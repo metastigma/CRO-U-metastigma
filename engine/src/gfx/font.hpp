@@ -1,7 +1,6 @@
 #pragma once
-// TrueType / OpenType text through stb_truetype, for the game's dialogue in every language
-// (the iOS game draws its text with the system font; font.mct only holds the digits).
-// Fonts come from the user's system (Noto Sans CJK, Hiragino, MS Gothic, ...), never shipped.
+// TrueType / OpenType text through stb_truetype, for the game's dialogue in every language.
+// User-provided .ttf / .otf / .ttc files are read from font/ beside the executable.
 
 #include <memory>
 #include <string>
@@ -42,8 +41,5 @@ private:
     bool openFace(int index);
 };
 
-// Loads the first usable font with CJK coverage among the platform's usual locations
-// (CR_FONT overrides; CR_FONT=none uses none); false if none.
-bool loadSystemFont(Font& font);
 
 } // namespace cr

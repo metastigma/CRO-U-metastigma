@@ -74,6 +74,7 @@ the program - it finds it by itself. The game folder is:
 ```
 <game folder>/
 ├── chaosrings                          (or chaosrings.exe, chaosrings.app, the .AppImage)
+├── font/                                your .ttf / .otf / .ttc files (optional)
 ├── ios/
 │   └── ChaosRingsOmegaHDeng.app/       the iPad 1.0.0's or 3.1.0's .app: its data/ (sys.evt, the .evt, .mct, .bin files)
 │                                       - or Payload/ChaosRingsOmegaHDeng.app/ (the .ipa unpacked as it is)
@@ -156,6 +157,14 @@ animations in the file are for previewing - the game plays its own. `crtool gltf
 checks a round trip (the export loaded back: every model lands exactly on the original in every
 animation). `CR_HD_MODELS=<folder>` reads them from elsewhere. Personal use: the exports are the
 game's models - keep them, and what you make from them, out of anything shared.
+
+## Fonts
+
+Put your own `.ttf`, `.otf` or `.ttc` files in `font/` beside the game executable.
+Choose one in **Options → Game → Font** and adjust **Text Size** from 80% to 200%.
+The selected file and size are kept in the Omega profile. Without a usable local font,
+the game falls back to its built-in bitmap font; it does not search Windows, macOS or Linux
+system font folders.
 
 ## Platforms
 

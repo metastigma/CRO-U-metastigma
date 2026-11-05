@@ -21,6 +21,7 @@ public:
                 float boxH, float alpha = 0.75f);
     // Font for the text (nullptr or not loaded: the 8x8 font). Takes effect on the next draw.
     void setFont(const Font* font);
+    void setFontScale(float scale);
     // Text colour (the rasterised glyphs are white): e.g. dark ink on the parchment window
     void setTint(float r, float g, float b) { tint_[0] = r, tint_[1] = g, tint_[2] = b; }
     void tint(float* out) const { out[0] = tint_[0], out[1] = tint_[1], out[2] = tint_[2]; }
@@ -35,6 +36,7 @@ private:
     float cachedScale_ = 0, cachedDensity_ = 0;
     float density_ = 1; // texture pixels per logical pixel
     const Font* font_ = nullptr;
+    float fontScale_ = 1.0f;
     const void* cachedFont_ = nullptr;
     int cachedGeneration_ = -1;
     Texture tex_;

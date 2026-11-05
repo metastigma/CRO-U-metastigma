@@ -58,29 +58,32 @@ bool rasterise(const std::vector<std::string>& utf8, Image& out) {
 
 void Hud::setFont(const Font* font) { font_ = font; }
 
+void Hud::setFontScale(float scale) { fontScale_ = std::clamp(scale, 0.5f, 3.0f); }
+
 // Re-rasterises when the text, size, font or window density changed. The 8x8 font is drawn
 // at `scale`; TrueType text is rasterised at the window's density and drawn at 1 / density.
 bool Hud::update(Renderer& r, const std::vector<std::string>& lines, float scale) {
     const bool ttf = font_ && font_->loaded();
+    const float textScale = ttf ? scale * fontScale_ : scale;
     const float density = ttf ? std::max(1.0f, std::round(r.pixelScale() * 4.0f) / 4.0f) : 1.0f;
     const void* fontKey = ttf ? static_cast<const void*>(font_) : nullptr;
     const int generation = ttf ? font_->generation() : -1;
-    if (tex_.id && lines == cached_ && scale == cachedScale_ && density == cachedDensity_ && fontKey == cachedFont_ &&
+    if (tex_.id && lines == cached_ && textScale == cachedScale_ && density == cachedDensity_ && fontKey == cachedFont_ &&
         generation == cachedGeneration_)
         return true;
     Image img;
-    const bool ok = ttf ? font_->rasterise(lines, kEm * scale * density, kFontLine * scale * density,
-                                           int(std::lround(kPad * scale * density)), img)
+    const bool ok = ttf ? font_->rasterise(lines, kEm * textScale * density, kFontLine * textScale * density,
+                                           int(std::lround(kPad * textScale * density)), img)
                         : rasterise(lines, img);
     if (!ok) return false;
     r.destroy(tex_);
     tex_ = r.upload(img);
     cached_ = lines;
-    cachedScale_ = scale;
+    cachedScale_ = textScale;
     cachedDensity_ = density;
     cachedFont_ = fontKey;
     cachedGeneration_ = generation;
-    density_ = ttf ? density : 1.0f / scale;
+    density_ = ttf ? density : 1.0f / textScale;
     return true;
 }
 
@@ -90,7 +93,7 @@ float Hud::measure(Renderer& r, const std::vector<std::string>& lines, float sca
 }
 
 float Hud::lineStep(float scale) const {
-    return font_ && font_->loaded() ? kFontLine * scale : float(kGlyph + kLineGap) * scale;
+    return font_ && font_->loaded() ? kFontLine * scale * fontScale_ : float(kGlyph + kLineGap) * scale;
 }
 
 void Hud::draw(Renderer& r, const std::vector<std::string>& lines, float scale) {

@@ -19,6 +19,11 @@ struct NodePose {
 // Every node's local transform for `action` at `time` (frames); a null action gives the rest pose
 void computeLocalPoses(const Skeleton& skel, const Action* action, float time, std::vector<NodePose>& out);
 
+// Blend local poses: shortest-arc quaternion rotation, linear translation and scale.
+void blendLocalPoses(const std::vector<NodePose>& from, const std::vector<NodePose>& to, float amount,
+                     std::vector<NodePose>& out);
+void computeWorldFromLocalPoses(const Skeleton& skel, const std::vector<NodePose>& poses, std::vector<Mat4>& world);
+
 // World matrices of every skeleton node for `action` at `time` (frames).
 // A null action gives the rest pose; an action animates its first segments' nodes.
 void computeWorld(const Skeleton& skel, const Action* action, float time, std::vector<Mat4>& world);
