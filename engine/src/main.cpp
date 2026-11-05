@@ -778,6 +778,7 @@ struct App {
     int playerFadeFrames = 0, playerFadeLeft = 0;
     cr::Vec3 puzzleStart;                  // where the leader came into the puzzle room (FieldPCCtrl::reset)
     struct CrystalCam { int npc = -1; int phase = 0; } crystalCam; // Uty_WarpCrystalCamera: 0 to the crystal, 1 back
+    float crystalSpin = 0;                // render-time phase, independent of the 20 Hz simulation
     bool puzzleStartPending = false;
     int bgmNo = 0;                         // G+0x35530: the music last asked for (Uty_GetBgmNo)
     struct NowLoading { bool on = false; int frame = 0; } nowLoading; // NowLoadProc's spinner
@@ -9818,6 +9819,23 @@ void reset(App& app) {
     pz.scene = 2;
 }
 
+// A shown WarpCrystalNG / WarpCrystalWS rotates around the vertical axis in the horizontal
+// plane. Apply this to the final render matrix, not the NPC state (which is simulation/interpolated).
+bool shownCrystal(const App& app, int npc) {
+    if (app.puzzle.stage < 0) return false;
+    for (const App::Puzzle::Obj& o : app.puzzle.objs)
+        if (o.npc == npc && o.type == cr::kTypeCrystal && o.shown) return true;
+    return false;
+}
+
+cr::Mat4 spinCrystalWorld(const cr::Mat4& world, float angle) {
+    cr::Mat4 spin;
+    const float c = std::cos(angle), s = std::sin(angle);
+    spin.m[0] = c; spin.m[2] = -s;
+    spin.m[8] = s; spin.m[10] = c;
+    return world * spin;
+}
+
 // One 20 Hz frame (PuzzleManager::update, under PuzzleScene::update)
 void step(App& app) {
     App::Puzzle& pz = app.puzzle;
@@ -10670,6 +10688,18 @@ const cr::Action* effectMaterialAction(const LoadedModel& lm, const cr::Material
 bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2], int unit = 0);
 const cr::Texture* secondUnit(const LoadedModel& lm, size_t mesh, const cr::Material* mt, float time, float uv2[4]);
 
+// c111.bin is one skinned mesh: node 2 owns the platform, while node 3 owns
+// the crystal. Apply the extra yaw to node 3 so the platform remains stationary.
+void spinCrystalBone(cr::NodePose& pose, float angle) {
+    const float c = std::cos(angle), s = std::sin(angle);
+    float x[3], z[3];
+    for (int r = 0; r < 3; ++r) { x[r] = pose.cols[0][r]; z[r] = pose.cols[2][r]; }
+    for (int r = 0; r < 3; ++r) {
+        pose.cols[0][r] = c * x[r] - s * z[r];
+        pose.cols[2][r] = s * x[r] + c * z[r];
+    }
+}
+
 void drawNpcs(App& app, const cr::Mat4& vp) {
     for (auto& d : app.npcDraws) {
         if (d.alpha <= 0.001f) continue;
@@ -10681,9 +10711,16 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
             return ap >= 0 && ap < int(m.materials.size()) ? &m.materials[size_t(ap)] : nullptr;
         };
         const bool posed = !m.skeleton.nodes.empty() && lm.meshes.size() == m.meshes.size();
+        const bool fieldWarpCrystal = d.model == "c111.bin";
         if (posed || (matAnim && lm.meshes.size() == m.meshes.size())) { // skin this instance; scroll its textures
-            const cr::Action* act = d.action >= 0 && d.action < int(lm.actions.size()) ? &lm.actions[d.action] : nullptr;
-            if (posed) cr::computeWorld(m.skeleton, act, d.time, lm.world);
+            const cr::Action* act = d.action >= 0 && d.action < int(lm.actions.size()) ? &lm.actions[size_t(d.action)] : nullptr;
+            if (posed) {
+                if (fieldWarpCrystal && m.skeleton.nodes.size() > 3 && m.skeleton.nodes[3].parent == 2) {
+                    cr::computeLocalPoses(m.skeleton, act, d.time, lm.localPose);
+                    spinCrystalBone(lm.localPose[3], app.crystalSpin);
+                    cr::computeWorldFromLocalPoses(m.skeleton, lm.localPose, lm.world);
+                } else cr::computeWorld(m.skeleton, act, d.time, lm.world);
+            }
             for (size_t i = 0; i < m.meshes.size(); ++i) {
                 float shift[2] = {0, 0}, scale[2] = {1, 1};
                 const bool moves = matAnim && effectUvMotion(lm, matOf(i), d.time, shift, scale);
@@ -10704,6 +10741,8 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
         cr::Mat4 world; // (as a frame between the game's steps shows it)
         float alpha;
         shownNpc(app, d, world, alpha);
+        if (!fieldWarpCrystal && puzzle::shownCrystal(app, d.index))
+            world = puzzle::spinCrystalWorld(world, app.crystalSpin);
         drawLoaded(app, lm, vp * world, nullptr, alpha, matAnim ? d.time : -1.0f);
     }
 }
@@ -14261,6 +14300,10 @@ void drawFrame(App& app, bool present = true) {
     const Uint64 now = app.clock.ticksNS();
     const float realDt = std::min(app.lastTicks && now >= app.lastTicks ? float(double(now - app.lastTicks) * 1e-9) : 0.0f, 0.1f);
     app.lastTicks = now;
+    if (app.mode == Mode::Maps && !app.battle.active) {
+        constexpr float kCrystalRadiansPerSecond = 2.2f;
+        app.crystalSpin = std::fmod(app.crystalSpin + realDt * kCrystalRadiansPerSecond, 6.2831853071795864769f);
+    }
     if (app.mode == Mode::Maps && !app.booting && !app.titleOpen && (app.havePlayer || app.battle.active))
         app.playSeconds += realDt;
     // Field Speed / Battle Speed: the battles, and the field while the player walks it, faster
