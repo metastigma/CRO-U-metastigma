@@ -12816,7 +12816,9 @@ void startTurn(App& app) {
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
-        if (melee) { // btlmove_setpos: up to the target, a step short of it
+        // m225.bin (battle model 0x20) uses an in-place blow: it plays the attack animation
+        // and its dedicated sound, but must not use the generic melee approach/return movement.
+        if (melee && u->modelId != 0x20) { // btlmove_setpos: up to the target, a step short of it
             const App::Battle::Actor* tv = battleActor(app, target);
             if (tv) {
                 const LoadedModel &lu = b.models[u->model], &lt = b.models[tv->model];
