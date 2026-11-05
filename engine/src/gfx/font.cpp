@@ -1,10 +1,9 @@
 #include "gfx/font.hpp"
 
-#include <SDL3/SDL.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 #include "core/file.hpp"
 #include "core/text.hpp"
@@ -34,10 +33,20 @@ bool Font::openFace(int index) {
 }
 
 bool Font::load(const std::string& path) {
-    face_.reset();
+    std::vector<unsigned char> nextData;
+    if (!readFile(path, nextData) || nextData.size() < 12) return false;
+    auto previousData = std::move(data_);
+    auto previousFace = std::move(face_);
+    const std::string previousPath = path_;
+    const int previousIndex = faceIndex_, previousGeneration = generation_;
+    data_ = std::move(nextData);
     faceIndex_ = -1;
-    if (!readFile(path, data_) || data_.size() < 12 || !openFace(0)) {
-        data_.clear();
+    if (!openFace(0)) {
+        data_ = std::move(previousData);
+        face_ = std::move(previousFace);
+        path_ = previousPath;
+        faceIndex_ = previousIndex;
+        generation_ = previousGeneration;
         return false;
     }
     path_ = path;
@@ -145,42 +154,6 @@ bool Font::rasterise(const std::vector<std::string>& lines, float em, float line
         }
     }
     return true;
-}
-
-bool loadSystemFont(Font& font) {
-    std::vector<std::string> candidates;
-    if (const char* env = SDL_getenv("CR_FONT")) {
-        if (SDL_strcmp(env, "none") == 0) return false; // the 8x8 font only
-        candidates.push_back(env);
-    }
-    for (const char* p : {
-             // Linux (Noto CJK under several distributions' paths, then other CJK families)
-             "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-             "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-             "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
-             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-             "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc",
-             "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-             "/usr/share/fonts/TTF/VL-Gothic-Regular.ttf",
-             // macOS
-             "/System/Library/Fonts/Hiragino Sans GB.ttc",
-             "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-             "/System/Library/Fonts/PingFang.ttc",
-             "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-             // Windows
-             "C:/Windows/Fonts/YuGothM.ttc",
-             "C:/Windows/Fonts/msgothic.ttc",
-             "C:/Windows/Fonts/meiryo.ttc",
-             "C:/Windows/Fonts/msyh.ttc",
-             // Android
-             "/system/fonts/NotoSansCJK-Regular.ttc",
-             "/system/fonts/NotoSansSC-Regular.otf",
-         })
-        candidates.push_back(p);
-    for (const std::string& c : candidates)
-        if (font.load(c)) return true;
-    return false;
 }
 
 } // namespace cr

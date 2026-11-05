@@ -20,6 +20,7 @@
 
 #define SDL_MAIN_USE_CALLBACKS 1
 #include "platform/vita_import_ui.hpp"
+#include "platform/held_action.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #ifdef SDL_PLATFORM_ANDROID
@@ -86,6 +87,7 @@ enum class Mode { Textures, Models, Maps };
 
 // Original animations are keyed in frames, played a frame a game frame (core/timing.hpp: 20 a second)
 using cr::kFramesPerSecond;
+constexpr float kFieldActionBlendFrames = 4.0f; // 0.2 s at the original 20 Hz logic rate
 
 struct LoadedModel {
     cr::Model cpu;                       // skeleton, skin data, rest pose
@@ -101,6 +103,8 @@ struct LoadedModel {
     float radius = 1;
     int triangles = 0;
     std::vector<cr::Mat4> world;
+    std::vector<cr::NodePose> localPose, transitionFrom, transitionTarget;
+    float transitionTime = 0;
     std::vector<float> skinned;
     std::vector<cr::Action> packageActions; // effects: every action, as materials' refGid number them
     std::vector<float> uvScratch;          // effects: a mesh's scrolled texture coordinates
@@ -228,7 +232,8 @@ struct App {
     // the screen's height, native resolution, no MSAA, vsync
     struct Video {
         int width = 1024, height = 768;    // window size (windowed) or display mode (fullscreen)
-        int display = 0;                   // 0 windowed, 1 fullscreen (that mode), 2 borderless (the desktop's)
+        int display = 2;                   // 0 windowed, 1 fullscreen (that mode), 2 borderless (the desktop's)
+        bool displayExplicit = false;       // saved mode is used only after the user deliberately chooses it
         bool widescreen = false;           // the screen widens to the window (up to 21:9); else 4:3
         int paintings = 0;                 // painted rooms: 0 the original's (2x, a screen-sized window following
                                            // the player), 1 the whole painting at the screen's height, 2 at its width
@@ -254,7 +259,11 @@ struct App {
     std::string modelsDir;                 // replacement models: models/hd/ in the game folder, or CR_HD_MODELS
     int hdModelsLoaded = 0;                // since startup
     int language = 1;                      // text language (cr::kLanguageName): English by default
-    cr::Font font;                         // system font for the game's text (all languages)
+    cr::Font font;                         // selected face from the local font/ folder
+    std::string fontDir, fontSelection;
+    std::vector<std::string> fontFiles;
+    int fontIndex = -1;
+    int fontScale = 125;                    // percent; slightly larger default for TrueType text
     std::vector<std::vector<int>> dialogueVoices; // per page: voice clips it starts (0x1e)
     int dialogueSerial = 0, voicedSerial = -1, voicedPage = -1; // which page's voices were started
     std::vector<int> voiceQueue;           // further clips of the same page
@@ -352,7 +361,8 @@ struct App {
     };
     Portrait portraits[16];
     bool itemWindowOpen = false;           // Uty_GetItem
-    bool skipScene = false;                // the skip button (X): pages turn by themselves until the scene ends
+    crinput::HeldAction skipSources;       // independently held X / □ / pointer sources
+    bool skipScene = false;                // derived from skipSources; fast-forward while any source is held
     int msgStyle = 2, msgLines = 2;        // the script's last Open: the message window's style and lines
     int msgColour = -1;                    // the page's message's 0x16 colour (MessageInfo::colour), -1 none
     double playSeconds = 0;                // TOTAL PLAYTIME: time on the field and in battles
@@ -966,6 +976,17 @@ SDL_EnumerationResult SDLCALL collectAssets(void* user, const char*, const char*
     return SDL_ENUM_CONTINUE;
 }
 
+SDL_EnumerationResult SDLCALL collectFontFiles(void* user, const char*, const char* fname) {
+    App& app = *static_cast<App*>(user);
+    if (!endsWith(fname, ".ttf") && !endsWith(fname, ".otf") && !endsWith(fname, ".ttc"))
+        return SDL_ENUM_CONTINUE;
+    SDL_PathInfo info{};
+    const std::string path = app.fontDir + fname;
+    if (SDL_GetPathInfo(path.c_str(), &info) && info.type == SDL_PATHTYPE_FILE)
+        app.fontFiles.push_back(path);
+    return SDL_ENUM_CONTINUE;
+}
+
 int wrap(int i, size_t n) { return n ? int(((i % int(n)) + int(n)) % int(n)) : 0; }
 
 void updateTitle(App& app) {
@@ -1212,6 +1233,15 @@ void vitaAudio(App& app) {
         const cr::PsarcArchive* a = &app.vitaBgm;
         app.music.setVitaSource([a](const std::string& n, std::vector<uint8_t>& out) { return a->read(n, out); });
     }
+}
+
+void setSceneSkip(App& app, crinput::HeldSource source, bool held) {
+    app.skipSources.set(source, held);
+    app.skipScene = app.skipSources.active();
+}
+void clearSceneSkip(App& app) {
+    app.skipSources.clear();
+    app.skipScene = false;
 }
 
 void saveMix(const App& app);
@@ -2014,6 +2044,30 @@ void applyLanguage(App& app) {
     app.font.selectRegion(kRegion[app.language]);
 }
 
+std::string fontFileName(const std::string& path) {
+    const size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+bool selectFontFile(App& app, const std::string& name) {
+    for (size_t i = 0; i < app.fontFiles.size(); ++i) {
+        if (fontFileName(app.fontFiles[i]) != name) continue;
+        if (app.font.path() != app.fontFiles[i] && !app.font.load(app.fontFiles[i])) return false;
+        app.fontIndex = int(i);
+        app.fontSelection = name;
+        applyLanguage(app);
+        return true;
+    }
+    return false;
+}
+
+void applyFontScale(App& app) {
+    const float scale = float(std::clamp(app.fontScale, 80, 200)) / 100.0f;
+    for (cr::Hud* h : {&app.dialogueHud, &app.promptHud, &app.itemHud, &app.choiceHud, &app.nameHud,
+                       &app.pageHud, &app.battleHud}) h->setFontScale(scale);
+    for (cr::Hud& h : app.lineHud) h.setFontScale(scale);
+}
+
 std::string itemName(const App& app, int item) {
     std::vector<std::vector<std::string>> name;
     if (app.systemText.message(cr::itemNameId(item), app.language, nullptr, name) && !name.empty() && !name[0].empty())
@@ -2233,13 +2287,45 @@ void animate(App& app, LoadedModel& lm, float dt) {
             lm.time = float(lm.loopFrom) + std::fmod(lm.time - float(lm.loopFrom), act->duration - float(lm.loopFrom));
         else if (act->duration > 0) lm.time = std::fmod(lm.time, act->duration);
     }
-    cr::computeWorld(m.skeleton, act, lm.time, lm.world);
+    if (!lm.transitionFrom.empty() && lm.transitionFrom.size() == m.skeleton.nodes.size()) {
+        cr::computeLocalPoses(m.skeleton, act, lm.time, lm.transitionTarget);
+        lm.transitionTime = std::min(kFieldActionBlendFrames, lm.transitionTime + std::max(0.0f, dt) * kFramesPerSecond);
+        float t = lm.transitionTime / kFieldActionBlendFrames;
+        t = t * t * (3.0f - 2.0f * t);
+        cr::blendLocalPoses(lm.transitionFrom, lm.transitionTarget, t, lm.localPose);
+        if (lm.transitionTime >= kFieldActionBlendFrames) {
+            lm.transitionFrom.clear();
+            lm.transitionTarget.clear();
+        }
+    } else {
+        lm.transitionFrom.clear();
+        lm.transitionTarget.clear();
+        cr::computeLocalPoses(m.skeleton, act, lm.time, lm.localPose);
+    }
+    cr::computeWorldFromLocalPoses(m.skeleton, lm.localPose, lm.world);
     for (size_t i = 0; i < m.meshes.size(); ++i) {
         cr::skinMesh(m, m.meshes[i], lm.world, lm.skinned);
         app.renderer.updatePositions(lm.meshes[i], lm.skinned, m.meshes[i].uvs, m.meshes[i].colors);
     }
 }
 
+void resetPoseTransition(LoadedModel& lm) {
+    lm.localPose.clear();
+    lm.transitionFrom.clear();
+    lm.transitionTarget.clear();
+    lm.transitionTime = 0;
+}
+void setPlayerAction(LoadedModel& lm, int action) {
+    if (lm.action == action) return;
+    const cr::Action* old = lm.action >= 0 && lm.action < int(lm.actions.size()) ? &lm.actions[lm.action] : nullptr;
+    if (lm.localPose.size() != lm.cpu.skeleton.nodes.size())
+        cr::computeLocalPoses(lm.cpu.skeleton, old, lm.time, lm.localPose);
+    lm.transitionFrom = lm.localPose;
+    lm.transitionTarget.clear();
+    lm.transitionTime = 0;
+    lm.action = action;
+    lm.time = 0;
+}
 void animateModel(App& app, float dt) { animate(app, app.model, dt); }
 
 bool viegIsOlgar(const App& app);
@@ -2303,6 +2389,7 @@ void placePlayer(App& app) {
     app.walker.gait = cr::Gait::Stand;
     app.player.action = app.player.actions.empty() ? -1 : 0;
     app.player.time = 0;
+    resetPoseTransition(app.player);
     app.walkClock = 0;
     app.havePlayer = true;
     app.lastKick = triggerAt(app, app.walker.pos); // starting inside a box doesn't fire it
@@ -2825,7 +2912,7 @@ struct ViewerHost : cr::EventHost {
     void showMessage(int id) override { showMessages(app, {id}); }
     bool messageOpen() override { return !app.dialogue.empty(); }
     bool tapped() override { const bool t = app.tapPending; app.tapPending = false; return t; }
-    void showItemWindow(int item) override { openItemWindow(app, item); }
+    void showItemWindow(int item) override { app.game.setFlag(0, false); openItemWindow(app, item); }
     void playAnim(int id, int slot, int loopFrom, int loopTo) override {
         int action = slot; // a slot LoadAct filled, else the model's own action of that number
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
@@ -3363,6 +3450,13 @@ void loadMix(App& app) {
         for (int i = 0; i < 4; ++i)
             if (const char* at = SDL_strstr(text, keys[i])) *fields[i] = std::clamp(SDL_atoi(at + SDL_strlen(keys[i])), 0, 100);
         if (const char* at = SDL_strstr(text, "language=")) app.language = std::clamp(SDL_atoi(at + 9), 0, cr::kLanguages - 1);
+        if (const char* at = SDL_strstr(text, "font=")) {
+            at += 5;
+            const char* end = at;
+            while (*end && *end != '\r' && *end != '\n') ++end;
+            if (end > at) selectFontFile(app, std::string(at, end));
+        }
+        if (const char* at = SDL_strstr(text, "font_scale=")) app.fontScale = std::clamp(SDL_atoi(at + 11), 80, 200);
         applyLanguage(app);
         loadVideo(app, text);
         app.voiceEntries.clear();
@@ -3380,6 +3474,7 @@ void loadMix(App& app) {
             app.mix.effects, app.mix.voice, app.voiceEntries.size(), settingsPath().c_str());
     app.sound.setVoiceEntries(app.voiceEntries);
     applyMix(app);
+    applyFontScale(app);
 }
 
 void saveMix(const App& app) {
@@ -3390,7 +3485,9 @@ void saveMix(const App& app) {
     for (int e : app.voiceEntries) list += (list.empty() ? "" : ",") + std::to_string(e);
     const App::Video& v = app.video;
     const std::string video = "width=" + std::to_string(v.width) + "\nheight=" + std::to_string(v.height) +
-                              "\ndisplay=" + std::to_string(v.display) + "\nwidescreen=" + std::to_string(int(v.widescreen)) +
+                              "\ndisplay=" + std::to_string(v.display) +
+                              "\ndisplay_user_set=" + std::to_string(int(v.displayExplicit)) +
+                              "\nwidescreen=" + std::to_string(int(v.widescreen)) +
                               "\npainted_rooms=" + std::to_string(v.paintings) + "\nrender_scale=" +
                               std::to_string(v.renderScale) + "\nmsaa=" + std::to_string(v.msaa) +
                               "\nvsync=" + std::to_string(int(v.vsync)) + "\nframe_limit=" + std::to_string(v.frameLimit) + "\nupscaler=" + std::to_string(v.upscaler) +
@@ -3406,7 +3503,8 @@ void saveMix(const App& app) {
                               std::to_string(int(app.lockLandscapeFlipped)) + "\n" + "vita=" + app.vitaPath + "\n" + "android=" + app.androidPath + "\n" + "pad_confirm=" +
                               (app.padConfirmEast ? "east" : "south") + "\n" + "field_speed=" + std::to_string(app.fieldSpeed) +
                               "\nbattle_speed=" + std::to_string(app.battleSpeed) + "\n";
-    const std::string all = t + "language=" + std::to_string(app.language) + "\nvoice_entries=" + list + "\n" + video;
+    const std::string all = t + "language=" + std::to_string(app.language) + "\nfont=" + app.fontSelection +
+                             "\nfont_scale=" + std::to_string(app.fontScale) + "\nvoice_entries=" + list + "\n" + video;
     std::string error;
     if (!crstorage::replaceFile(settingsPath(), all, &error)) SDL_Log("settings: %s", error.c_str());
 }
@@ -3443,7 +3541,10 @@ void loadVideo(App& app, const char* text) {
     App::Video& v = app.video;
     v.width = std::clamp(keyValue(text, "\nwidth=", v.width), 320, 3840);
     v.height = std::clamp(keyValue(text, "\nheight=", v.height), 240, 2160);
-    v.display = std::clamp(keyValue(text, "\ndisplay=", v.display), 0, 2);
+    // Older settings.ini files contain display=0 from the old windowed default.
+    // Keep borderless fullscreen unless a user explicitly chose a mode in this version.
+    v.displayExplicit = keyValue(text, "\ndisplay_user_set=", 0) != 0;
+    v.display = v.displayExplicit ? std::clamp(keyValue(text, "\ndisplay=", v.display), 0, 2) : 2;
     v.widescreen = keyValue(text, "\nwidescreen=", v.widescreen) != 0;
     v.paintings = std::clamp(keyValue(text, "\npainted_rooms=", keyValue(text, "\nzoom_paintings=", 0) ? 2 : v.paintings), 0, 2);
     v.renderScale = std::clamp(keyValue(text, "\nrender_scale=", v.renderScale), 25, 400);
@@ -3613,7 +3714,7 @@ void adjustVideo(App& app, int row, int dir) {
         v.height = kResolutions[i][1];
         break;
     }
-    case 1: v.display = (v.display + dir + 3) % 3; break;
+    case 1: v.display = (v.display + dir + 3) % 3; v.displayExplicit = true; break;
     case 2: v.widescreen = !v.widescreen; break;
     case 3: v.paintings = (v.paintings + dir + 3) % 3; break;
     case 4: stepChoice(v.renderScale, kRenderScales, int(sizeof kRenderScales / sizeof kRenderScales[0]), dir); break;
@@ -3812,6 +3913,24 @@ std::vector<OptRow> optionRows(App& app, int page) {
             applyLanguage(app);
             saveMix(app);
         });
+        value("Font", app.fontSelection.empty() ? "Bitmap" : app.fontSelection, [&app](int dir) {
+            if (app.fontFiles.empty()) return;
+            const int next = wrap(app.fontIndex + (dir ? dir : 1), app.fontFiles.size());
+            if (selectFontFile(app, fontFileName(app.fontFiles[size_t(next)]))) saveMix(app);
+        });
+        rows.back().enabled = !app.fontFiles.empty();
+        rows.back().hint = app.fontFiles.empty()
+                               ? "No local fonts found. Put .ttf, .otf or .ttc files in font/ beside the game."
+                               : "Left / Right: choose a font file from font/ beside the game. The choice is saved.";
+        value("Text Size", std::to_string(app.fontScale) + "%", [&app](int dir) {
+            const int next = std::clamp(app.fontScale + (dir ? dir : 1) * 10, 80, 200);
+            if (next == app.fontScale) return;
+            app.fontScale = next;
+            applyFontScale(app);
+            saveMix(app);
+        });
+        rows.back().enabled = app.font.loaded();
+        rows.back().hint = "TrueType font size: 80% to 200%, in 10% steps. Default: 125%.";
         onOff(sysLabel(app, 58108, "Environment Effects"), &app.environmentEffects, nullptr);
         onOff(sysLabel(app, 58109, "Lock Screen Orientation"), &app.lockOrientation,
               [&app] { applyOrientation(app, app.lockOrientation); });
@@ -9978,7 +10097,7 @@ void stepEvents(App& app) {
     // their presents - open
     for (int f = 101; f <= 106; ++f) app.game.setFlag(f, true);
     if (app.skipScene) { // fast-forward: every page turns at once (choices still wait for an answer)
-        if (!app.runner.running()) app.skipScene = false;
+        if (!app.runner.running()) clearSceneSkip(app);
         else if (!app.dialogue.empty()) advanceDialogue(app);
     }
     stepTyping(app);
@@ -10278,10 +10397,10 @@ void updatePlayer(App& app, float dt, float camYaw) {
     if (!app.havePlayer) return;
     const bool* keys = SDL_GetKeyboardState(nullptr);
     // A running script, its dialogue box or item window hold the player in place
-    const bool talking = !app.dialogue.empty() || app.runner.running() || app.itemWindowOpen || app.optionsOpen ||
-                         app.campOpen || app.saveScreen.open || app.shop.open || app.mapScreen.open ||
-                         app.puzzle.tpState != 0 || app.puzzle.pkState != 0 ||
+    const bool talking = fieldSceneRunning(app) || app.optionsOpen || app.campOpen || app.saveScreen.open ||
+                         app.shop.open || app.mapScreen.open || app.puzzle.tpState != 0 || app.puzzle.pkState != 0 ||
                          (app.puzzle.stage >= 0 && app.puzzle.scene != 4);
+    if (talking) app.walker.gait = cr::Gait::Stand;
     float sx = talking ? 0.0f : float(keys[SDL_SCANCODE_D]) - float(keys[SDL_SCANCODE_A]);
     float sy = talking ? 0.0f : float(keys[SDL_SCANCODE_S]) - float(keys[SDL_SCANCODE_W]);
     bool run = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
@@ -10309,13 +10428,19 @@ void updatePlayer(App& app, float dt, float camYaw) {
         BetweenStep between(app);
         stepEvents(app);
         if (app.battle.active) break;
-        if (app.runner.running() || !app.havePlayer) continue;
+        if (fieldSceneRunning(app) || !app.havePlayer) {
+            app.walker.gait = cr::Gait::Stand;
+            continue;
+        }
         const cr::Vec3 before = app.walker.pos;
         cr::stepWalker(app.walker, app.walkCollision, sx, sy, run, camYaw);
         const cr::Vec3 moved = app.walker.pos - before;
         fieldWalked(app, std::sqrt(cr::dot(moved, moved)));
         checkTriggers(app);
-        if (app.runner.running() || !app.dialogue.empty() || !app.havePlayer) continue;
+        if (fieldSceneRunning(app) || !app.havePlayer) {
+            app.walker.gait = cr::Gait::Stand;
+            continue;
+        }
         cr::BattleStart start; // fldencount_encount
         auto random = [&](int n) { return app.rng.get(n); };
         const auto& pr = app.game.pairs[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))]; // 171 / 172 on either
@@ -10338,8 +10463,7 @@ void updatePlayer(App& app, float dt, float camYaw) {
     const bool hold = app.puzzle.pkState != 0 && app.player.actions.size() > 3;
     const int want = hold ? 3 : std::min(int(app.walker.gait), int(app.player.actions.size()) - 1);
     if (want != app.player.action) {
-        app.player.action = want;
-        app.player.time = 0;
+        setPlayerAction(app.player, want);
         app.footPrev = 0;
     }
     app.player.loopFrom = hold ? 2 : -1;
@@ -11446,7 +11570,7 @@ void step(App& app) {
     if (!app.runner.running()) { app.game.setFlag(kFlag, false); return; }
     stepEvents(app);
     if (app.game.flag(kFlag)) return;
-    app.skipScene = false; // (the skip button ends with the talk)
+    clearSceneSkip(app); // a completed talk ends every held skip source
     if (!app.battle.eventBattle) app.runner.stop();
 }
 } // namespace battletalk
@@ -13923,7 +14047,8 @@ void battleClick(App& app, float px, float py) {
     const float uiX = app.renderer.uiX(), rightX = app.renderer.phoneLayout() ? uiX : 2 * uiX;
     const float cx = (lx - uiX) / 2, rx = (lx - rightX) / 2, my = ly / 2;
     if (battletalk::on(app)) { // a talk: the skip corner, else the next page
-        if (lx >= app.renderer.layoutRight() - 76 && ly < app.renderer.layoutTop() + 72) app.skipScene = true;
+        if (lx >= app.renderer.layoutRight() - 76 && ly < app.renderer.layoutTop() + 72)
+            setSceneSkip(app, crinput::HeldSource::Pointer, true);
         else if (!app.dialogue.empty()) tapDialogue(app);
         else app.tapPending = true;
         return;
@@ -19244,7 +19369,8 @@ void bootTitle(App& app) {
     app.touchPad = App::TouchPad();
     app.menuMask = App::MenuMask();
     app.campPointer = App::CampPointer();
-    app.dragging = app.optionsBarDrag = app.tapPending = app.skipScene = false;
+    app.dragging = app.optionsBarDrag = app.tapPending = false;
+    clearSceneSkip(app);
     app.padHeld = -1;
     app.padHeldFor = 0;
     app.padHeldOver.cancel();
@@ -20497,16 +20623,19 @@ void videoArgs(App& app, int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         const char* next = i + 1 < argc ? argv[i + 1] : nullptr;
-        if (SDL_strcmp(a, "--original") == 0) v = App::Video();
-        else if (SDL_strcmp(a, "--resolution") == 0 && next) {
+        if (SDL_strcmp(a, "--original") == 0) {
+            v = App::Video();
+            v.display = 0;
+            v.displayExplicit = true;
+        } else if (SDL_strcmp(a, "--resolution") == 0 && next) {
             int w = 0, h = 0;
             if (SDL_sscanf(next, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 240) {
                 v.width = std::min(w, 3840);
                 v.height = std::min(h, 2160);
             }
-        } else if (SDL_strcmp(a, "--windowed") == 0) v.display = 0;
-        else if (SDL_strcmp(a, "--fullscreen") == 0) v.display = 1;
-        else if (SDL_strcmp(a, "--borderless") == 0) v.display = 2;
+        } else if (SDL_strcmp(a, "--windowed") == 0) v.display = 0, v.displayExplicit = true;
+        else if (SDL_strcmp(a, "--fullscreen") == 0) v.display = 1, v.displayExplicit = true;
+        else if (SDL_strcmp(a, "--borderless") == 0) v.display = 2, v.displayExplicit = true;
         else if (SDL_strcmp(a, "--widescreen") == 0) v.widescreen = true;
         else if (SDL_strcmp(a, "--layout") == 0 && i + 1 < argc) // --layout auto | ipad | iphone | vita | android
             v.layout = SDL_strcmp(argv[i + 1], "android") == 0 ? 4 : SDL_strcmp(argv[i + 1], "vita") == 0 ? 3
@@ -20554,6 +20683,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         if (!s.empty() && s.back() != '/') s += '/';
         return s;
     }();
+    app->fontDir = beside + "font/";
     auto isDir = [](const std::string& p) {
         SDL_PathInfo info;
         return SDL_GetPathInfo(p.c_str(), &info) && info.type == SDL_PATHTYPE_DIRECTORY;
@@ -20764,9 +20894,24 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         for (const std::string& n : app->android.names()) collectAssets(app, nullptr, n.c_str());
     else SDL_EnumerateDirectory(app->dataDir.c_str(), collectAssets, app);
     app->systemText.load(app->dataDir);
-    // The game's text in every language: a system font (CR_FONT overrides), else the 8x8 font
-    if (cr::loadSystemFont(app->font)) SDL_Log("font: %s", app->font.path().c_str());
-    else SDL_Log("no CJK font found (set CR_FONT): Japanese, Chinese and Korean text unavailable");
+    // Local fonts only: font/*.ttf, *.otf and *.ttc beside the executable. Never search OS font folders.
+    SDL_PathInfo fontDirInfo{};
+    if (SDL_GetPathInfo(app->fontDir.c_str(), &fontDirInfo) && fontDirInfo.type == SDL_PATHTYPE_DIRECTORY)
+        SDL_EnumerateDirectory(app->fontDir.c_str(), collectFontFiles, app);
+    std::sort(app->fontFiles.begin(), app->fontFiles.end());
+    const std::vector<std::string> fontCandidates = app->fontFiles;
+    app->fontFiles.clear();
+    cr::Font fontProbe;
+    for (const std::string& path : fontCandidates)
+        if (fontProbe.load(path)) app->fontFiles.push_back(path);
+    if (!app->fontFiles.empty()) {
+        selectFontFile(*app, fontFileName(app->fontFiles.front()));
+        SDL_Log("font: %s", app->font.path().c_str());
+    } else {
+        app->fontSelection.clear();
+        app->fontIndex = -1;
+        SDL_Log("font/: no usable .ttf/.otf/.ttc; using the built-in bitmap font");
+    }
     // (the options menu is the engine's own, column-aligned for the 8x8 font)
     for (cr::Hud* h : {&app->dialogueHud, &app->promptHud, &app->itemHud, &app->choiceHud, &app->nameHud,
                        &app->pageHud, &app->battleHud})
@@ -20986,6 +21131,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
             }
         }
     }
+    const bool hdTexturesAtInitialLoad = app->video.hdTextures;
     if (hdBundled) app->video.hdTextures = true; // (the build's own: on, unless settings.ini turns it off)
     if (!startSound(*app)) SDL_Log("sound effects unavailable");
     else SDL_Log("%d sound effects", app->sound.entries());
@@ -21000,6 +21146,19 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         if (SDL_strcmp(argv[i], "--battle-speed") == 0) app->battleSpeed = std::clamp(SDL_atoi(argv[i + 1]), 1, 5);
     }
     applyVideo(*app);
+    if (app->video.hdTextures != hdTexturesAtInitialLoad) {
+        cr::Image wi;
+        if (loadImage(*app, "window.mct", wi, &app->androidWindow)) {
+            app->renderer.destroy(app->windowTex);
+            app->windowTex = app->renderer.upload(wi);
+            noteWindowAtlas(*app, wi);
+        }
+        cr::Image ci;
+        if (loadImage(*app, "window_cutin.mct", ci)) {
+            app->renderer.destroy(app->cutinTex);
+            app->cutinTex = app->renderer.upload(ci);
+        }
+    }
     if (languageArg >= 0) { // the command line wins over settings.ini
         app->language = languageArg;
         applyLanguage(*app);
@@ -21063,7 +21222,8 @@ void padButton(App& app, int b) {
         return;
     case SDL_GAMEPAD_BUTTON_WEST: // □: text skipped; in a puzzle room, the ability
         if (padField(app) && puzzle) padKey(app, SDLK_T);
-        else if (app.mode == Mode::Maps && app.runner.running()) padKey(app, SDLK_X);
+        else if (app.mode == Mode::Maps && app.runner.running())
+            setSceneSkip(app, crinput::HeldSource::Gamepad, true);
         return;
     case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: padKey(app, SDLK_PAGEUP); return;   // L: a page back
     case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: padKey(app, SDLK_PAGEDOWN); return; // R: a page on
@@ -21123,7 +21283,8 @@ void consumeInputCancel(App& app) {
     app.dragging = app.optionsBarDrag = false;
     app.campPointer = App::CampPointer();
     app.touchPad = App::TouchPad();
-    app.tapPending = app.skipScene = false;
+    app.tapPending = false;
+    clearSceneSkip(app);
     app.padHeld = -1, app.padHeldFor = 0;
     app.padHeldOver.cancel();
     app.pointerCancelled = true;
@@ -21159,12 +21320,29 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
-        if (app.pad && SDL_GetGamepadID(app.pad) == event->gdevice.which) SDL_CloseGamepad(app.pad), app.pad = nullptr;
+        if (app.pad && SDL_GetGamepadID(app.pad) == event->gdevice.which) {
+            setSceneSkip(app, crinput::HeldSource::Gamepad, false);
+            SDL_CloseGamepad(app.pad);
+            app.pad = nullptr;
+        }
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         if (app.pad && SDL_GetGamepadID(app.pad) == event->gbutton.which) padButton(app, event->gbutton.button);
         break;
+    case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        if (app.pad && SDL_GetGamepadID(app.pad) == event->gbutton.which && event->gbutton.button == SDL_GAMEPAD_BUTTON_WEST)
+            setSceneSkip(app, crinput::HeldSource::Gamepad, false);
+        break;
     case SDL_EVENT_KEY_DOWN:
+        if (event->key.key == SDLK_X && !event->key.repeat && app.mode == Mode::Maps && app.runner.running())
+            setSceneSkip(app, crinput::HeldSource::Keyboard, true);
+        if (event->key.key == SDLK_F11 && !event->key.repeat) {
+            app.video.display = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) ? 0 : 2;
+            app.video.displayExplicit = true;
+            applyVideo(app);
+            saveMix(app);
+            break;
+        }
         if (app.vitaLogo.phase) { // the Vita's logos: confirm cuts the hold short
             const SDL_Keycode k = event->key.key;
             if (app.vitaLogo.phase == 2 && (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_SPACE || k == SDLK_E || k == SDLK_ESCAPE))
@@ -21350,7 +21528,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             break;
         case SDLK_U: app.zUp = !app.zUp; updateTitle(app); break;
         case SDLK_F: app.smoothFilter = !app.smoothFilter; updateTitle(app); break;
-        case SDLK_X: if (app.mode == Mode::Maps && app.runner.running()) app.skipScene = true; break;
+        case SDLK_X: break; // held at KEY_DOWN; released in SDL_EVENT_KEY_UP
         case SDLK_N:
             if (app.mode == Mode::Models) selectAction(app, 1);
             else if (app.mode == Mode::Maps) { app.showNpcs = !app.showNpcs; buildNpcDraws(app); updateTitle(app); }
@@ -21363,6 +21541,9 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         case SDLK_EQUALS: app.speed = std::min(8.0f, app.speed * 2.0f); updateTitle(app); break;
         default: break;
         }
+        break;
+    case SDL_EVENT_KEY_UP:
+        if (event->key.key == SDLK_X) setSceneSkip(app, crinput::HeldSource::Keyboard, false);
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         app.pointerCancelled = false;
@@ -21458,7 +21639,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             float lx, ly;
             app.renderer.toLogical(event->button.x * kx, event->button.y * ky, lx, ly);
             if (lx >= app.renderer.layoutRight() - 76 && ly < app.renderer.layoutTop() + 72) {
-                app.skipScene = true;
+                setSceneSkip(app, crinput::HeldSource::Pointer, true);
                 break;
             }
             if (app.choiceFlag >= 0) { // the Yes / No plates (0x88 x 0x28)
@@ -21484,7 +21665,8 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
-        if (app.pointerCancelled) break; // cancellation is not a click or a puzzle release
+        if (app.pointerCancelled) break;
+        setSceneSkip(app, crinput::HeldSource::Pointer, false); // cancellation is not a click or a puzzle release
         if (app.campPointer.down) {
             int ww = 0, wh = 0;
             SDL_GetWindowSize(app.window, &ww, &wh);

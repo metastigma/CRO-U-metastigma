@@ -1,5 +1,6 @@
 #include "scene/pose.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -28,6 +29,35 @@ void euler(int type, const float* turns, float cols[3][3]) {
         for (int k = 0; k < 3; ++k) cols[c][k] = r[k][c];
 }
 
+struct Quaternion { float w=1, x=0, y=0, z=0; };
+Quaternion normalize(Quaternion q) {
+ const float l=std::sqrt(q.w*q.w+q.x*q.x+q.y*q.y+q.z*q.z);
+ if(l<1e-8f)return {};
+ const float k=1.0f/l; return {q.w*k,q.x*k,q.y*k,q.z*k};
+}
+Quaternion fromColumns(const float c[3][3]) {
+ const float m00=c[0][0],m01=c[1][0],m02=c[2][0],m10=c[0][1],m11=c[1][1],m12=c[2][1],m20=c[0][2],m21=c[1][2],m22=c[2][2];
+ Quaternion q; const float tr=m00+m11+m22;
+ if(tr>0){float s=std::sqrt(tr+1)*2;q={.25f*s,(m21-m12)/s,(m02-m20)/s,(m10-m01)/s};}
+ else if(m00>m11&&m00>m22){float s=std::sqrt(std::max(0.0f,1+m00-m11-m22))*2;q={(m21-m12)/s,.25f*s,(m01+m10)/s,(m02+m20)/s};}
+ else if(m11>m22){float s=std::sqrt(std::max(0.0f,1+m11-m00-m22))*2;q={(m02-m20)/s,(m01+m10)/s,.25f*s,(m12+m21)/s};}
+ else {float s=std::sqrt(std::max(0.0f,1+m22-m00-m11))*2;q={(m10-m01)/s,(m02+m20)/s,(m12+m21)/s,.25f*s};}
+ return normalize(q);
+}
+void toColumns(Quaternion q,float c[3][3]) {
+ q=normalize(q);float xx=q.x*q.x,yy=q.y*q.y,zz=q.z*q.z,xy=q.x*q.y,xz=q.x*q.z,yz=q.y*q.z,wx=q.w*q.x,wy=q.w*q.y,wz=q.w*q.z;
+ c[0][0]=1-2*(yy+zz);c[0][1]=2*(xy+wz);c[0][2]=2*(xz-wy);
+ c[1][0]=2*(xy-wz);c[1][1]=1-2*(xx+zz);c[1][2]=2*(yz+wx);
+ c[2][0]=2*(xz+wy);c[2][1]=2*(yz-wx);c[2][2]=1-2*(xx+yy);
+}
+Quaternion slerp(Quaternion a,Quaternion b,float t) {
+ float d=a.w*b.w+a.x*b.x+a.y*b.y+a.z*b.z;
+ if(d<0){b={-b.w,-b.x,-b.y,-b.z};d=-d;}
+ d=std::clamp(d,-1.0f,1.0f);
+ if(d>.9995f)return normalize({a.w+t*(b.w-a.w),a.x+t*(b.x-a.x),a.y+t*(b.y-a.y),a.z+t*(b.z-a.z)});
+ float angle=std::acos(d),sn=std::sin(angle),wa=std::sin((1-t)*angle)/sn,wb=std::sin(t*angle)/sn;
+ return normalize({wa*a.w+wb*b.w,wa*a.x+wb*b.x,wa*a.y+wb*b.y,wa*a.z+wb*b.z});
+}
 Mat4 localMatrix(const float cols[3][3], const float* t, const float* s) {
     Mat4 m;
     for (int c = 0; c < 3; ++c)
@@ -108,12 +138,21 @@ void computeLocalPoses(const Skeleton& skel, const Action* action, float time, s
     }
 }
 
-void computeWorld(const Skeleton& skel, const Action* action, float time, std::vector<Mat4>& world) {
-    std::vector<NodePose> poses;
-    computeLocalPoses(skel, action, time, poses);
-    std::vector<Mat4> local(poses.size());
-    for (size_t i = 0; i < poses.size(); ++i) local[i] = localMatrix(poses[i].cols, poses[i].t, poses[i].s);
-    resolveWorld(skel, local, world);
+void blendLocalPoses(const std::vector<NodePose>& a,const std::vector<NodePose>& b,float t,std::vector<NodePose>& out) {
+ if(a.size()!=b.size()){out=t<.5f?a:b;return;}
+ t=std::clamp(t,0.0f,1.0f);if(t<=0){out=a;return;}if(t>=1){out=b;return;}
+ out.resize(a.size());
+ for(size_t i=0;i<a.size();++i){toColumns(slerp(fromColumns(a[i].cols),fromColumns(b[i].cols),t),out[i].cols);
+  for(int k=0;k<3;++k){out[i].t[k]=a[i].t[k]+(b[i].t[k]-a[i].t[k])*t;out[i].s[k]=a[i].s[k]+(b[i].s[k]-a[i].s[k])*t;}}
+}
+void computeWorldFromLocalPoses(const Skeleton& skel,const std::vector<NodePose>& poses,std::vector<Mat4>& world) {
+ std::vector<NodePose> rest;const std::vector<NodePose>* src=&poses;
+ if(poses.size()!=skel.nodes.size()){computeLocalPoses(skel,nullptr,0,rest);src=&rest;}
+ std::vector<Mat4> local(src->size());for(size_t i=0;i<src->size();++i)local[i]=localMatrix((*src)[i].cols,(*src)[i].t,(*src)[i].s);
+ resolveWorld(skel,local,world);
+}
+void computeWorld(const Skeleton& skel,const Action* action,float time,std::vector<Mat4>& world) {
+ std::vector<NodePose> poses;computeLocalPoses(skel,action,time,poses);computeWorldFromLocalPoses(skel,poses,world);
 }
 
 void skinMesh(const Model& model, const Mesh& mesh, const std::vector<Mat4>& world, std::vector<float>& out) {
