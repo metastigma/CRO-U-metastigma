@@ -11021,6 +11021,24 @@ int battleAction(const LoadedModel& lm, int slot) {
     return -1;
 }
 
+// Omega's _btlanmtbl [8..10] identifies the package-backed attack slot for each model.
+// When an action requests a shared/missing class slot, use the model's unique package-backed
+// attack clip instead of letting playSlot() silently fall back to idle. Preserve the request
+// when the table offers no unique, loaded alternative.
+int battleAttackSlot(const LoadedModel& lm, int modelId, int requested) {
+    if (requested < 8 || requested > 10 || modelId < 0 || modelId >= cr::kNumBattleModels) return requested;
+    if (cr::kBattleAnimTable[modelId][requested] && battleAction(lm, requested) >= 0) return requested;
+    int resolved = -1;
+    for (int slot = 8; slot <= 10; ++slot) {
+        if (!cr::kBattleAnimTable[modelId][slot] || battleAction(lm, slot) < 0) continue;
+        if (resolved >= 0) return requested; // ambiguous: do not guess
+        resolved = slot;
+    }
+    if (resolved >= 0 && SDL_getenv("CR_BATTLE_DEBUG"))
+        std::printf("battle model %d: attack slot %d -> package slot %d\n", modelId, requested, resolved);
+    return resolved >= 0 ? resolved : requested;
+}
+
 // The battle HUD (menub_mainPut and its cmd_* pieces), in the menus' 512 x 384 units: the
 // tex2d calls' 480 x 320 space moved by (16, 32). Everything comes from window_hd (slot 44) or
 // plain colour (slot 45).
@@ -11056,6 +11074,7 @@ App::Battle::Actor* battleActor(App& app, int fighter) {
 // Plays action slot `slot` from its start; `then` >= 0 follows it once it ends (else it loops)
 void playSlot(App& app, App::Battle::Actor& a, int slot, int then = -1) {
     const LoadedModel& lm = app.battle.models[a.model];
+    slot = battleAttackSlot(lm, a.modelId, slot);
     a.slot = slot;
     a.action = battleAction(lm, slot);
     if (a.action < 0) { // the model hasn't that one: stand
@@ -12225,7 +12244,7 @@ void startStaged(App& app, const cr::BattleActionDef* a) {
     case 432: { // the slot's loop, 45 frames past its start
         app.sound.play(0xb8);
         if (u) playSlot(app, *u, cls, -1);
-        const cr::BattleAnim an = app.battleData.anim(u ? u->modelId : 0, cls);
+        const cr::BattleAnim an = app.battleData.anim(u ? u->modelId : 0, u ? u->slot : cls);
         b.hitFrame = an.loopStart + 45;
         setBattleCamera(app, 0x1fe);
         break;
@@ -12236,7 +12255,7 @@ void startStaged(App& app, const cr::BattleActionDef* a) {
         app.sound.play(0xec);
         if (u) {
             playSlot(app, *u, cls, -1);
-            const cr::BattleAnim an = app.battleData.anim(u->modelId, cls);
+            const cr::BattleAnim an = app.battleData.anim(u->modelId, u->slot);
             u->loopFrom = own ? 103 : an.loopStart;
             u->loopTo = own ? 113 : an.loopEnd;
         }
@@ -12774,7 +12793,7 @@ void startTurn(App& app) {
         if (t.kind == cr::kCmdAttack && t.actors[1] >= 0 && k == 1) slot = 9; // the pair attack's second
         if (target >= 0) faceFighter(app, *u, target);
         playSlot(app, *u, slot, melee ? btlui::kSlotReturn : btlui::kSlotIdle);
-        const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
+        const cr::BattleAnim an = app.battleData.anim(u->modelId, u->slot);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
         // m225.bin (battle model 0x20) uses an in-place blow: it plays the attack animation
@@ -15350,7 +15369,8 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 b.rules.forceAction = w.action;
                 for (int k = 0; k < 2; ++k) // (the pair outlasts the later groups' blows)
                     if (b.rules.f[size_t(k)].present) b.rules.f[size_t(k)].hp = b.rules.f[size_t(k)].hpMax = 9999999;
-                int hitAt = -1, endAt = -1, cams = 0, slot = -1, stageEnd = 0, motionEnd = 0;
+                int hitAt = -1, endAt = -1, cams = 0, slot = -1, modelId = -1, stageEnd = 0, motionEnd = 0;
+                std::string modelFile;
                 float flash = 0, quake = 0, after = 0;
                 bool started = false, landed = false;
                 for (int f = 0; f < 8000 && b.active && endAt < 0; ++f) {
@@ -15366,7 +15386,7 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                         if (const App::Battle::Actor* o = battleActor(app, kPropFighter)) otherSlot = o->slot;
                     if (on && !started) {
                         started = true;
-                        if (const App::Battle::Actor* u = battleActor(app, b.turn.actors[0])) slot = u->slot;
+                        if (const App::Battle::Actor* u = battleActor(app, b.turn.actors[0])) slot = u->slot, modelId = u->modelId, modelFile = u->model;
                         stageEnd = b.stageEnd;
                         motionEnd = b.hitFrame;
                     }
@@ -15389,10 +15409,12 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                     if (was && !b.turnOn) endAt = b.turnFrame;
                 }
                 const float wantAfter = w.after > 3 ? w.after : w.after > 0 && landed ? 3.0f : 0.0f;
+                const int expectedSlot = modelId >= 0 && !modelFile.empty()
+                                           ? battleAttackSlot(b.models[modelFile], modelId, def->cls) : def->cls;
                 const int wantHit = w.hit >= 0 ? w.hit : w.hit == -2 ? motionEnd
-                                  : app.battleData.anim(battleActor(app, 2)->modelId, def->cls).loopStart + 45;
+                                  : app.battleData.anim(modelId >= 0 ? modelId : 2, expectedSlot).loopStart + 45;
                 const int wantEnd = w.wait >= 0 ? wantHit + w.wait : std::max(stageEnd, wantHit + 1);
-                const int bad = !started + (slot != def->cls) + (hitAt != wantHit) + (endAt != wantEnd) + (w.wait < 0 && stageEnd <= 0) +
+                const int bad = !started + (slot != expectedSlot) + (hitAt != wantHit) + (endAt != wantEnd) + (w.wait < 0 && stageEnd <= 0) +
                                 (w.cams >= 0 && cams != w.cams) + (w.flash != (flash >= 254)) + (w.quake != (quake > 0.5f)) +
                                 (w.after >= 0 && after != wantAfter);
                 if (bad)
