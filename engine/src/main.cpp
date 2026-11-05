@@ -12812,13 +12812,14 @@ void startTurn(App& app) {
         int slot = a && a->cls >= 8 && a->cls < cr::kBattleAnimSlots ? a->cls : 8;
         if (t.kind == cr::kCmdAttack && t.actors[1] >= 0 && k == 1) slot = 9; // the pair attack's second
         if (target >= 0) faceFighter(app, *u, target);
-        playSlot(app, *u, slot, melee ? btlui::kSlotReturn : btlui::kSlotIdle);
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
+        // Section 13's moveStart/moveEnd are the per-model movement window. An empty window
+        // means this action stays in place; do not invent a fallback approach from hitFrame.
+        const bool approach = melee && an.hasMoveWindow();
+        playSlot(app, *u, slot, approach ? btlui::kSlotReturn : btlui::kSlotIdle);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
-        // m225.bin (battle model 0x20) uses an in-place blow: it plays the attack animation
-        // and its dedicated sound, but must not use the generic melee approach/return movement.
-        if (melee && u->modelId != 0x20) { // btlmove_setpos: up to the target, a step short of it
+        if (approach) { // btlmove_setpos: up to the target, a step short of it
             const App::Battle::Actor* tv = battleActor(app, target);
             if (tv) {
                 const LoadedModel &lu = b.models[u->model], &lt = b.models[tv->model];
@@ -12828,8 +12829,8 @@ void startTurn(App& app) {
                 u->from = u->pos;
                 u->to = tv->home + cr::Vec3{d.x / len * reach, 0, d.z / len * reach};
                 if (k == 1) u->to = u->to + cr::Vec3{d.z / len * 18, 0, -d.x / len * 18}; // beside the first
-                u->moveFrom = an.moveEnd > an.moveStart ? an.moveStart : 0;
-                u->moveTo = an.moveEnd > an.moveStart ? an.moveEnd : std::max(1, b.hitFrame - 4);
+                u->moveFrom = an.moveStart;
+                u->moveTo = an.moveEnd;
             }
         }
     }

@@ -59,6 +59,7 @@ struct EncounterTable {
 // actor moves, when hits land.
 struct BattleAnim {
     int loopStart = 0, loopEnd = 0, moveStart = 0, moveEnd = 0, hit = 0, hit2 = 0;
+    bool hasMoveWindow() const { return moveEnd > moveStart; }
 };
 constexpr int kBattleAnimSlots = 16; // 13 for most models, up to 15 for the bosses
 
