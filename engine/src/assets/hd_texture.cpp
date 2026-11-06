@@ -117,7 +117,7 @@ bool decodeDds(const uint8_t* p,size_t n,Image& out){
  if(flags&4u){
   if(fcc==0x31545844u)k=BC1;else if(fcc==0x33545844u)k=BC2;else if(fcc==0x35545844u)k=BC3;
   else if(fcc==0x55344342u||fcc==0x31495441u)k=BC4;else if(fcc==0x55354342u||fcc==0x32495441u)k=BC5;
-  else if(fcc==0x30315844u){if(n<148||get32(p+132)!=3||get32(p+140)!=1)return false;at=148;uint32_t z=get32(p+128);
+  else if(fcc==0x30315844u){if(n<148||get32(p+132)!=3||(get32(p+136)&4u)||get32(p+140)!=1)return false;at=148;uint32_t z=get32(p+128);
    if(z==71||z==72)k=BC1;else if(z==74||z==75)k=BC2;else if(z==77||z==78)k=BC3;else if(z==80)k=BC4;else if(z==83)k=BC5;else return false;
   }else return false;
  }else return false;
