@@ -1472,11 +1472,73 @@ void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool cha
     // replacement as its maker built it)
     (void)character;
     if (!replaced && app.video.smoothModels >= 2) cr::smoothModel(m, app.video.smoothModels);
-    for (const auto& img : m.textures) {
+    // Set CR_ALPHA_DEBUG=1 to report the actual source alpha path for every loaded model:
+    // MCT pixels, HD replacement pixels, per-mesh vertex alpha and the Appearance used by that mesh.
+    // This is deliberately diagnostic only; it does not change any render state or asset data.
+    const bool alphaDebug = SDL_getenv("CR_ALPHA_DEBUG") != nullptr;
+    auto reportImageAlpha = [&](const char* stage, size_t index, const cr::Image& image) {
+        if (!alphaDebug) return;
+        size_t transparent = 0, partial = 0, opaque = 0;
+        uint8_t minAlpha = 255, maxAlpha = 0;
+        const size_t pixels = image.rgba.size() / 4;
+        for (size_t p = 0; p < pixels; ++p) {
+            const uint8_t a = image.rgba[p * 4 + 3];
+            minAlpha = std::min(minAlpha, a);
+            maxAlpha = std::max(maxAlpha, a);
+            if (a == 0) ++transparent;
+            else if (a == 255) ++opaque;
+            else ++partial;
+        }
+        SDL_Log("[alpha] %s model=%s tex=%zu size=%dx%d storage=%d alphaOnly=%d noAlpha=%d "
+                "A[min=%u max=%u zero=%zu partial=%zu opaque=%zu]",
+                stage, name.c_str(), index, image.width, image.height, int(image.storage), int(image.alphaOnly),
+                int(image.noAlpha), unsigned(minAlpha), unsigned(maxAlpha), transparent, partial, opaque);
+    };
+    if (alphaDebug) {
+        SDL_Log("[alpha] MODEL %s replaced=%d meshes=%zu appearances=%zu textures=%zu",
+                name.c_str(), int(replaced), m.meshes.size(), m.materials.size(), m.textures.size());
+        for (size_t ti = 0; ti < m.textures.size(); ++ti) reportImageAlpha("MCT", ti, m.textures[ti]);
+        for (size_t mi = 0; mi < m.meshes.size(); ++mi) {
+            const cr::Mesh& mesh = m.meshes[mi];
+            const cr::Material* material = mesh.appearance >= 0 && mesh.appearance < int(m.materials.size())
+                                               ? &m.materials[size_t(mesh.appearance)] : nullptr;
+            uint8_t minAlpha = 255, maxAlpha = 255;
+            size_t vertexZero = 0, vertexPartial = 0, vertexOpaque = 0;
+            if (!mesh.colors.empty()) {
+                minAlpha = 255, maxAlpha = 0;
+                for (size_t p = 3; p < mesh.colors.size(); p += 4) {
+                    const uint8_t a = mesh.colors[p];
+                    minAlpha = std::min(minAlpha, a);
+                    maxAlpha = std::max(maxAlpha, a);
+                    if (a == 0) ++vertexZero;
+                    else if (a == 255) ++vertexOpaque;
+                    else ++vertexPartial;
+                }
+            }
+            const int textureId = mesh.texture >= 0 && mesh.texture < int(m.textureIds.size())
+                                      ? m.textureIds[size_t(mesh.texture)] : -1;
+            SDL_Log("[alpha] MESH model=%s mesh=%zu visible=%d vertices=%zu appearance=%d "
+                    "diffuseA=%.3f blend=%u/%u alphaTest=%u texBlend=%u textureIndex=%d textureId=%d "
+                    "vertexA=%u..%u vZero=%zu vPartial=%zu vOpaque=%zu",
+                    name.c_str(), mi, int(mesh.visible), mesh.colors.size() / 4, mesh.appearance,
+                    material ? material->diffuse[3] : 1.0f,
+                    unsigned(material ? material->blendSrc : 1), unsigned(material ? material->blendDst : 0),
+                    unsigned(material ? material->alphaThreshold : 0), unsigned(material ? material->texBlend : 4),
+                    mesh.texture, textureId, unsigned(minAlpha), unsigned(maxAlpha), vertexZero, vertexPartial, vertexOpaque);
+        }
+    }
+    for (size_t ti = 0; ti < m.textures.size(); ++ti) {
+        const cr::Image& img = m.textures[ti];
         if (app.video.hdTextures) {
             cr::Image hd = img;
             applyHd(app, hd);
+            reportImageAlpha("HD", ti, hd);
             out.textures.push_back(app.renderer.upload(hd));
+            if (alphaDebug) {
+                const cr::Texture& gpu = out.textures.back();
+                SDL_Log("[alpha] GPU model=%s tex=%zu cutout=%d alphaOnly=%d noAlpha=%d",
+                        name.c_str(), ti, int(gpu.cutout), int(gpu.alphaOnly), int(gpu.noAlpha));
+            }
         } else {
             out.textures.push_back(app.renderer.upload(img));
         }
@@ -10758,6 +10820,36 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
 // `override`, if given, replaces every material (texture unbound); `alpha` < 1 fades it.
 void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override, float alpha, float matTime) {
     const cr::Model& cpu = m.cpu;
+    // The load-time report cannot show the opacity that reaches the GPU. Capture the leader's
+    // first actual draw once, after HD replacement and animation/material selection are settled.
+    if (SDL_getenv("CR_ALPHA_DEBUG") && &m == &app.player) {
+        static bool reportedPlayerDraw = false;
+        if (!reportedPlayerDraw) {
+            reportedPlayerDraw = true;
+            SDL_Log("[alpha] PLAYER_DRAW modelAlpha=%.3f override=%d meshes=%zu", alpha, int(override != nullptr), m.meshes.size());
+            for (size_t i = 0; i < cpu.meshes.size() && i < m.meshes.size(); ++i) {
+                const cr::Mesh& source = cpu.meshes[i];
+                const int ap = source.appearance;
+                const cr::Material* material = ap >= 0 && ap < int(cpu.materials.size()) ? &cpu.materials[size_t(ap)] : nullptr;
+                const cr::GpuMesh& gpu = m.meshes[i];
+                const cr::Texture* texture = gpu.texture >= 0 && gpu.texture < int(m.textures.size()) ? &m.textures[size_t(gpu.texture)] : nullptr;
+                uint8_t minVertexAlpha = 255, maxVertexAlpha = 255;
+                if (!source.colors.empty()) {
+                    minVertexAlpha = 255; maxVertexAlpha = 0;
+                    for (size_t p = 3; p < source.colors.size(); p += 4) {
+                        minVertexAlpha = std::min(minVertexAlpha, source.colors[p]);
+                        maxVertexAlpha = std::max(maxVertexAlpha, source.colors[p]);
+                    }
+                }
+                SDL_Log("[alpha] PLAYER_DRAW_MESH mesh=%zu visible=%d appearance=%d diffuseA=%.3f blend=%u/%u alphaTest=%u texBlend=%u tex=%d gpuAlphaOnly=%d gpuNoAlpha=%d gpuCutout=%d vertexA=%u..%u",
+                        i, int(source.visible), ap, material ? material->diffuse[3] : 1.0f,
+                        unsigned(material ? material->blendSrc : 1), unsigned(material ? material->blendDst : 0),
+                        unsigned(material ? material->alphaThreshold : 0), unsigned(material ? material->texBlend : 4),
+                        gpu.texture, int(texture ? texture->alphaOnly : false), int(texture ? texture->noAlpha : true),
+                        int(texture ? texture->cutout : false), unsigned(minVertexAlpha), unsigned(maxVertexAlpha));
+            }
+        }
+    }
     static const cr::Material kDefaultMaterial;
     auto baseOf = [&](size_t i) -> const cr::Material& {
         const int a = i < cpu.meshes.size() ? cpu.meshes[i].appearance : -1;
