@@ -61,6 +61,11 @@ struct BattleAnim {
     int loopStart = 0, loopEnd = 0, moveStart = 0, moveEnd = 0, hit = 0, hit2 = 0;
     bool hasMoveWindow() const { return moveEnd > moveStart; }
 };
+// The action's motion flag is stored separately from this model-specific animation row.
+// Both conditions are required: a timing window alone must not make an action approach.
+inline bool battleApproachEnabled(int motion, bool opposingTarget, const BattleAnim& animation) {
+    return motion == 1 && opposingTarget && animation.hasMoveWindow();
+}
 constexpr int kBattleAnimSlots = 16; // 13 for most models, up to 15 for the bosses
 
 // A battle camera (sys.evt section 15, 32 bytes; btlcamera_set): eye and target in stage units

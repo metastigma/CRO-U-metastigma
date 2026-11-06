@@ -12805,7 +12805,9 @@ void startTurn(App& app) {
         if (it != app.game.items.end() && --it->second <= 0) app.game.items.erase(it);
     }
     const int target = !t.barriers.empty() ? t.barriers[0] : t.hits.empty() ? -1 : t.hits[0].target; // (reflected: at the barrier)
-    const bool melee = a && a->motion == 1 && target >= 0 && (target < 2) != (t.actors[0] < 2);
+    // motion is read from the separate action record (sys.evt +0x2c, byte +17);
+    // Section 13 supplies only the selected model's frame window.
+    const bool opposingTarget = target >= 0 && (target < 2) != (t.actors[0] < 2);
     for (int k = 0; k < 2; ++k) {
         App::Battle::Actor* u = t.actors[k] >= 0 ? battleActor(app, t.actors[k]) : nullptr;
         if (!u) continue;
@@ -12813,9 +12815,8 @@ void startTurn(App& app) {
         if (t.kind == cr::kCmdAttack && t.actors[1] >= 0 && k == 1) slot = 9; // the pair attack's second
         if (target >= 0) faceFighter(app, *u, target);
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
-        // Section 13's moveStart/moveEnd are the per-model movement window. An empty window
-        // means this action stays in place; do not invent a fallback approach from hitFrame.
-        const bool approach = melee && an.hasMoveWindow();
+        // motion == 1 and the model's own timing window must both allow an approach.
+        const bool approach = cr::battleApproachEnabled(a ? a->motion : 0, opposingTarget, an);
         playSlot(app, *u, slot, approach ? btlui::kSlotReturn : btlui::kSlotIdle);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
@@ -13364,10 +13365,15 @@ void stepBattle(App& app) {
                 playSlot(app, a, next, back ? btlui::kSlotIdle : -1);
                 if (back) { // and walks back to its place meanwhile
                     const cr::BattleAnim ra = app.battleData.anim(a.modelId, btlui::kSlotReturn);
-                    a.from = a.pos;
-                    a.to = a.home;
-                    a.moveFrom = ra.moveEnd > ra.moveStart ? ra.moveStart : 0;
-                    a.moveTo = ra.moveEnd > ra.moveStart ? ra.moveEnd : std::max(1, int(actorDuration(app, a)));
+                    if (ra.hasMoveWindow()) {
+                        a.from = a.pos;
+                        a.to = a.home;
+                        a.moveFrom = ra.moveStart;
+                        a.moveTo = ra.moveEnd;
+                    } else {
+                        // No return window: do not synthesize one from the action duration.
+                        a.moveFrom = a.moveTo = 0;
+                    }
                 } else if (next == btlui::kSlotIdle) {
                     a.pos = a.home;
                     a.yaw = a.homeYaw;

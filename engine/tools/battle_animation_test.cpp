@@ -23,6 +23,14 @@ int main() {
     invalidWindow.moveEnd = 7;
     problems += invalidWindow.hasMoveWindow();
 
-    std::printf("battle animation movement windows: empty/stated/invalid intervals; %d problems\n", problems);
+    // The action motion flag and this model-specific timing row are independent inputs.
+    problems += cr::battleApproachEnabled(0, true, startsAtZero);
+    problems += cr::battleApproachEnabled(1, false, startsAtZero);
+    problems += !cr::battleApproachEnabled(1, true, startsAtZero);
+    problems += cr::battleApproachEnabled(1, true, noWindow);
+    problems += cr::battleApproachEnabled(1, true, invalidWindow);
+    problems += !cr::battleApproachEnabled(1, true, delayedWindow);
+
+    std::printf("battle approach: independent action motion + model timing window; %d problems\\n", problems);
     return problems ? 1 : 0;
 }
