@@ -253,3 +253,16 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
 - [ ] In-game check: execute a paired attack and confirm both actors approach, attack from adjacent positions and return; confirm a solo attack without a movement window remains in place.
 
 The regression came from removing the legacy bounded interval globally in PR #7. The correction does not add model-ID exceptions.
+
+
+## Внешние PNG / DDS-текстуры — 06.11.2026
+
+- [x] Перенесён PNG-экспорт и чтение PNG из DuIslingr/CRO-U (015dbb1).
+- [x] Сохранена совместимость с .crraw и .crhd.
+- [x] Добавлена загрузка замен textures/hd/<hash>.dds.
+- [x] DDS: DXT1/BC1, DXT3/BC2, DXT5/BC3, BC4/5 UNORM; DX10 BC1–BC5 UNORM. Только верхний mip одной 2D-текстуры.
+- [x] Добавлен синтетический DXT1 тест.
+- [ ] Windows build и CTest.
+- [ ] Проверка PNG и DDS замен в игре.
+
+DDS BC6H/BC7, signed BC4/5, arrays, cubemaps и volume textures пока не поддерживаются.
