@@ -11080,7 +11080,7 @@ int battleAttackSlot(const LoadedModel& lm, int modelId, int requested) {
         resolved = slot;
     }
     if (resolved >= 0 && SDL_getenv("CR_BATTLE_DEBUG"))
-        std::printf("battle model %d: attack slot %d -> package slot %d\\n", modelId, requested, resolved);
+        std::printf("battle model %d: attack slot %d -> package slot %d\n", modelId, requested, resolved);
     return resolved >= 0 ? resolved : requested;
 }
 
