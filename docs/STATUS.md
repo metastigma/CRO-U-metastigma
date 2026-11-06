@@ -240,3 +240,13 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       its Ogg Vorbis music
 - [x] the Android release alone as the game (`--data` / `--android` with no iOS data): the
       OBB's files, its event files unscrambled, voices streamed from it; self-test clean
+
+
+## Логотипы Vita — 06.11.2026
+
+- [x] Перенесена логика кадрирования из DuIslingr/CRO-U: логотипы используют 15/16 ширины и 10/16 ширины листа (Vita 480×320 из 512, iPad 960×640 из 1024).
+- [x] Для изображения предупреждения (picture 254) используется весь лист, а не область логотипа.
+- [x] Признак warning хранится отдельно для каждого слота; размеры текстуры проверяются перед расчётом.
+- [ ] Сборка Windows/Linux/Android и проверка реального старта игры.
+- [ ] Проверка на данных Vita и iOS; текущая реализация использует размеры загруженного листа, не фиксированные 960×640.
+- Источник: DuIslingr/CRO-U commit 869e2fe50aa9cc96e7ee2dac42ca6c4608d8351e.
