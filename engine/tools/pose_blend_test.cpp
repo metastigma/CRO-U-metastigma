@@ -10,4 +10,10 @@ cr::blendLocalPoses({a},{b},.5f,out);bad+=!near(angle(out[0]),45,.01f)||!near(ou
 float dot=out[0].cols[0][0]*out[0].cols[1][0]+out[0].cols[0][1]*out[0].cols[1][1]+out[0].cols[0][2]*out[0].cols[1][2];bad+=!near(dot,0);
 rot(a,350);rot(b,10);cr::blendLocalPoses({a},{b},.5f,out);bad+=std::fabs(angle(out[0]))>.01f;
 cr::Skeleton sk;sk.nodes.resize(1);std::vector<cr::Mat4>w;cr::computeWorldFromLocalPoses(sk,out,w);bad+=w.size()!=1||!near(w[0].m[15],1);
+// Omega package clips may animate only the first nodes; trailing nodes stay at rest.
+cr::Skeleton partialSk;partialSk.nodes.resize(4);cr::Action partial;partial.segments.resize(1);
+cr::Track tr;tr.type=1;tr.comps=3;cr::Key key;key.time=0;key.mode=3;key.n=1;key.v[0]=4;key.v[1]=2;key.v[2]=1;tr.keys.push_back(key);partial.segments[0].push_back(tr);
+std::vector<cr::NodePose> partialPose;cr::computeLocalPoses(partialSk,&partial,0,partialPose);
+bad+=partialPose.size()!=4||!near(partialPose[0].t[0],4)||!near(partialPose[0].t[1],2)||!near(partialPose[0].t[2],1);
+bad+=!near(partialPose[1].t[0],0)||!near(partialPose[2].t[1],0)||!near(partialPose[3].t[2],0);
 std::printf("pose blend: endpoints, midpoint, shortest arc, translation, scale, world resolve; %d problems\n",bad);return bad?1:0;}

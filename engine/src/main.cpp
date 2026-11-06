@@ -1424,6 +1424,30 @@ void unloadModel(App& app) {
     unloadLoaded(app, app.model);
 }
 
+// The original _btlanmtbl says which built-in animation slots belong to this model package.
+// A package-owned clip remains valid when it has fewer transform segments than the skeleton:
+// nodes without a track stay in their rest pose, as computeLocalPoses already supports.
+int builtInPackageSlot(const std::string& actionName) {
+    constexpr char prefix[] = "built-in ";
+    if (actionName.rfind(prefix, 0) != 0) return -1;
+    size_t at = sizeof(prefix) - 1;
+    int number = 0;
+    bool digit = false;
+    while (at < actionName.size() && actionName[at] >= '0' && actionName[at] <= '9') {
+        digit = true;
+        number = number * 10 + (actionName[at] - '0');
+        ++at;
+    }
+    if (!digit || at >= actionName.size() || actionName[at] != '.' || number <= 0) return -1;
+    return number - 1; // package animation number 9 is BattleAnim slot 8
+}
+
+int battleModelIndexForPackage(const std::string& name) {
+    for (int i = 0; i < cr::kNumBattleModels; ++i)
+        if (name == cr::kBattleModelFile[i]) return i;
+    return -1;
+}
+
 // Loads a model package (and its fitting animations) into `out`.
 void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool character) {
     std::vector<uint8_t> data;
@@ -1491,12 +1515,19 @@ void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool cha
     // the scenes' effect props (ee*, fe*): keep every package action for them, as effects do
     for (const auto& mat : m.materials)
         if (int32_t(mat.refGid) >= 0) { out.packageActions = m.actions; break; }
-    // Animations: those stored in the package plus standalone <name>e*.mca files,
-    // keeping only actions that animate this skeleton (one segment per node)
-    // (or, for each list's motion - its first action, "N.1" - one a few segments off)
+    // The model's _btlanmtbl is authoritative for built-in battle clips. Do not discard a
+    // package-owned slot just because its action has more than six fewer segments than the
+    // skeleton: original Omega still plays that slot, leaving nodes without tracks at rest.
+    const int battleModel = battleModelIndexForPackage(name);
     for (auto& a : m.actions) {
         const bool motion = a.name.size() > 2 && a.name.compare(a.name.size() - 2, 2, ".1") == 0;
-        const bool fits = cr::actionFits(m.skeleton, a) || (motion && cr::actionNearlyFits(m.skeleton, a));
+        const int packageSlot = builtInPackageSlot(a.name);
+        const bool mappedBattleClip = battleModel >= 0 && packageSlot >= 0 && packageSlot < 15 &&
+                                      cr::kBattleAnimTable[battleModel][packageSlot] != 0;
+        const bool partialBattleClip = mappedBattleClip && !a.segments.empty() &&
+                                       a.segments.size() <= m.skeleton.nodes.size();
+        const bool fits = cr::actionFits(m.skeleton, a) || (motion && cr::actionNearlyFits(m.skeleton, a)) ||
+                          partialBattleClip;
         if (SDL_getenv("CR_FIT_DEBUG") && !cr::actionFits(m.skeleton, a)) {
             float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
             if (fits) { // its pose halfway through: the bounds stay the model's size when the nodes line up
