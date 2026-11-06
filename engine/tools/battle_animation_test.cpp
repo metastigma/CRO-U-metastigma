@@ -40,10 +40,9 @@ int main() {
     problems += cr::battleApproachEnabled(0, true, noWindow, true);
     problems += cr::battleApproachEnabled(1, false, noWindow, true);
     // The already-merged M225 in-place fix must survive normal and paired-secondary paths.
+    // M225 remains eligible for its post-hit return clip but never approaches.
     problems += cr::battleApproachEnabled(1, true, startsAtZero, false, true);
     problems += cr::battleApproachEnabled(1, true, noWindow, true, true);
-    // M225 remains eligible for its post-hit return clip but never approaches.
-    problems += !cr::battleApproachEnabled(1, true, startsAtZero, false, true);
     problems += !cr::battleApproachEnabled(1, true, delayedWindow);
 
     // A valid Section 13 window takes precedence over the fallback.
