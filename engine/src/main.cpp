@@ -10813,6 +10813,36 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
 // `override`, if given, replaces every material (texture unbound); `alpha` < 1 fades it.
 void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override, float alpha, float matTime) {
     const cr::Model& cpu = m.cpu;
+    // The load-time report cannot show the opacity that reaches the GPU. Capture the leader's
+    // first actual draw once, after HD replacement and animation/material selection are settled.
+    if (SDL_getenv("CR_ALPHA_DEBUG") && &m == &app.player) {
+        static bool reportedPlayerDraw = false;
+        if (!reportedPlayerDraw) {
+            reportedPlayerDraw = true;
+            SDL_Log("[alpha] PLAYER_DRAW modelAlpha=%.3f override=%d meshes=%zu", alpha, int(override != nullptr), m.meshes.size());
+            for (size_t i = 0; i < cpu.meshes.size() && i < m.meshes.size(); ++i) {
+                const cr::Mesh& source = cpu.meshes[i];
+                const int ap = source.appearance;
+                const cr::Material* material = ap >= 0 && ap < int(cpu.materials.size()) ? &cpu.materials[size_t(ap)] : nullptr;
+                const cr::GpuMesh& gpu = m.meshes[i];
+                const cr::Texture* texture = gpu.texture >= 0 && gpu.texture < int(m.textures.size()) ? &m.textures[size_t(gpu.texture)] : nullptr;
+                uint8_t minVertexAlpha = 255, maxVertexAlpha = 255;
+                if (!source.colors.empty()) {
+                    minVertexAlpha = 255; maxVertexAlpha = 0;
+                    for (size_t p = 3; p < source.colors.size(); p += 4) {
+                        minVertexAlpha = std::min(minVertexAlpha, source.colors[p]);
+                        maxVertexAlpha = std::max(maxVertexAlpha, source.colors[p]);
+                    }
+                }
+                SDL_Log("[alpha] PLAYER_DRAW_MESH mesh=%zu visible=%d appearance=%d diffuseA=%.3f blend=%u/%u alphaTest=%u texBlend=%u tex=%d gpuAlphaOnly=%d gpuNoAlpha=%d gpuCutout=%d vertexA=%u..%u",
+                        i, int(source.visible), ap, material ? material->diffuse[3] : 1.0f,
+                        unsigned(material ? material->blendSrc : 1), unsigned(material ? material->blendDst : 0),
+                        unsigned(material ? material->alphaThreshold : 0), unsigned(material ? material->texBlend : 4),
+                        gpu.texture, int(texture ? texture->alphaOnly : false), int(texture ? texture->noAlpha : true),
+                        int(texture ? texture->cutout : false), unsigned(minVertexAlpha), unsigned(maxVertexAlpha));
+            }
+        }
+    }
     static const cr::Material kDefaultMaterial;
     auto baseOf = [&](size_t i) -> const cr::Material& {
         const int a = i < cpu.meshes.size() ? cpu.meshes[i].appearance : -1;
