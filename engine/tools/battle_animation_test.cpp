@@ -31,6 +31,6 @@ int main() {
     problems += cr::battleApproachEnabled(1, true, invalidWindow);
     problems += !cr::battleApproachEnabled(1, true, delayedWindow);
 
-    std::printf("battle approach: independent action motion + model timing window; %d problems\\n", problems);
+    std::printf("battle approach: independent action motion + model timing window; %d problems\n", problems);
     return problems ? 1 : 0;
 }
