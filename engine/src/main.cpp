@@ -19583,6 +19583,7 @@ int runExplore(App& app, int maxActions, int scenario) {
             app.tapPending = true;
         }
         totalFrames += f;
+        if (SDL_getenv("CR_EXPLORE_DRAW")) drawFrame(app, false); // flush deferred renderer frees while measuring an autoplay run
         return f;
     };
     auto flagCount = [&] {
