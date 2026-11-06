@@ -256,6 +256,7 @@ struct App {
     bool phoneData = false;                // the data is a voiced iPhone release's (voiceevnt.bin, no _ipad art)
     std::string hdDir;                     // HD textures: textures/hd/ in the game folder, or CR_HD_TEXTURES
     int hdLoaded = 0, hdMissing = 0;       // replacements found / not found since startup
+    std::set<std::string> hdRefused;       // invalid replacement files: log once
     std::string modelsDir;                 // replacement models: models/hd/ in the game folder, or CR_HD_MODELS
     int hdModelsLoaded = 0;                // since startup
     int language = 1;                      // text language (cr::kLanguageName): English by default
@@ -1061,7 +1062,9 @@ void applyHd(App& app, cr::Image& img) {
     if (!app.video.hdTextures || app.hdDir.empty() || img.width <= 0) return;
     if (const char* only = SDL_getenv("CR_HD_ONLY"); only && cr::hashName(cr::imageHash(img)) != only) return; // (debugging: one replacement alone)
     cr::Image hd;
-    if (!cr::loadHdImage(app.hdDir, img, hd)) {
+    std::string why;
+    if (!cr::loadHdImage(app.hdDir, img, hd, &why)) {
+        if (!why.empty() && app.hdRefused.insert(why).second) SDL_Log("hd textures: %s - left out", why.c_str());
         ++app.hdMissing;
         return;
     }
@@ -19803,7 +19806,7 @@ int runExplore(App& app, int maxActions, int scenario) {
 // --capture <map.cmp> <out.bmp>: renders that map's composite (background + collision through
 // the stage camera, no HUD) and saves the frame — for checking alignment without a person.
 // --export-textures [dir] (without one, textures/export/ in the game folder): every distinct picture
-// the game draws (its .mct files and the textures inside model packages) as <hash>.crraw, for tools/hd_textures.py to upscale into <hash>.crhd.
+// the game draws (its .mct files and the textures inside model packages) as upright <hash>.png, for editors/upscalers to save as <hash>.png or <hash>.dds in textures/hd/
 // With --vita, the Vita's lossless version of each picture it has alike (same size, alpha kept, the
 // same picture: within 12/255 a channel on average - not the art it redrew) is exported instead,
 // and <ios hash>.cralias (the Vita's hash, 16 hex digits) lets the one upscale serve the iOS
@@ -19875,9 +19878,9 @@ int runExportTextures(App& app, const char* dirArg) {
             ++dupes;
             return h;
         }
-        const std::string path = dir + cr::hashName(h) + ".crraw";
+        const std::string path = dir + cr::hashName(h) + ".png";
         if (SDL_GetPathInfo(path.c_str(), nullptr)) return h; // already exported
-        if (cr::saveRawImage(path, img)) ++written;
+        if (cr::savePngImage(path, img)) ++written;
         else ++failed;
         return h;
     };
