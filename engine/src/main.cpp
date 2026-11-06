@@ -19224,8 +19224,12 @@ int runSelfTest(App& app) {
                 drawFrame(app, false); // process exit 5 through the same endBattle path as a flee
                 openingReturned = !b.active && app.runner.running() && app.runner.gate() == -1 &&
                                   !app.booting && !app.titleOpen && app.pendingEntry == App::Entry::None;
+                std::vector<size_t> openingPcs;
+                cr::setEventTrace([&](size_t pc, int) { openingPcs.push_back(pc); });
                 stepEvents(app); // execute Gosub 0xa1bf from the suspended original script
-                openingResumed = app.runner.running() && app.runner.where() != before;
+                cr::setEventTrace({});
+                openingResumed = app.runner.running() && app.runner.where() != before &&
+                                 std::find(openingPcs.begin(), openingPcs.end(), size_t(0xa1bf)) != openingPcs.end();
             }
         }
         problems += !openingStarted + !openingRouted + !openingReturned + !openingResumed;
