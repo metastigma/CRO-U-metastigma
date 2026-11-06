@@ -12805,8 +12805,8 @@ void startTurn(App& app) {
         if (it != app.game.items.end() && --it->second <= 0) app.game.items.erase(it);
     }
     const int target = !t.barriers.empty() ? t.barriers[0] : t.hits.empty() ? -1 : t.hits[0].target; // (reflected: at the barrier)
-    // motion is read from the separate action record (sys.evt +0x2c, byte +17);
-    // Section 13 supplies only the selected model's frame window.
+    // Omega's 38-byte action record: six voice s16s occupy +10..+21, so motion is byte +29
+    // (the legacy 24-byte layout's +17). Section 13 supplies only the model-specific frame window.
     const bool opposingTarget = target >= 0 && (target < 2) != (t.actors[0] < 2);
     for (int k = 0; k < 2; ++k) {
         App::Battle::Actor* u = t.actors[k] >= 0 ? battleActor(app, t.actors[k]) : nullptr;
