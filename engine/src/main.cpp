@@ -12849,7 +12849,7 @@ void startTurn(App& app) {
             t.kind == cr::kCmdAttack, t.actors[1] >= 0, k);
         // motion and target still gate both paths; only actor 1 of a pair can use the legacy window.
         const bool approach = cr::battleApproachEnabled(
-            a ? a->motion : 0, opposingTarget, an, pairedSecondary);
+            a ? a->motion : 0, opposingTarget, an, pairedSecondary, u->modelId == 0x20);
         playSlot(app, *u, slot, approach ? btlui::kSlotReturn : btlui::kSlotIdle);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;

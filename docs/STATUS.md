@@ -264,12 +264,13 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
 - [x] Prefer the participant's own valid Section 13 window whenever present.
 - [x] Restrict the fallback to actor index 1 when the action is an attack and `actors[1]` is present; its interval is `0..max(1, primary hitFrame - 4)`.
 - [x] Keep `motion == 1` and an opposing target mandatory for both the normal and fallback paths.
+- [x] Preserve merged PR #5's verified M225 (`modelId == 0x20`) in-place attack; it cannot approach, including through the paired-secondary fallback.
 - [x] Keep solo attacks without a valid Section 13 window stationary; return movement remains tied to the return animation's own window.
-- [x] Add unit coverage for pair-secondary eligibility, motion/target gating, valid-window precedence, missing/invalid windows and the bounded fallback.
+- [x] Add unit coverage for pair-secondary eligibility, motion/target gating, valid-window precedence, missing/invalid windows, bounded fallback and M225's in-place attack.
 - [ ] Build and run CTest / `battle-animation-tests` in CI.
 - [ ] In-game check: execute a paired attack and confirm both actors approach, attack from adjacent positions and return; confirm a solo attack without a movement window remains in place.
 
-The regression came from removing the legacy bounded interval globally in PR #7. The correction does not add model-ID exceptions.
+The regression came from removing the legacy bounded interval globally in PR #7. The bounded fallback is restricted to the second actor; merged PR #5's M225 in-place exception is explicitly retained.
 
 
 ## Внешние PNG / DDS-текстуры — 06.11.2026

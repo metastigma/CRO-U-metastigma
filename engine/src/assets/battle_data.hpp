@@ -67,9 +67,10 @@ struct BattleAnim {
 inline bool battleApproachPairedSecondary(bool attack, bool hasSecondActor, int actorIndex) {
     return attack && hasSecondActor && actorIndex == 1;
 }
+// M225's built-in turret attack is an in-place blow; preserve the verified PR #5 behavior.
 inline bool battleApproachEnabled(int motion, bool opposingTarget, const BattleAnim& animation,
-                                  bool pairedSecondary = false) {
-    return motion == 1 && opposingTarget && (animation.hasMoveWindow() || pairedSecondary);
+                                  bool pairedSecondary = false, bool inPlaceModel = false) {
+    return !inPlaceModel && motion == 1 && opposingTarget && (animation.hasMoveWindow() || pairedSecondary);
 }
 inline int battleApproachMoveStart(const BattleAnim& animation) {
     return animation.hasMoveWindow() ? animation.moveStart : 0;
