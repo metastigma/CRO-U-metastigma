@@ -19202,7 +19202,38 @@ int runSelfTest(App& app) {
         }
         problems += !tutorialSeen || pagesSeen == 0;
         if (b.active) endBattle(app, false);
-        // 2. An event battle with its talk (Omega): j001_d05 script 203 - the scene, Battle 651 (stage 11),
+        // 2. The opening story battle's required defeat: j001_t01 event 202 starts group 650,
+        // and the native iOS path returns to the same EVT at Gosub 0xa1bf instead of booting Title.
+        app.testNoTutorials = true;
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        app.game.setFlag(0xff1, true);
+        const int openingMap = cr::kAreaFirstMap[9]; // j001_t01.evt, first map 169
+        bool openingStarted = false, openingRouted = false, openingReturned = false, openingResumed = false;
+        if (openingMap >= 0 && openingMap < cr::kNumMaps && playScript(9, openingMap, 202)) {
+            int f = 0;
+            for (; f < 6000 && !b.active && app.runner.running(); ++f) stepEvents(app), readOn(f);
+            openingStarted = b.active && b.eventBattle && b.start.group == 0x28a && app.runner.running();
+            if (openingStarted) {
+                const std::string before = app.runner.where(); // PC immediately after EVT Battle
+                b.phase = App::Battle::Lost;
+                b.phaseFrames = 119;
+                stepBattle(app); // reach the normal defeat timeout
+                openingRouted = b.exit == 5;
+                app.lastTicks = 0;
+                drawFrame(app, false); // process exit 5 through the same endBattle path as a flee
+                openingReturned = !b.active && app.runner.running() && app.runner.gate() == -1 &&
+                                  !app.booting && !app.titleOpen && app.pendingEntry == App::Entry::None;
+                stepEvents(app); // execute Gosub 0xa1bf from the suspended original script
+                openingResumed = app.runner.running() && app.runner.where() != before;
+            }
+        }
+        problems += !openingStarted + !openingRouted + !openingReturned + !openingResumed;
+        if (b.active) endBattle(app, false);
+        app.runner.stop();
+        app.runner.setGate(-1);
+
+        // 3. An event battle with its talk (Omega): j001_d05 script 203 - the scene, Battle 651 (stage 11),
         // then flag 1403 (0x57b) and on to area 9 map 169. Group 651 talks as round 3 ends
         // (chk_karaok_between) and can't fall below 1 HP before flag 0x57b (chk_karaok_dmg_hp)
         app.game = cr::GameState();
