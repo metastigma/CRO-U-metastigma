@@ -63,8 +63,20 @@ struct BattleAnim {
 };
 // The action's motion flag is stored separately from this model-specific animation row.
 // Both conditions are required: a timing window alone must not make an action approach.
-inline bool battleApproachEnabled(int motion, bool opposingTarget, const BattleAnim& animation) {
-    return motion == 1 && opposingTarget && animation.hasMoveWindow();
+// Only the second participant in a two-actor attack gets the bounded legacy fallback.
+inline bool battleApproachPairedSecondary(bool attack, bool hasSecondActor, int actorIndex) {
+    return attack && hasSecondActor && actorIndex == 1;
+}
+inline bool battleApproachEnabled(int motion, bool opposingTarget, const BattleAnim& animation,
+                                  bool pairedSecondary = false) {
+    return motion == 1 && opposingTarget && (animation.hasMoveWindow() || pairedSecondary);
+}
+inline int battleApproachMoveStart(const BattleAnim& animation) {
+    return animation.hasMoveWindow() ? animation.moveStart : 0;
+}
+inline int battleApproachMoveEnd(const BattleAnim& animation, bool pairedSecondary, int hitFrame) {
+    if (animation.hasMoveWindow()) return animation.moveEnd;
+    return pairedSecondary ? std::max(1, hitFrame - 4) : 0;
 }
 constexpr int kBattleAnimSlots = 16; // 13 for most models, up to 15 for the bosses
 
