@@ -60,5 +60,21 @@ int main() {
     problems += cr::battleApproachMoveEnd(invalidWindow, true, 20) != 16;
 
     std::printf("battle approach: paired-secondary fallback and solo gating; %d problems\n", problems);
+    // Omega's per-participant attack clip selection: secondary uses its own clip, not slot 9.
+    auto attack = cr::battleAttackMotion(0, 2, 0, 8, true, false, false);
+    problems += attack.slot != 8 || attack.inPlace;
+    attack = cr::battleAttackMotion(1, 3, 1, 8, true, false, true);
+    problems += attack.slot != 8 || attack.inPlace;
+    attack = cr::battleAttackMotion(0, 2, 0, 8, true, true, false);
+    problems += attack.slot != 9 || !attack.inPlace;
+    attack = cr::battleAttackMotion(0, 2, 0, 10, true, false, false);
+    problems += attack.slot != 10 || !attack.inPlace;
+    attack = cr::battleAttackMotion(1, 7, 1, 8, true, false, true);
+    problems += attack.slot != 13 || !attack.inPlace;
+    attack = cr::battleAttackMotion(3, 0xa1, -1, 8, true, false, true);
+    problems += attack.slot != 13 || !attack.inPlace;
+    attack = cr::battleAttackMotion(0, 0x9d, 0, 8, true, false, false);
+    problems += attack.slot != 13 || attack.inPlace;
+
     return problems ? 1 : 0;
 }

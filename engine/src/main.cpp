@@ -12840,18 +12840,29 @@ void startTurn(App& app) {
         App::Battle::Actor* u = t.actors[k] >= 0 ? battleActor(app, t.actors[k]) : nullptr;
         if (!u) continue;
         int slot = a && a->cls >= 8 && a->cls < cr::kBattleAnimSlots ? a->cls : 8;
-        if (t.kind == cr::kCmdAttack && t.actors[1] >= 0 && k == 1) slot = 9; // the pair attack's second
-        // Resolve the package-backed clip before reading its animation window and hit timing.
-        slot = battleAttackSlot(b.models[u->model], u->modelId, slot);
+        bool inPlace = false;
+        if (t.kind == cr::kCmdAttack) {
+            const int fighter = t.actors[k];
+            const int character = fighter >= 0 && fighter < 5 ? b.rules.f[size_t(fighter)].character : -1;
+            const LoadedModel& lm = b.models[u->model];
+            const int nine = battleAction(lm, 9);
+            const bool hasLongSlot9 = nine >= 0 && lm.actions[size_t(nine)].duration - 1 > 3;
+            const cr::BattleAttackMotion motion = cr::battleAttackMotion(
+                fighter, u->modelId, character, a ? a->cls : 0,
+                b.rules.pair || b.rules.enemyPair, hasLongSlot9, k == 1);
+            slot = motion.slot;
+            inPlace = motion.inPlace;
+            slot = battleAttackSlot(lm, u->modelId, slot);
+        }
         if (target >= 0) faceFighter(app, *u, target);
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
         const bool pairedSecondary = cr::battleApproachPairedSecondary(
             t.kind == cr::kCmdAttack, t.actors[1] >= 0, k);
-        // motion and target still gate both paths; only actor 1 of a pair can use the legacy window.
         const bool actionHasReturn = cr::battleShouldPlayReturn(a ? a->motion : 0, opposingTarget);
         const bool approach = cr::battleApproachEnabled(
-            a ? a->motion : 0, opposingTarget, an, pairedSecondary, u->modelId == 0x20);
-        playSlot(app, *u, slot, actionHasReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
+            a ? a->motion : 0, opposingTarget, an, pairedSecondary, inPlace || u->modelId == 0x20);
+        const bool playReturn = actionHasReturn && (approach || u->modelId == 0x20);
+        playSlot(app, *u, slot, playReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
         if (approach) { // btlmove_setpos: up to the target, a step short of it

@@ -84,6 +84,25 @@ inline int battleApproachMoveEnd(const BattleAnim& animation, bool pairedSeconda
     if (animation.hasMoveWindow()) return animation.moveEnd;
     return pairedSecondary ? std::max(1, hitFrame - 4) : 0;
 }
+// Omega's btlact_attack_init chooses a different package slot for each participant.
+// The primary may use its long slot 9 or special slot 10; the second normally uses slot 8.
+// Some model families use slot 13 instead. inPlace suppresses approach translation, not the clip.
+struct BattleAttackMotion { int slot = 8; bool inPlace = false; };
+inline BattleAttackMotion battleAttackMotion(int fighter, int model, int character, int cls,
+                                             bool pair, bool hasLongSlot9, bool secondary) {
+    if (secondary) {
+        const bool inPlace = fighter < 2 ? model == 7 : model >= 0xa0 && model <= 0xa2;
+        return {inPlace ? 13 : 8, inPlace};
+    }
+    if (hasLongSlot9) return {9, true};
+    const bool slot10 = fighter < 2
+                            ? character == 0x21 || cls == 10
+                            : (model >= 0xa0 && model <= 0xa2) ||
+                                  ((cls == 10 || model == 0x4f) && model >= 0x4c && model <= 0x4f);
+    if (slot10) return {10, true};
+    return {model >= 0x9d && model <= 0x9f && pair ? 13 : 8, false};
+}
+
 constexpr int kBattleAnimSlots = 16; // 13 for most models, up to 15 for the bosses
 
 // A battle camera (sys.evt section 15, 32 bytes; btlcamera_set): eye and target in stage units
