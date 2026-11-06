@@ -240,3 +240,12 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       its Ogg Vorbis music
 - [x] the Android release alone as the game (`--data` / `--android` with no iOS data): the
       OBB's files, its event files unscrambled, voices streamed from it; self-test clean
+
+
+## Синхронизация с upstream — AppImage и explore — 06.11.2026
+
+- [x] AppImage: генерация PNG-значка из существующего SVG через packaging/make_icons.py; workflow использует PNG, который требует linuxdeploy.
+- [x] Explore: добавлен необязательный CR_EXPLORE_DRAW=1 — отрисовка кадра после каждого settle/action, чтобы Vulkan успевал освобождать отложенные ресурсы во время автопрохождения.
+- [ ] Проверить Linux AppImage job и Windows/Linux сборки.
+- [ ] Сравнить поведение --explore с CR_EXPLORE_DRAW=1 по памяти и стабильности.
+- Источники: DuIslingr/CRO-U commits 8bbf8a88187b2062998d31d3303c281ad1247a1d и 9eb032aa180d334fd5b56a4ffb3b5d042c7c8402.
