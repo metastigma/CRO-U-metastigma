@@ -27,7 +27,11 @@ int main() {
     problems += cr::battleApproachPairedSecondary(true, false, 1);
     problems += cr::battleApproachPairedSecondary(false, true, 1);
 
-    // Both paths still require motion == 1 and an opposing target.
+    // The return clip is selected by action motion + opposing target, independently of translation.
+    problems += !cr::battleShouldPlayReturn(1, true);
+    problems += cr::battleShouldPlayReturn(0, true);
+    problems += cr::battleShouldPlayReturn(1, false);
+    // Both approach paths still require motion == 1 and an opposing target.
     problems += cr::battleApproachEnabled(0, true, startsAtZero);
     problems += cr::battleApproachEnabled(1, false, startsAtZero);
     problems += !cr::battleApproachEnabled(1, true, startsAtZero);
@@ -38,6 +42,8 @@ int main() {
     // The already-merged M225 in-place fix must survive normal and paired-secondary paths.
     problems += cr::battleApproachEnabled(1, true, startsAtZero, false, true);
     problems += cr::battleApproachEnabled(1, true, noWindow, true, true);
+    // M225 remains eligible for its post-hit return clip but never approaches.
+    problems += !cr::battleApproachEnabled(1, true, startsAtZero, false, true);
     problems += !cr::battleApproachEnabled(1, true, delayedWindow);
 
     // A valid Section 13 window takes precedence over the fallback.

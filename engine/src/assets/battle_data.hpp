@@ -67,10 +67,15 @@ struct BattleAnim {
 inline bool battleApproachPairedSecondary(bool attack, bool hasSecondActor, int actorIndex) {
     return attack && hasSecondActor && actorIndex == 1;
 }
-// M225's built-in turret attack is an in-place blow; preserve the verified PR #5 behavior.
+// A melee action with an opposing target still plays its return clip after the attack.
+// Approach translation is a separate decision: M225 (PR #5) must stay at its home position.
+inline bool battleShouldPlayReturn(int motion, bool opposingTarget) {
+    return motion == 1 && opposingTarget;
+}
 inline bool battleApproachEnabled(int motion, bool opposingTarget, const BattleAnim& animation,
                                   bool pairedSecondary = false, bool inPlaceModel = false) {
-    return !inPlaceModel && motion == 1 && opposingTarget && (animation.hasMoveWindow() || pairedSecondary);
+    return battleShouldPlayReturn(motion, opposingTarget) && !inPlaceModel &&
+           (animation.hasMoveWindow() || pairedSecondary);
 }
 inline int battleApproachMoveStart(const BattleAnim& animation) {
     return animation.hasMoveWindow() ? animation.moveStart : 0;
