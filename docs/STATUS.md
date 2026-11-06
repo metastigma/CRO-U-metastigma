@@ -74,6 +74,7 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       equipment's seven slots (the Human Genes slot takes the characters' own plates); the shop
       (Omega's levels, stock and sell lists); the World Select (each scenario's worlds, bands -
       which set the scenario's level byte for enemies and treasure -, the skip question)
+- [ ] **First scripted defeat (battle group 650):** [`docs/BATTLE_DEFEAT_FLOW.md`](BATTLE_DEFEAT_FLOW.md) records the iOS defeat phase, original `sys.evt` 57016 template (`{STR:0} и команда повержены...`), the port fix (`Lost → exit 5 → endBattle(false)`) and EVT-continuation self-test. Runtime self-test/CI validation is pending; Piu-Piu's Oz eligibility and Vita's encrypted SELF remain open.
 - [x] Omega's genes (plates 474..504, skills to 198, `_geneplate`), its 38-byte battle actions,
       the story battles' talks and HP floors (`chk_karaok_*`), the defeat warp, the encounter
       level, battle voices' speakers (3.1.0 / Vita), the talk window's parchment (`window_cutin`)

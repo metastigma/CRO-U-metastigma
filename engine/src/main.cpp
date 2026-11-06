@@ -13524,9 +13524,13 @@ void stepBattle(App& app) {
         }
         break;
     case App::Battle::Results: stepResults(app); break;
-    case App::Battle::Lost: // 0x513, then (9000) btl_lose: a story battle starts over from the title,
-        // any other goes back to the pair's Ark (drawFrame does either, between frames)
-        if (b.phaseFrames >= 120) b.exit = b.eventBattle ? 2 : 3;
+    case App::Battle::Lost: // 0x513 / btl_lose. Omega iOS has a dedicated defeat continuation for
+        // the opening story battle (group 0x28a): close the battle and resume its suspended EVT.
+        // Other event battles retain their own loss handling; random battles return to the Ark.
+        if (b.phaseFrames >= 120) {
+            if (b.eventBattle && b.start.group == 0x28a) b.exit = 5; // scripted defeat: resume EVT
+            else b.exit = b.eventBattle ? 2 : 3;
+        }
         break;
     case App::Battle::Fled:
         if (b.phaseFrames >= 30) b.exit = 1;
@@ -14290,6 +14294,7 @@ void drawFrame(App& app, bool present = true) {
         app.battle.exit = 0;
         if (e == 1) endBattle(app, false);
         else if (e == 4) endBattle(app, true);
+        else if (e == 5) endBattle(app, false); // group 650's original scripted-defeat continuation
         else if (e == 3) loseToArk(app);
         else bootTitle(app);
     }
@@ -19197,7 +19202,42 @@ int runSelfTest(App& app) {
         }
         problems += !tutorialSeen || pagesSeen == 0;
         if (b.active) endBattle(app, false);
-        // 2. An event battle with its talk (Omega): j001_d05 script 203 - the scene, Battle 651 (stage 11),
+        // 2. The opening story battle's required defeat: j001_t01 event 202 starts group 650,
+        // and the native iOS path returns to the same EVT at Gosub 0xa1bf instead of booting Title.
+        app.testNoTutorials = true;
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        app.game.setFlag(0xff1, true);
+        const int openingMap = cr::kAreaFirstMap[9]; // j001_t01.evt, first map 169
+        bool openingStarted = false, openingRouted = false, openingReturned = false, openingResumed = false;
+        if (openingMap >= 0 && openingMap < cr::kNumMaps && playScript(9, openingMap, 202)) {
+            int f = 0;
+            for (; f < 6000 && !b.active && app.runner.running(); ++f) stepEvents(app), readOn(f);
+            openingStarted = b.active && b.eventBattle && b.start.group == 0x28a && app.runner.running();
+            if (openingStarted) {
+                const std::string before = app.runner.where(); // PC immediately after EVT Battle
+                b.phase = App::Battle::Lost;
+                b.phaseFrames = 119;
+                stepBattle(app); // reach the normal defeat timeout
+                openingRouted = b.exit == 5;
+                app.lastTicks = 0;
+                drawFrame(app, false); // process exit 5 through the same endBattle path as a flee
+                openingReturned = !b.active && app.runner.running() && app.runner.gate() == -1 &&
+                                  !app.booting && !app.titleOpen && app.pendingEntry == App::Entry::None;
+                std::vector<size_t> openingPcs;
+                cr::setEventTrace([&](size_t pc, int) { openingPcs.push_back(pc); });
+                stepEvents(app); // execute Gosub 0xa1bf from the suspended original script
+                cr::setEventTrace({});
+                openingResumed = app.runner.running() && app.runner.where() != before &&
+                                 std::find(openingPcs.begin(), openingPcs.end(), size_t(0xa1bf)) != openingPcs.end();
+            }
+        }
+        problems += !openingStarted + !openingRouted + !openingReturned + !openingResumed;
+        if (b.active) endBattle(app, false);
+        app.runner.stop();
+        app.runner.setGate(-1);
+
+        // 3. An event battle with its talk (Omega): j001_d05 script 203 - the scene, Battle 651 (stage 11),
         // then flag 1403 (0x57b) and on to area 9 map 169. Group 651 talks as round 3 ends
         // (chk_karaok_between) and can't fall below 1 HP before flag 0x57b (chk_karaok_dmg_hp)
         app.game = cr::GameState();
