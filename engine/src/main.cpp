@@ -786,6 +786,7 @@ struct App {
         cr::Texture tex[2];                // by slot (0x47's slot + 16 in the original's Tex2d)
         int slot = -1, phase = 0, frame = 0, in = 0, hold = 0, out = 0;
         bool skip = false;                 // a tap / confirm in the hold: on to the fade-out
+        bool warning[2] = {false, false};  // picture 254 is the whole warning sheet, not a cropped logo
     } vitaLogo;
     struct TexDisp {                       // Uty_TexDisp (2016): a Tex2d slot's picture faded in, held, out
         bool on = false;
@@ -3272,6 +3273,7 @@ struct ViewerHost : cr::EventHost {
         app.renderer.destroy(l.tex[k]);
         cr::Image img;
         if (name && loadImage(app, std::string(name) + "_hd.mct", img)) l.tex[k] = app.renderer.upload(img);
+        l.warning[k] = picture == 254;
     }
     void vitaLogoShow(int slot, int in, int hold, int out) override {
         App::VitaLogo& l = app.vitaLogo;
@@ -6934,15 +6936,20 @@ void drawVitaLogo(App& app) {
     cr::Renderer& r = app.renderer;
     r.setOrigin(0);
     r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 1);
-    const cr::Texture& t = l.tex[std::clamp(l.slot, 0, 1)];
+    const int s = std::clamp(l.slot, 0, 1);
+    const cr::Texture& t = l.tex[s];
     const float a = l.phase == 1 ? float(l.frame) / float(std::max(1, l.in)) : l.phase == 2 ? 1.0f
                     : l.phase == 3 ? 1.0f - float(l.frame) / float(std::max(1, l.out)) : 0.0f;
-    if (t.id && a > 0) {
-        // Vita boot pictures: use a 960 x 640 window at the sheet's top-left.
-        // Keep the aspect-fit and centring calculation; sample only the actual picture area.
-        constexpr float pw = 960.0f, ph = 640.0f;
-        const float k = std::min(r.screenW() / pw, float(cr::Renderer::kLogicalH) / ph), w = pw * k, h = ph * k;
-        r.drawQuadUV(t, (r.screenW() - w) / 2, (cr::Renderer::kLogicalH - h) / 2, w, h, 0, 0, pw, ph, 1, 1, 1, a);
+    if (t.id && a > 0 && t.width > 0 && t.height > 0) {
+        // Logos occupy 15/16 x 10/16 of their square sheet (Vita 480x320/512,
+        // iPad 960x640/1024). The warning picture (254) is the entire sheet.
+        const float sw = float(t.width);
+        const float pw = l.warning[s] ? sw : sw * 15.0f / 16.0f;
+        const float ph = l.warning[s] ? float(t.height) : sw * 10.0f / 16.0f;
+        const float k = std::min(r.screenW() / pw, float(cr::Renderer::kLogicalH) / ph);
+        const float w = pw * k, h = ph * k;
+        r.drawQuadUV(t, (r.screenW() - w) / 2, (cr::Renderer::kLogicalH - h) / 2,
+                     w, h, 0, 0, pw, ph, 1, 1, 1, a);
     }
     r.setOrigin(r.uiX());
 }
