@@ -239,3 +239,17 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       its Ogg Vorbis music
 - [x] the Android release alone as the game (`--data` / `--android` with no iOS data): the
       OBB's files, its event files unscrambled, voices streamed from it; self-test clean
+
+
+## Battle animation follow-up — PR #7 (2026-11-06)
+
+- [x] Restore approach movement for the second participant of a two-actor attack when its model's Section 13 row has no movement window.
+- [x] Prefer the participant's own valid Section 13 window whenever present.
+- [x] Restrict the fallback to actor index 1 when the action is an attack and `actors[1]` is present; its interval is `0..max(1, primary hitFrame - 4)`.
+- [x] Keep `motion == 1` and an opposing target mandatory for both the normal and fallback paths.
+- [x] Keep solo attacks without a valid Section 13 window stationary; return movement remains tied to the return animation's own window.
+- [x] Add unit coverage for pair-secondary eligibility, motion/target gating, valid-window precedence, missing/invalid windows and the bounded fallback.
+- [ ] Build and run CTest / `battle-animation-tests` in CI.
+- [ ] In-game check: execute a paired attack and confirm both actors approach, attack from adjacent positions and return; confirm a solo attack without a movement window remains in place.
+
+The regression came from removing the legacy bounded interval globally in PR #7. The correction does not add model-ID exceptions.
