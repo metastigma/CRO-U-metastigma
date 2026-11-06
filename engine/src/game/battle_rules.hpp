@@ -16,8 +16,9 @@
 // speed +6, calc +8; six voice s16s at +10..+21. The action fields from the 1.0.1 24-byte layout
 // follow those voices: icon +22, class +23 (animation slot: 8-10 attacks, 11 genes, 12 items),
 // scope +24, side +25, pick +26, always hits +27, variance % +28, motion +29, element +30,
-// sure gene +32, affinity +34, hostile +35, dodgeable +36. `motion == 1` permits approach only
-// when the selected model's Section 13 animation also has a valid moveStart/moveEnd window.
+// sure gene +32, affinity +34, hostile +35, dodgeable +36. `motion == 1` and an opposing target permit approach; solo actors require the selected model's
+// Section 13 moveStart/moveEnd window. Only actor 1 of an attack with a second participant may use
+// the bounded legacy interval 0..max(1, hitFrame - 4) when its own window is absent.
 //  - 10..17 each character's attack (character + 10; monsters use them too), 18..21 the routes'
 //    pair attacks (route + 18), 26 defend, 100..126 battle items 21..47, 201.. genes.
 //
