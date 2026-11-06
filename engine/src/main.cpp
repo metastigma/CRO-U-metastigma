@@ -13524,9 +13524,13 @@ void stepBattle(App& app) {
         }
         break;
     case App::Battle::Results: stepResults(app); break;
-    case App::Battle::Lost: // 0x513, then (9000) btl_lose: a story battle starts over from the title,
-        // any other goes back to the pair's Ark (drawFrame does either, between frames)
-        if (b.phaseFrames >= 120) b.exit = b.eventBattle ? 2 : 3;
+    case App::Battle::Lost: // 0x513 / btl_lose. Omega iOS has a dedicated defeat continuation for
+        // the opening story battle (group 0x28a): close the battle and resume its suspended EVT.
+        // Other event battles retain their own loss handling; random battles return to the Ark.
+        if (b.phaseFrames >= 120) {
+            if (b.eventBattle && b.start.group == 0x28a) b.exit = 5; // scripted defeat: resume EVT
+            else b.exit = b.eventBattle ? 2 : 3;
+        }
         break;
     case App::Battle::Fled:
         if (b.phaseFrames >= 30) b.exit = 1;
@@ -14290,6 +14294,7 @@ void drawFrame(App& app, bool present = true) {
         app.battle.exit = 0;
         if (e == 1) endBattle(app, false);
         else if (e == 4) endBattle(app, true);
+        else if (e == 5) endBattle(app, false); // group 650's original scripted-defeat continuation
         else if (e == 3) loseToArk(app);
         else bootTitle(app);
     }
