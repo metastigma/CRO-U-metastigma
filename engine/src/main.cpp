@@ -12815,8 +12815,11 @@ void startTurn(App& app) {
         if (t.kind == cr::kCmdAttack && t.actors[1] >= 0 && k == 1) slot = 9; // the pair attack's second
         if (target >= 0) faceFighter(app, *u, target);
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
-        // motion == 1 and the model's own timing window must both allow an approach.
-        const bool approach = cr::battleApproachEnabled(a ? a->motion : 0, opposingTarget, an);
+        const bool pairedSecondary = cr::battleApproachPairedSecondary(
+            t.kind == cr::kCmdAttack, t.actors[1] >= 0, k);
+        // motion and target still gate both paths; only actor 1 of a pair can use the legacy window.
+        const bool approach = cr::battleApproachEnabled(
+            a ? a->motion : 0, opposingTarget, an, pairedSecondary);
         playSlot(app, *u, slot, approach ? btlui::kSlotReturn : btlui::kSlotIdle);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
@@ -12830,8 +12833,8 @@ void startTurn(App& app) {
                 u->from = u->pos;
                 u->to = tv->home + cr::Vec3{d.x / len * reach, 0, d.z / len * reach};
                 if (k == 1) u->to = u->to + cr::Vec3{d.z / len * 18, 0, -d.x / len * 18}; // beside the first
-                u->moveFrom = an.moveStart;
-                u->moveTo = an.moveEnd;
+                u->moveFrom = cr::battleApproachMoveStart(an);
+                u->moveTo = cr::battleApproachMoveEnd(an, pairedSecondary, b.hitFrame);
             }
         }
     }
