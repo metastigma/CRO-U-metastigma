@@ -74,6 +74,7 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       equipment's seven slots (the Human Genes slot takes the characters' own plates); the shop
       (Omega's levels, stock and sell lists); the World Select (each scenario's worlds, bands -
       which set the scenario's level byte for enemies and treasure -, the skip question)
+- [ ] **First scripted defeat (battle group 650):** [`docs/BATTLE_DEFEAT_FLOW.md`](BATTLE_DEFEAT_FLOW.md) records the iOS defeat phase, original `sys.evt` 57016 template (`{STR:0} и команда повержены...`), the port fix (`Lost → exit 5 → endBattle(false)`) and EVT-continuation self-test. Runtime self-test/CI validation is pending; Piu-Piu's Oz eligibility and Vita's encrypted SELF remain open.
 - [x] Omega's genes (plates 474..504, skills to 198, `_geneplate`), its 38-byte battle actions,
       the story battles' talks and HP floors (`chk_karaok_*`), the defeat warp, the encounter
       level, battle voices' speakers (3.1.0 / Vita), the talk window's parchment (`window_cutin`)
@@ -239,3 +240,20 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       its Ogg Vorbis music
 - [x] the Android release alone as the game (`--data` / `--android` with no iOS data): the
       OBB's files, its event files unscrambled, voices streamed from it; self-test clean
+
+
+## Синхронизация с upstream — AppImage и explore — 06.11.2026
+
+- [x] AppImage: генерация PNG-значка из существующего SVG через packaging/make_icons.py; workflow использует PNG, который требует linuxdeploy.
+- [x] Explore: добавлен необязательный CR_EXPLORE_DRAW=1 — отрисовка кадра после каждого settle/action, чтобы Vulkan успевал освобождать отложенные ресурсы во время автопрохождения.
+- [ ] Проверить Linux AppImage job и Windows/Linux сборки.
+- [ ] Сравнить поведение --explore с CR_EXPLORE_DRAW=1 по памяти и стабильности.
+- Источники: DuIslingr/CRO-U commits 8bbf8a88187b2062998d31d3303c281ad1247a1d и 9eb032aa180d334fd5b56a4ffb3b5d042c7c8402.
+## Логотипы Vita — 06.11.2026
+
+- [x] Перенесена логика кадрирования из DuIslingr/CRO-U: логотипы используют 15/16 ширины и 10/16 ширины листа (Vita 480×320 из 512, iPad 960×640 из 1024).
+- [x] Для изображения предупреждения (picture 254) используется весь лист, а не область логотипа.
+- [x] Признак warning хранится отдельно для каждого слота; размеры текстуры проверяются перед расчётом.
+- [ ] Сборка Windows/Linux/Android и проверка реального старта игры.
+- [ ] Проверка на данных Vita и iOS; текущая реализация использует размеры загруженного листа, не фиксированные 960×640.
+- Источник: DuIslingr/CRO-U commit 869e2fe50aa9cc96e7ee2dac42ca6c4608d8351e.
