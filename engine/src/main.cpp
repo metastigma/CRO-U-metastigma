@@ -16279,11 +16279,42 @@ int inputCancelSelfTest(App& app) {
         const auto& layout = cr::kPuzzleStage[pkStage];
         setActor(app, 0, puzzle::centre(app, at.row == 0 ? layout.rows - 1 : 0,
                                        at.col == 0 ? layout.cols - 1 : 0), nullptr, false);
-        puzzle::pkGrab(app, target, 200, 200);
+        // Convert an object's projected field position to the renderer's frame pixels.
+        // Both cancellation and the R3 gesture must begin with a real hit-test, not pkGrab().
+        auto projectBlock = [&](int objectIndex, float& px, float& py) {
+            if (objectIndex < 0 || size_t(objectIndex) >= app.puzzle.objs.size()) return false;
+            const auto& object = app.puzzle.objs[size_t(objectIndex)];
+            if (object.npc < 0 || size_t(object.npc) >= app.npcs.size()) return false;
+            const cr::FieldNpc& npc = app.npcs[size_t(object.npc)];
+            float hx = 0, hy = 0;
+            if (!fieldViewPoint(app, {npc.pos[0], npc.pos[1] + 5.0f, npc.pos[2]}, hx, hy)) return false;
+            const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
+            float vx = 0, vy = 0, vw = 0, vh = 0;
+            if (scrollingField(app)) {
+                vw = fieldViewW(app), vh = fieldViewH(app);
+                vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
+            } else {
+                vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
+                vx = (SW - vw) / 2, vy = (H - vh) / 2;
+            }
+            const float logicalX = vx + hx * vw / fieldViewW(app);
+            const float logicalY = vy + hy * vh / fieldViewH(app);
+            float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            const float fw = float(app.renderer.frameWidth()), fh = float(app.renderer.frameHeight());
+            app.renderer.toLogical(0, 0, x0, y0);
+            app.renderer.toLogical(fw, fh, x1, y1);
+            if (x1 == x0 || y1 == y0) return false;
+            px = (logicalX - x0) * fw / (x1 - x0);
+            py = (logicalY - y0) * fh / (y1 - y0);
+            return px >= 0 && px < fw && py >= 0 && py < fh;
+        };
+        float cancelTapX = 0, cancelTapY = 0;
+        const bool cancelTapProjected = projectBlock(target, cancelTapX, cancelTapY);
+        const bool cancelTapHit = cancelTapProjected && puzzle::click(app, cancelTapX, cancelTapY);
         for (int i = 0; i < 4; ++i) stepEvents(app);
         const auto& block = app.puzzle.objs[size_t(target)];
         const int row = block.row, col = block.col, esp = app.puzzle.esp, uses = app.game.vars[13];
-        problems += app.puzzle.pkState != 1 || block.pk != 2;
+        problems += !cancelTapHit || app.puzzle.pkState != 1 || block.pk != 2;
         SDL_Event e{};
         e.type = SDL_EVENT_WINDOW_FOCUS_LOST, e.window.windowID = SDL_GetWindowID(app.window);
         SDL_AppEvent(&app, &e);
@@ -16326,30 +16357,7 @@ int inputCancelSelfTest(App& app) {
             app.pad = pad;
             app.puzzleTouch = App::PuzzleTouch();
             puzzleTouchPrepare(app);
-            const auto& obj = app.puzzle.objs[size_t(target)];
-            const cr::FieldNpc& npc = app.npcs[size_t(obj.npc)];
-            float hx = 0, hy = 0;
-            bool projected = fieldViewPoint(app, {npc.pos[0], npc.pos[1] + 5.0f, npc.pos[2]}, hx, hy);
-            const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
-            float vx = 0, vy = 0, vw = 0, vh = 0;
-            if (scrollingField(app)) {
-                vw = fieldViewW(app), vh = fieldViewH(app);
-                vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
-            } else {
-                vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
-                vx = (SW - vw) / 2, vy = (H - vh) / 2;
-            }
-            const float logicalX = vx + hx * vw / fieldViewW(app);
-            const float logicalY = vy + hy * vh / fieldViewH(app);
-            float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-            const float fw = float(app.renderer.frameWidth()), fh = float(app.renderer.frameHeight());
-            app.renderer.toLogical(0, 0, x0, y0);
-            app.renderer.toLogical(fw, fh, x1, y1);
-            projected = projected && x1 != x0 && y1 != y0;
-            app.puzzleTouch.x = projected ? (logicalX - x0) * fw / (x1 - x0) : 0;
-            app.puzzleTouch.y = projected ? (logicalY - y0) * fh / (y1 - y0) : 0;
-            const bool onScreen = projected && app.puzzleTouch.x >= 0 && app.puzzleTouch.x < fw &&
-                                  app.puzzleTouch.y >= 0 && app.puzzleTouch.y < fh;
+            const bool onScreen = projectBlock(target, app.puzzleTouch.x, app.puzzleTouch.y);
             puzzleTouchCacheBindings(app);
             const int rawR3 = app.puzzleTouch.rawR3Buttons.empty() ? -1 : app.puzzleTouch.rawR3Buttons.front();
             if (!onScreen || rawR3 < 0) {
