@@ -4900,7 +4900,7 @@ void drawSaveScreen(App& app) {
     }
     r.setOrigin(wideLeft(app));
     if (keyHints(app)) // (our key hints)
-        m.text(ss.phase == 1 ? "Left/Right  Enter  Esc: no" : ss.phase == 0 ? "Up/Down  Enter  Esc: back" : "", 20, 372, false,
+        m.text(ss.phase == 1 ? "Up/Down  Enter  Esc: no" : ss.phase == 0 ? "Up/Down  Enter  Esc: back" : "", 20, 372, false,
            a * 0.8f, 9);
     r.setOrigin(r.uiX());
 }
@@ -4925,8 +4925,10 @@ void saveScreenKey(App& app, SDL_Keycode key) {
         return;
     }
     if (ss.phase == 1) {
-        if (key == SDLK_LEFT || key == SDLK_A || key == SDLK_RIGHT || key == SDLK_D) { ss.confirm ^= 1; menuSound(app, se::kCursor); }
-        else if (enter && ss.confirm == 0) saveScreenYes(app);
+        if (key == SDLK_UP || key == SDLK_W || key == SDLK_DOWN || key == SDLK_S) {
+            ss.confirm ^= 1;
+            menuSound(app, se::kCursor);
+        } else if (enter && ss.confirm == 0) saveScreenYes(app);
         else if (enter || back) { // No
             menuSound(app, se::kChoose);
             if (ss.load && ss.kind == 3) { // then a plain new game? (57089..57091)
@@ -4958,13 +4960,15 @@ void saveScreenClick(App& app, float px, float py) {
     menuPointAt(app, lx, ly, wideRight(app), rx, my); // (widescreen: the plates on the right)
     if (ss.phase == 2) { ss.timer = 1000; return; }
     if (ss.phase == 1) {
-        if (app.renderer.phoneLayout()) { // the plates (0x88 x 0x28)
-            if (mx >= 336 && mx < 472 && my >= 104 && my < 144) { ss.confirm = 0; saveScreenYes(app); }
-            else if (mx >= 336 && mx < 472 && my >= 160 && my < 200) saveScreenKey(app, SDLK_ESCAPE);
-            return;
+        // Yes / No are drawn at the right-hand menu origin in every layout.
+        // Hit-test in that same coordinate space (including widescreen and phone fit).
+        if (rx >= 336 && rx < 472 && my >= 104 && my < 144) {
+            ss.confirm = 0;
+            saveScreenYes(app);
+        } else if (rx >= 336 && rx < 472 && my >= 160 && my < 200) {
+            ss.confirm = 1;
+            saveScreenKey(app, SDLK_ESCAPE);
         }
-        if (my >= 288 && my < 336 && mx >= 128 && mx < 240) { ss.confirm = 0; saveScreenYes(app); }
-        else if (my >= 288 && my < 336 && mx >= 272 && mx < 384) saveScreenKey(app, SDLK_ESCAPE);
         return;
     }
     const std::vector<int> plates = savePlates(app);
@@ -17575,6 +17579,12 @@ int runSelfTest(App& app) {
         problems += !SDL_SaveFile(previousSlot.c_str(), oversizedPrevious.data(), oversizedPrevious.size());
         openSaveScreen(app, false);
         problems += !app.saveScreen.open || app.saveScreen.phase != 1;
+        saveScreenKey(app, SDLK_RIGHT); // horizontal arrows must not change Yes / No
+        problems += app.saveScreen.confirm != 0;
+        saveScreenKey(app, SDLK_DOWN); // Down selects No
+        problems += app.saveScreen.confirm != 1;
+        saveScreenKey(app, SDLK_UP); // Up selects Yes
+        problems += app.saveScreen.confirm != 0;
         saveScreenKey(app, SDLK_RETURN); // Yes
         problems += app.saveScreen.message != 57082;
         problems += expectSounds("save", {11});
