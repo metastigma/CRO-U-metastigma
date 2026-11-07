@@ -12902,7 +12902,7 @@ void startTurn(App& app) {
                 u->from = u->pos;
                 bool usedFormationPosition = false;
                 const int fighter = t.actors[k];
-                if (fighter >= 0 && fighter < 2 && target >= 2 && target < 5 &&
+                if (t.kind == cr::kCmdAttack && fighter >= 0 && fighter < 2 && target >= 2 && target < 5 &&
                     b.formation >= 0 && b.formation < cr::kNumFormations) {
                     const int positionSlot = cr::battleApproachPositionSlot(target, fighter, b.rules.pair);
                     if (positionSlot >= 0) {
