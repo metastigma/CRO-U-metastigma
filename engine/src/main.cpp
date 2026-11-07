@@ -9717,8 +9717,9 @@ void pkGrab(App& app, int t, float sx = -1e9f, float sy = -1e9f) {
     App::Puzzle& pz = app.puzzle;
     if (pz.busy || pz.pkState || t < 0 || t >= int(pz.objs.size())) return;
     App::Puzzle::Obj& o = pz.objs[size_t(t)];
-    int pr, pc;
-    if (o.type != cr::kTypeNormal || o.state != 1 || o.pk != 0 || !cellOf(app, app.walker.pos, pr, pc)) return;
+    // A screen touch may select any visible block in the board. The player's current
+    // tile is relevant to the keyboard's ahead() lookup, not to a direct object hit-test.
+    if (o.type != cr::kTypeNormal || o.state != 1 || o.pk != 0) return;
     if (pz.esp == 0) { punish(app, t); return; } // no ESP left - only the mark
     pz.busy = true;
     o.pkMsg = 1;
@@ -21754,7 +21755,11 @@ void puzzleTouchDown(App& app) {
         app.puzzle.pkPointerCancelled = false;
         return;
     }
-    touch.hit = puzzle::click(app, touch.x, touch.y);
+    const bool clicked = puzzle::click(app, touch.x, touch.y);
+    touch.hit = clicked;
+    if (app.puzzle.stage >= 0 && app.puzzle.stage < cr::kPuzzleStages &&
+        cr::kPuzzleStage[size_t(app.puzzle.stage)].ability == cr::kAbilityPsychokinesis)
+        touch.hit = clicked && app.puzzle.pkState == 1 && app.puzzle.pkTarget >= 0;
 }
 
 void puzzleTouchUp(App& app) {
