@@ -353,3 +353,11 @@ The previous port ignored slots 3–11 and generated the second member's destina
 - [x] ○ снова передаёт штатный SDLK_RETURN: обычное действие/подтверждение, включая взаимодействие с кристаллом выхода при приближении.
 - [x] Управление виртуальным касанием остаётся отдельным: правый стик + R3; автоматическое приближение к доступным блокам не затрагивается.
 - [ ] Проверить в игре оба сценария: кристалл выхода и паззл с удалённым блоком.
+
+
+## R3 touch selection regression — PR #17
+
+- [x] Read SDL's physical joystick-button binding that maps to Gamepad RIGHT_STICK, with direct SDL joystick-button polling and event fallback.
+- [x] Give the virtual cursor a pressed/hit visual state so a touch miss is distinguishable from an unreceived R3 press.
+- [x] Replaced the empty-corner/button-only self-test with a real block test: project a visible psychokinesis block to screen coordinates, press the virtual joystick's mapped R3 input there, require puzzle::click to select that block, drag the pointer and release.
+- [ ] CI and in-game verification.

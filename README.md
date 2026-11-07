@@ -201,7 +201,7 @@ Steam Controller (through Steam Input).
 |---|---|---|---|
 | Left stick / D-pad | walk (the stick pushed far runs) | move the cursor (held, it repeats) | walk |
 | Right stick | - | - | move the touch pointer |
-| R3 (press right stick) | - | - | touch / release; drag while held for psychokinesis |
+| R3 (press right stick) | - | - | real touch-down / touch-up at the right-stick cursor; drag while held for psychokinesis |
 | ○ | - | - | normal action / confirm; activates the puzzle-room exit crystal when nearby |
 | □ | - | - | skip dialogue only |
 | ○ | examine / talk | confirm, turn the page | examine |

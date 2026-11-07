@@ -16301,7 +16301,8 @@ int inputCancelSelfTest(App& app) {
         std::printf("puzzle input cancel: block held %s, fresh release drops in place without ESP %s\n",
                     held ? "yes" : "NO", dropped ? "yes" : "NO");
 
-        // The right stick moves the virtual touch point; R3 down/up brackets the same swipe path.
+        // Aim at a real visible block, then use the virtual joystick's physical R3 binding.
+        // This verifies the entire path: R3 -> pointer tap -> puzzle::click -> pkGrab -> swipe release.
         SDL_VirtualJoystickDesc desc;
         SDL_INIT_INTERFACE(&desc);
         desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
@@ -16316,30 +16317,62 @@ int inputCancelSelfTest(App& app) {
             ++problems;
         } else {
             SDL_Gamepad* keepPad = app.pad;
+            const App::PuzzleTouch keepTouch = app.puzzleTouch;
             app.pad = pad;
             app.puzzleTouch = App::PuzzleTouch();
-            app.puzzleTouch.initialized = true;
-            app.puzzleTouch.stage = app.puzzle.stage;
-            app.puzzleTouch.x = 8.0f, app.puzzleTouch.y = 8.0f; // empty HUD corner: do not pick a block here
-            SDL_Event pe{};
-            SDL_SetJoystickVirtualButton(js, SDL_GAMEPAD_BUTTON_RIGHT_STICK, true);
-            SDL_UpdateJoysticks();
-            puzzleTouchStep(app, 0.0f); // real R3 polling path, no synthetic pkGrab
-            const bool pressed = app.puzzleTouch.pressed;
-            for (int i = 0; i < 4; ++i) stepEvents(app);
-            const float cursorFrom = app.puzzleTouch.x;
-            SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_RIGHTX, 32767);
-            SDL_UpdateJoysticks();
-            for (int i = 0; i < 5; ++i) puzzleTouchStep(app, 0.05f);
-            const bool moved = app.puzzleTouch.x > cursorFrom + 40.0f;
-            SDL_SetJoystickVirtualButton(js, SDL_GAMEPAD_BUTTON_RIGHT_STICK, false);
-            SDL_UpdateJoysticks();
-            puzzleTouchStep(app, 0.0f);
-            const bool released = !app.puzzleTouch.pressed && app.puzzle.pkState == 0;
-            problems += !pressed || !moved || !released;
-            std::printf("puzzle right-stick touch: R3 press %s, right-stick cursor movement %s, R3 release edge %s\n",
-                        pressed ? "yes" : "NO", moved ? "yes" : "NO", released ? "yes" : "NO");
-            app.puzzleTouch = App::PuzzleTouch();
+            puzzleTouchPrepare(app);
+            const auto& obj = app.puzzle.objs[size_t(target)];
+            const cr::FieldNpc& npc = app.npcs[size_t(obj.npc)];
+            float hx = 0, hy = 0;
+            bool projected = fieldViewPoint(app, {npc.pos[0], npc.pos[1] + 5.0f, npc.pos[2]}, hx, hy);
+            const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
+            float vx = 0, vy = 0, vw = 0, vh = 0;
+            if (scrollingField(app)) {
+                vw = fieldViewW(app), vh = fieldViewH(app);
+                vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
+            } else {
+                vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
+                vx = (SW - vw) / 2, vy = (H - vh) / 2;
+            }
+            const float logicalX = vx + hx * vw / fieldViewW(app);
+            const float logicalY = vy + hy * vh / fieldViewH(app);
+            float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            const float fw = float(app.renderer.frameWidth()), fh = float(app.renderer.frameHeight());
+            app.renderer.toLogical(0, 0, x0, y0);
+            app.renderer.toLogical(fw, fh, x1, y1);
+            projected = projected && x1 != x0 && y1 != y0;
+            app.puzzleTouch.x = projected ? (logicalX - x0) * fw / (x1 - x0) : 0;
+            app.puzzleTouch.y = projected ? (logicalY - y0) * fh / (y1 - y0) : 0;
+            const bool onScreen = projected && app.puzzleTouch.x >= 0 && app.puzzleTouch.x < fw &&
+                                  app.puzzleTouch.y >= 0 && app.puzzleTouch.y < fh;
+            puzzleTouchCacheBindings(app);
+            const int rawR3 = app.puzzleTouch.rawR3Buttons.empty() ? -1 : app.puzzleTouch.rawR3Buttons.front();
+            if (!onScreen || rawR3 < 0) {
+                std::printf("puzzle right-stick touch: target projection %s, SDL R3 binding %s\n",
+                            onScreen ? "yes" : "NO", rawR3 >= 0 ? "yes" : "NO");
+                ++problems;
+            } else {
+                SDL_SetJoystickVirtualButton(js, rawR3, true);
+                SDL_UpdateJoysticks();
+                puzzleTouchStep(app, 0.0f);
+                const bool pressed = app.puzzleTouch.pressed;
+                const bool selected = app.puzzleTouch.hit && app.puzzle.pkState == 1 && app.puzzle.pkTarget == target;
+                for (int i = 0; i < 4; ++i) stepEvents(app);
+                const float cursorFrom = app.puzzleTouch.x;
+                SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_RIGHTX, 32767);
+                SDL_UpdateJoysticks();
+                for (int i = 0; i < 5; ++i) puzzleTouchStep(app, 0.012f);
+                const bool moved = app.puzzleTouch.x > cursorFrom + 35.0f;
+                SDL_SetJoystickVirtualButton(js, rawR3, false);
+                SDL_UpdateJoysticks();
+                puzzleTouchStep(app, 0.0f);
+                const bool released = !app.puzzleTouch.pressed && app.puzzle.pkState == 2;
+                problems += !pressed || !selected || !moved || !released;
+                std::printf("puzzle right-stick touch: R3 press %s, pointer selected target block %s, drag %s, R3 release %s\n",
+                            pressed ? "yes" : "NO", selected ? "yes" : "NO", moved ? "yes" : "NO",
+                            released ? "yes" : "NO");
+            }
+            app.puzzleTouch = keepTouch;
             app.pad = keepPad;
             SDL_CloseGamepad(pad);
         }
