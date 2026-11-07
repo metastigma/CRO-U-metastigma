@@ -18817,10 +18817,15 @@ int runSelfTest(App& app) {
             app.runner.stop(); // (anything the walk set off)
             app.dialogue.clear();
             app.pendingEntry = App::Entry::None;
+            app.fieldMenu = App::FieldMenu();
+            app.padConfirmEast = false;
             padButton(app, SDL_GAMEPAD_BUTTON_SOUTH); // × on the field: nothing
             const bool fieldQuiet = !app.campOpen && app.havePlayer;
-            padButton(app, SDL_GAMEPAD_BUTTON_NORTH); // △: the Camp
-            const bool opened = app.campOpen;
+            padButton(app, SDL_GAMEPAD_BUTTON_NORTH); // △ opens the Map / Save / Camp bar
+            const bool opened = app.fieldMenu.open && !app.campOpen;
+            for (int f = 0; f < 4; ++f) stepFieldMenu(app); // finish the bar's slide
+            pressFieldButton(app, 0); // choose Camp from that bar
+            const bool campOpened = app.campOpen;
 
             const int c0 = app.camp.cursor;
             padButton(app, SDL_GAMEPAD_BUTTON_DPAD_UP);
@@ -18868,8 +18873,11 @@ int runSelfTest(App& app) {
             problems += !repeated || !repeatStopped || !repeatFresh;
             std::printf("controller: a held direction repeats %s, stops with the focus %s, and repeats again once let go %s\n",
                         repeated ? "yes" : "NO", repeatStopped ? "yes" : "NO", repeatFresh ? "yes" : "NO");
-            padButton(app, SDL_GAMEPAD_BUTTON_NORTH); // △ again: closed, from any page
-            const bool closed = !app.campOpen;
+            app.padConfirmEast = false;
+            padButton(app, SDL_GAMEPAD_BUTTON_EAST); // ○-cancel: leave Camp
+            const bool campClosed = !app.campOpen;
+            padButton(app, SDL_GAMEPAD_BUTTON_NORTH); // △ closes the top bar again
+            const bool closed = !app.campOpen && !app.fieldMenu.open;
             app.runner.stop();
             app.dialogue.clear();
             app.pendingEntry = App::Entry::None;
@@ -18889,10 +18897,11 @@ int runSelfTest(App& app) {
             app.pendingEntry = App::Entry::None;
             problems += !walkStopped;
             std::printf("controller: a stick held through a lost focus stops walking %s\n", walkStopped ? "yes" : "NO");
-            problems += !walked || !fieldQuiet || !opened || !moved || !confirmed || !backed || !swapped || !closed;
-            std::printf("controller: the stick walks %s, △ opens / closes the Camp %s / %s, the D-pad moves %s, ○ confirms %s, × back %s "
-                        "(on the field nothing %s), ×-confirm %s; %d problems\n", walked ? "yes" : "NO", opened ? "yes" : "NO",
-                        closed ? "yes" : "NO", moved ? "yes" : "NO", confirmed ? "yes" : "NO", backed ? "yes" : "NO",
+            problems += !walked || !fieldQuiet || !opened || !campOpened || !moved || !confirmed || !backed || !swapped || !campClosed || !closed;
+            std::printf("controller: the stick walks %s, △ opens / closes the field bar %s / %s, Camp via the bar %s / cancel %s, "
+                        "D-pad moves %s, ○ confirms %s, × back %s (on the field nothing %s), swapped confirm %s; %d problems\n",
+                        walked ? "yes" : "NO", opened ? "yes" : "NO", closed ? "yes" : "NO", campOpened ? "yes" : "NO",
+                        campClosed ? "yes" : "NO", moved ? "yes" : "NO", confirmed ? "yes" : "NO", backed ? "yes" : "NO",
                         fieldQuiet ? "yes" : "NO", swapped ? "yes" : "NO", problems);
             app.campOpen = false;
             app.pad = keepPad;
@@ -21309,9 +21318,8 @@ void padButton(App& app, int b) {
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN: if (padMenus(app)) padKey(app, SDLK_DOWN); return;
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT: if (padMenus(app)) padKey(app, SDLK_LEFT); return;
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: if (padMenus(app)) padKey(app, SDLK_RIGHT); return;
-    case SDL_GAMEPAD_BUTTON_NORTH: // △: the menu
-        if (app.campOpen) { app.campOpen = false; menuSound(app, se::kCampClose); }
-        else if (padField(app)) padKey(app, SDLK_K);
+    case SDL_GAMEPAD_BUTTON_NORTH: // △: the field's top bar (Map / Save / Camp)
+        if (padField(app)) padKey(app, SDLK_R);
         return;
     case SDL_GAMEPAD_BUTTON_WEST: // □: text skipped; in a puzzle room, the ability
         if (padField(app) && puzzle) padKey(app, SDLK_T);
