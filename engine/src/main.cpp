@@ -7224,14 +7224,6 @@ void drawFieldMenu(App& app) {
         fieldButtonPos(app, k, x, y);
         const float* src = k == 3 && fieldEncountersOff(app) ? kEncountersOff : kPiece[k];
         m.piece(x + 16, y + 32, src[0], src[1], kSize[k], kSize[k], a);
-        if (f.open && f.anim == 0 && f.selected == k && k < 3) {
-            const float edge[4] = {1.0f, 0.82f, 0.24f, a};
-            constexpr float b = 2.0f;
-            m.quad(x - b, y - b, kSize[k] + 2 * b, b, edge, edge);
-            m.quad(x - b, y + kSize[k], kSize[k] + 2 * b, b, edge, edge);
-            m.quad(x - b, y, b, kSize[k], edge, edge);
-            m.quad(x + kSize[k], y, b, kSize[k], edge, edge);
-        }
     }
     r.setOrigin(r.uiX());
 }
