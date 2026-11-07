@@ -12,12 +12,13 @@
 //    leader's level, or the pair's average when it's the route's own pair; ordinary monsters
 //    without a level pick one in the area's band (10b+1..10b+10, kept within L-5..L+2).
 //
-// Actions (sys.evt +0x2c, 24 bytes, 1-based): s16 +0, power +2, MP +4, speed +6, calc +8; u8 icon
-// +10, class +11 (the animation slot: 8-10 attacks, 11 genes, 12 items), scope +12 (1 self, 2/4/6
-// one of own side / opposite / anyone, 3/5/7 all of them), side +13 (1 self, 2 own, 3 opposite,
-// 4 any), pick +14 (the AI's target: 1 random, 2 lowest HP, 3 highest, 4 / 5 the first / second),
-// always hits +15, variance % +16, motion +17, element +18 (sets the user's), affinity +22 (the
-// element triangle applies).
+// Actions (sys.evt +0x2c, Omega's 38-byte records, 1-based): +0 is not used here; power +2, MP +4,
+// speed +6, calc +8; six voice s16s at +10..+21. The action fields from the 1.0.1 24-byte layout
+// follow those voices: icon +22, class +23 (animation slot: 8-10 attacks, 11 genes, 12 items),
+// scope +24, side +25, pick +26, always hits +27, variance % +28, motion +29, element +30,
+// sure gene +32, affinity +34, hostile +35, dodgeable +36. `motion == 1` and an opposing target permit approach; solo actors require the selected model's
+// Section 13 moveStart/moveEnd window. Only actor 1 of an attack with a second participant may use
+// the bounded legacy interval 0..max(1, hitFrame - 4) when its own window is absent.
 //  - 10..17 each character's attack (character + 10; monsters use them too), 18..21 the routes'
 //    pair attacks (route + 18), 26 defend, 100..126 battle items 21..47, 201.. genes.
 //
