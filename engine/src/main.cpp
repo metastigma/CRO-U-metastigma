@@ -16278,8 +16278,15 @@ int inputCancelSelfTest(App& app) {
     else {
         const auto& at = app.puzzle.objs[size_t(target)];
         const auto& layout = cr::kPuzzleStage[pkStage];
-        setActor(app, 0, puzzle::centre(app, at.row == 0 ? layout.rows - 1 : 0,
-                                       at.col == 0 ? layout.cols - 1 : 0), nullptr, false);
+        // Deliberately leave the player outside the puzzle grid. A virtual touch must
+        // acquire a visible remote block without requiring cellOf(player.position).
+        const cr::Vec3 outsideBoard{layout.x0 - cr::kPuzzleCell, layout.y,
+                                    layout.z0 - cr::kPuzzleCell};
+        setActor(app, 0, outsideBoard, nullptr, false);
+        int playerRow = -1, playerCol = -1;
+        const bool playerOnBoard = cellOf(app, app.walker.pos, playerRow, playerCol);
+        problems += playerOnBoard;
+        if (playerOnBoard) std::printf("puzzle remote touch: player unexpectedly inside board\\n");
         // Convert an object's projected field position to the renderer's frame pixels.
         // Both cancellation and the R3 gesture must begin with a real hit-test, not pkGrab().
         auto projectBlock = [&](int objectIndex, float& px, float& py) {
