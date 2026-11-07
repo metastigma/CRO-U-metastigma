@@ -21728,9 +21728,8 @@ void padButton(App& app, int b) {
         else if (app.fieldMenu.open && fieldMenuWanted(app)) padKey(app, SDLK_R);
         else if (padField(app)) padKey(app, SDLK_R);
         return;
-    case SDL_GAMEPAD_BUTTON_EAST: // ○: Japanese-layout action button for puzzle abilities
-        if (padField(app) && puzzle) padKey(app, SDLK_T);
-        else if (confirm) padKey(app, SDLK_RETURN);
+    case SDL_GAMEPAD_BUTTON_EAST: // ○: the normal Japanese-layout action / confirm button, including the puzzle exit crystal
+        if (confirm) padKey(app, SDLK_RETURN);
         else if (cancel && (padMenus(app) || app.mapScreen.open || app.staffRoll.open)) padKey(app, SDLK_ESCAPE);
         return;
     case SDL_GAMEPAD_BUTTON_WEST: // □: skip text only; never trigger a puzzle ability
