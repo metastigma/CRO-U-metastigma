@@ -256,6 +256,7 @@ struct App {
     bool phoneData = false;                // the data is a voiced iPhone release's (voiceevnt.bin, no _ipad art)
     std::string hdDir;                     // HD textures: textures/hd/ in the game folder, or CR_HD_TEXTURES
     int hdLoaded = 0, hdMissing = 0;       // replacements found / not found since startup
+    std::set<std::string> hdRefused;       // invalid replacement files: log once
     std::string modelsDir;                 // replacement models: models/hd/ in the game folder, or CR_HD_MODELS
     int hdModelsLoaded = 0;                // since startup
     int language = 1;                      // text language (cr::kLanguageName): English by default
@@ -1062,7 +1063,9 @@ void applyHd(App& app, cr::Image& img) {
     if (!app.video.hdTextures || app.hdDir.empty() || img.width <= 0) return;
     if (const char* only = SDL_getenv("CR_HD_ONLY"); only && cr::hashName(cr::imageHash(img)) != only) return; // (debugging: one replacement alone)
     cr::Image hd;
-    if (!cr::loadHdImage(app.hdDir, img, hd)) {
+    std::string why;
+    if (!cr::loadHdImage(app.hdDir, img, hd, &why)) {
+        if (!why.empty() && app.hdRefused.insert(why).second) SDL_Log("hd textures: %s - left out", why.c_str());
         ++app.hdMissing;
         return;
     }
@@ -1421,6 +1424,30 @@ void unloadModel(App& app) {
     unloadLoaded(app, app.model);
 }
 
+// The original _btlanmtbl says which built-in animation slots belong to this model package.
+// A package-owned clip remains valid when it has fewer transform segments than the skeleton:
+// nodes without a track stay in their rest pose, as computeLocalPoses already supports.
+int builtInPackageSlot(const std::string& actionName) {
+    constexpr char prefix[] = "built-in ";
+    if (actionName.rfind(prefix, 0) != 0) return -1;
+    size_t at = sizeof(prefix) - 1;
+    int number = 0;
+    bool digit = false;
+    while (at < actionName.size() && actionName[at] >= '0' && actionName[at] <= '9') {
+        digit = true;
+        number = number * 10 + (actionName[at] - '0');
+        ++at;
+    }
+    if (!digit || at >= actionName.size() || actionName[at] != '.' || number <= 0) return -1;
+    return number - 1; // package animation number 9 is BattleAnim slot 8
+}
+
+int battleModelIndexForPackage(const std::string& name) {
+    for (int i = 0; i < cr::kNumBattleModels; ++i)
+        if (name == cr::kBattleModelFile[i]) return i;
+    return -1;
+}
+
 // Loads a model package (and its fitting animations) into `out`.
 void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool character) {
     std::vector<uint8_t> data;
@@ -1488,12 +1515,19 @@ void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool cha
     // the scenes' effect props (ee*, fe*): keep every package action for them, as effects do
     for (const auto& mat : m.materials)
         if (int32_t(mat.refGid) >= 0) { out.packageActions = m.actions; break; }
-    // Animations: those stored in the package plus standalone <name>e*.mca files,
-    // keeping only actions that animate this skeleton (one segment per node)
-    // (or, for each list's motion - its first action, "N.1" - one a few segments off)
+    // The model's _btlanmtbl is authoritative for built-in battle clips. Do not discard a
+    // package-owned slot just because its action has more than six fewer segments than the
+    // skeleton: original Omega still plays that slot, leaving nodes without tracks at rest.
+    const int battleModel = battleModelIndexForPackage(name);
     for (auto& a : m.actions) {
         const bool motion = a.name.size() > 2 && a.name.compare(a.name.size() - 2, 2, ".1") == 0;
-        const bool fits = cr::actionFits(m.skeleton, a) || (motion && cr::actionNearlyFits(m.skeleton, a));
+        const int packageSlot = builtInPackageSlot(a.name);
+        const bool mappedBattleClip = battleModel >= 0 && packageSlot >= 0 && packageSlot < 15 &&
+                                      cr::kBattleAnimTable[battleModel][packageSlot] != 0;
+        const bool partialBattleClip = mappedBattleClip && !a.segments.empty() &&
+                                       a.segments.size() <= m.skeleton.nodes.size();
+        const bool fits = cr::actionFits(m.skeleton, a) || (motion && cr::actionNearlyFits(m.skeleton, a)) ||
+                          partialBattleClip;
         if (SDL_getenv("CR_FIT_DEBUG") && !cr::actionFits(m.skeleton, a)) {
             float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
             if (fits) { // its pose halfway through: the bounds stay the model's size when the nodes line up
@@ -12830,31 +12864,68 @@ void startTurn(App& app) {
         if (it != app.game.items.end() && --it->second <= 0) app.game.items.erase(it);
     }
     const int target = !t.barriers.empty() ? t.barriers[0] : t.hits.empty() ? -1 : t.hits[0].target; // (reflected: at the barrier)
-    const bool melee = a && a->motion == 1 && target >= 0 && (target < 2) != (t.actors[0] < 2);
+    // Omega's 38-byte action record: six voice s16s occupy +10..+21, so motion is byte +29
+    // (the legacy 24-byte layout's +17). Section 13 supplies only the model-specific frame window.
+    const bool opposingTarget = target >= 0 && (target < 2) != (t.actors[0] < 2);
     for (int k = 0; k < 2; ++k) {
         App::Battle::Actor* u = t.actors[k] >= 0 ? battleActor(app, t.actors[k]) : nullptr;
         if (!u) continue;
         int slot = a && a->cls >= 8 && a->cls < cr::kBattleAnimSlots ? a->cls : 8;
-        if (t.kind == cr::kCmdAttack && t.actors[1] >= 0 && k == 1) slot = 9; // the pair attack's second
+        bool inPlace = false;
+        if (t.kind == cr::kCmdAttack) {
+            const int fighter = t.actors[k];
+            const int character = fighter >= 0 && fighter < 5 ? b.rules.f[size_t(fighter)].character : -1;
+            const LoadedModel& lm = b.models[u->model];
+            const int nine = battleAction(lm, 9);
+            const bool hasLongSlot9 = nine >= 0 && lm.actions[size_t(nine)].duration - 1 > 3;
+            const cr::BattleAttackMotion motion = cr::battleAttackMotion(
+                fighter, u->modelId, character, a ? a->cls : 0,
+                b.rules.pair || b.rules.enemyPair, hasLongSlot9, k == 1);
+            slot = motion.slot;
+            inPlace = motion.inPlace;
+            slot = battleAttackSlot(lm, u->modelId, slot);
+        }
         if (target >= 0) faceFighter(app, *u, target);
-        playSlot(app, *u, slot, melee ? btlui::kSlotReturn : btlui::kSlotIdle);
-        const cr::BattleAnim an = app.battleData.anim(u->modelId, u->slot);
+        const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
+        const bool pairedSecondary = cr::battleApproachPairedSecondary(
+            t.kind == cr::kCmdAttack, t.actors[1] >= 0, k);
+        const bool actionHasReturn = cr::battleShouldPlayReturn(a ? a->motion : 0, opposingTarget);
+        const bool approach = cr::battleApproachEnabled(
+            a ? a->motion : 0, opposingTarget, an, pairedSecondary, inPlace || u->modelId == 0x20);
+        const bool playReturn = actionHasReturn && (approach || u->modelId == 0x20);
+        playSlot(app, *u, slot, playReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
-        // m225.bin (battle model 0x20) uses an in-place blow: it plays the attack animation
-        // and its dedicated sound, but must not use the generic melee approach/return movement.
-        if (melee && u->modelId != 0x20) { // btlmove_setpos: up to the target, a step short of it
+        if (approach) { // btlmove_setpos: the formation defines the exact approach point per target
             const App::Battle::Actor* tv = battleActor(app, target);
             if (tv) {
-                const LoadedModel &lu = b.models[u->model], &lt = b.models[tv->model];
-                cr::Vec3 d = u->home - tv->home;
-                const float len = std::max(1.0f, std::sqrt(d.x * d.x + d.z * d.z));
-                const float reach = 0.6f * (lu.radius * u->scale + lt.radius * tv->scale) + (k ? 18.0f : 0.0f);
                 u->from = u->pos;
-                u->to = tv->home + cr::Vec3{d.x / len * reach, 0, d.z / len * reach};
-                if (k == 1) u->to = u->to + cr::Vec3{d.z / len * 18, 0, -d.x / len * 18}; // beside the first
-                u->moveFrom = an.moveEnd > an.moveStart ? an.moveStart : 0;
-                u->moveTo = an.moveEnd > an.moveStart ? an.moveEnd : std::max(1, b.hitFrame - 4);
+                bool usedFormationPosition = false;
+                const int fighter = t.actors[k];
+                if (t.kind == cr::kCmdAttack && fighter >= 0 && fighter < 2 && target >= 2 && target < 5 &&
+                    b.formation >= 0 && b.formation < cr::kNumFormations) {
+                    const int positionSlot = cr::battleApproachPositionSlot(target, fighter, b.rules.pair);
+                    if (positionSlot >= 0) {
+                        const short* position = cr::kBattlePosition[b.formation][positionSlot];
+                        if (position[0] != 0 || position[1] != 0) {
+                            // A pair has two table positions per enemy. Use the fighter id,
+                            // not loop index k: a surviving second member can be t.actors[0].
+                            u->to = {float(position[0]), tv->home.y, float(position[1])};
+                            usedFormationPosition = true;
+                        }
+                    }
+                }
+                if (!usedFormationPosition) {
+                    // Keep the existing fallback for enemy attacks and non-formation targets.
+                    const LoadedModel &lu = b.models[u->model], &lt = b.models[tv->model];
+                    cr::Vec3 d = u->home - tv->home;
+                    const float len = std::max(1.0f, std::sqrt(d.x * d.x + d.z * d.z));
+                    const float reach = 0.6f * (lu.radius * u->scale + lt.radius * tv->scale) + (k ? 18.0f : 0.0f);
+                    u->to = tv->home + cr::Vec3{d.x / len * reach, 0, d.z / len * reach};
+                    if (k == 1) u->to = u->to + cr::Vec3{d.z / len * 18, 0, -d.x / len * 18};
+                }
+                u->moveFrom = cr::battleApproachMoveStart(an);
+                u->moveTo = cr::battleApproachMoveEnd(an, pairedSecondary, b.hitFrame);
             }
         }
     }
@@ -13388,10 +13459,15 @@ void stepBattle(App& app) {
                 playSlot(app, a, next, back ? btlui::kSlotIdle : -1);
                 if (back) { // and walks back to its place meanwhile
                     const cr::BattleAnim ra = app.battleData.anim(a.modelId, btlui::kSlotReturn);
-                    a.from = a.pos;
-                    a.to = a.home;
-                    a.moveFrom = ra.moveEnd > ra.moveStart ? ra.moveStart : 0;
-                    a.moveTo = ra.moveEnd > ra.moveStart ? ra.moveEnd : std::max(1, int(actorDuration(app, a)));
+                    if (ra.hasMoveWindow()) {
+                        a.from = a.pos;
+                        a.to = a.home;
+                        a.moveFrom = ra.moveStart;
+                        a.moveTo = ra.moveEnd;
+                    } else {
+                        // No return window: do not synthesize one from the action duration.
+                        a.moveFrom = a.moveTo = 0;
+                    }
                 } else if (next == btlui::kSlotIdle) {
                     a.pos = a.home;
                     a.yaw = a.homeYaw;
@@ -19862,7 +19938,7 @@ int runExplore(App& app, int maxActions, int scenario) {
 // --capture <map.cmp> <out.bmp>: renders that map's composite (background + collision through
 // the stage camera, no HUD) and saves the frame — for checking alignment without a person.
 // --export-textures [dir] (without one, textures/export/ in the game folder): every distinct picture
-// the game draws (its .mct files and the textures inside model packages) as <hash>.crraw, for tools/hd_textures.py to upscale into <hash>.crhd.
+// the game draws (its .mct files and the textures inside model packages) as upright <hash>.png, for editors/upscalers to save as <hash>.png or <hash>.dds in textures/hd/
 // With --vita, the Vita's lossless version of each picture it has alike (same size, alpha kept, the
 // same picture: within 12/255 a channel on average - not the art it redrew) is exported instead,
 // and <ios hash>.cralias (the Vita's hash, 16 hex digits) lets the one upscale serve the iOS
@@ -19934,9 +20010,9 @@ int runExportTextures(App& app, const char* dirArg) {
             ++dupes;
             return h;
         }
-        const std::string path = dir + cr::hashName(h) + ".crraw";
+        const std::string path = dir + cr::hashName(h) + ".png";
         if (SDL_GetPathInfo(path.c_str(), nullptr)) return h; // already exported
-        if (cr::saveRawImage(path, img)) ++written;
+        if (cr::savePngImage(path, img)) ++written;
         else ++failed;
         return h;
     };

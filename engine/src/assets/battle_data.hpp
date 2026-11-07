@@ -59,7 +59,61 @@ struct EncounterTable {
 // actor moves, when hits land.
 struct BattleAnim {
     int loopStart = 0, loopEnd = 0, moveStart = 0, moveEnd = 0, hit = 0, hit2 = 0;
+    bool hasMoveWindow() const { return moveEnd > moveStart; }
 };
+// The action's motion flag is stored separately from this model-specific animation row.
+// Both conditions are required: a timing window alone must not make an action approach.
+// Only the second participant in a two-actor attack gets the bounded legacy fallback.
+inline bool battleApproachPairedSecondary(bool attack, bool hasSecondActor, int actorIndex) {
+    return attack && hasSecondActor && actorIndex == 1;
+}
+// A melee action with an opposing target still plays its return clip after the attack.
+// Approach translation is a separate decision: M225 (PR #5) must stay at its home position.
+inline bool battleShouldPlayReturn(int motion, bool opposingTarget) {
+    return motion == 1 && opposingTarget;
+}
+inline bool battleApproachEnabled(int motion, bool opposingTarget, const BattleAnim& animation,
+                                  bool pairedSecondary = false, bool inPlaceModel = false) {
+    return battleShouldPlayReturn(motion, opposingTarget) && !inPlaceModel &&
+           (animation.hasMoveWindow() || pairedSecondary);
+}
+inline int battleApproachMoveStart(const BattleAnim& animation) {
+    return animation.hasMoveWindow() ? animation.moveStart : 0;
+}
+inline int battleApproachMoveEnd(const BattleAnim& animation, bool pairedSecondary, int hitFrame) {
+    if (animation.hasMoveWindow()) return animation.moveEnd;
+    return pairedSecondary ? std::max(1, hitFrame - 4) : 0;
+}
+// read_btlcpl / btlact_attack_init: formation approach points are target-specific.
+// Slots 3..5 are the solo approach points for enemy fighters 2..4; in pair mode
+// slots 6..11 are two adjacent points per enemy (fighter 0/1). Do not synthesize a
+// perpendicular offset: it can send the second member toward a different enemy.
+inline int battleApproachPositionSlot(int targetFighter, int partyFighter, bool pair) {
+    if (targetFighter < 2 || targetFighter > 4) return -1;
+    const int enemySlot = targetFighter - 2;
+    if (!pair) return 3 + enemySlot;
+    if (partyFighter < 0 || partyFighter > 1) return -1;
+    return 6 + enemySlot * 2 + partyFighter;
+}
+// Omega's btlact_attack_init chooses a different package slot for each participant.
+// The primary may use its long slot 9 or special slot 10; the second normally uses slot 8.
+// Some model families use slot 13 instead. inPlace suppresses approach translation, not the clip.
+struct BattleAttackMotion { int slot = 8; bool inPlace = false; };
+inline BattleAttackMotion battleAttackMotion(int fighter, int model, int character, int cls,
+                                             bool pair, bool hasLongSlot9, bool secondary) {
+    if (secondary) {
+        const bool inPlace = fighter < 2 ? model == 7 : model >= 0xa0 && model <= 0xa2;
+        return {inPlace ? 13 : 8, inPlace};
+    }
+    if (hasLongSlot9) return {9, true};
+    const bool slot10 = fighter < 2
+                            ? character == 0x21 || cls == 10
+                            : (model >= 0xa0 && model <= 0xa2) ||
+                                  ((cls == 10 || model == 0x4f) && model >= 0x4c && model <= 0x4f);
+    if (slot10) return {10, true};
+    return {model >= 0x9d && model <= 0x9f && pair ? 13 : 8, false};
+}
+
 constexpr int kBattleAnimSlots = 16; // 13 for most models, up to 15 for the bosses
 
 // A battle camera (sys.evt section 15, 32 bytes; btlcamera_set): eye and target in stage units

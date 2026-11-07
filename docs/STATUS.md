@@ -257,3 +257,58 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
 - [ ] Сборка Windows/Linux/Android и проверка реального старта игры.
 - [ ] Проверка на данных Vita и iOS; текущая реализация использует размеры загруженного листа, не фиксированные 960×640.
 - Источник: DuIslingr/CRO-U commit 869e2fe50aa9cc96e7ee2dac42ca6c4608d8351e.
+
+## Battle animation follow-up — PR #7 (2026-11-06)
+
+- [x] Restore approach movement for the second participant of a two-actor attack when its model's Section 13 row has no movement window.
+- [x] Prefer the participant's own valid Section 13 window whenever present.
+- [x] Restrict the fallback to actor index 1 when the action is an attack and `actors[1]` is present; its interval is `0..max(1, primary hitFrame - 4)`.
+- [x] Keep `motion == 1` and an opposing target mandatory for both the normal and fallback paths.
+- [x] Preserve merged PR #5's verified M225 (`modelId == 0x20`) in-place attack: no approach translation, including through paired-secondary fallback; retain its original post-hit return-clip selection.
+- [x] Keep solo attacks without a valid Section 13 window stationary; return movement remains tied to the return animation's own window.
+- [x] Add unit coverage for pair-secondary eligibility, motion/target gating, valid-window precedence, missing/invalid windows, bounded fallback and M225's in-place attack.
+- [ ] Build and run CTest / `battle-animation-tests` in CI.
+- [ ] In-game check: execute a paired attack and confirm both actors approach, attack from adjacent positions and return; confirm a solo attack without a movement window remains in place.
+
+The regression came from removing the legacy bounded interval globally in PR #7. The bounded fallback is restricted to the second actor; merged PR #5's M225 in-place exception is explicitly retained.
+
+
+## Внешние PNG / DDS-текстуры — 06.11.2026
+
+- [x] Перенесён PNG-экспорт и чтение PNG из DuIslingr/CRO-U (015dbb1).
+- [x] Сохранена совместимость с .crraw и .crhd.
+- [x] Добавлена загрузка замен textures/hd/<hash>.dds.
+- [x] DDS: DXT1/BC1, DXT3/BC2, DXT5/BC3, BC4/5 UNORM; DX10 BC1–BC5 UNORM. Только верхний mip одной 2D-текстуры.
+- [x] Добавлен синтетический DXT1 тест.
+- [ ] Windows build и CTest.
+- [x] PNG и DDS замены проверены пользователем в игре; импорт подтверждён.
+
+DDS BC6H/BC7, signed BC4/5, arrays, cubemaps и volume textures пока не поддерживаются.
+
+
+## Парная атака — исправление по оригинальному iOS-бинарнику Omega (PR #7)
+
+- [x] Отклонена предыдущая гипотеза, перенесённая с upstream DuIslingr/CRO-U: она не является эталоном поведения игры.
+- [x] В iOS Mach-O подтверждён выбор слота 8 для обычного второго участника; специальная ветка модели 7 выбирает слот 13.
+- [x] В оригинальной таблице `_btlanmtbl` у обычных моделей пары (battle model 8–11) слот 8 отмечен как собственный клип пакета.
+- [x] Исправлен загрузчик: назначенный таблицей клип не отбрасывается только из-за неполного числа сегментов скелета; узлы без треков остаются в rest pose.
+- [x] Добавлен тест частичной анимации скелета.
+- [ ] CI и проверка в игре: оба участника парной атаки должны реально проигрывать свои клипы.
+- Vita SELF присутствует в архиве, но его исполняемые сегменты в этой сессии не были расшифрованы; вывод о выборе слота основан на iOS Mach-O и общей таблице ресурсов Omega.
+
+
+
+## Formation-targeted approach for solo and paired attacks — PR #7 (2026-11-07)
+
+- [x] Confirmed in the original Omega iOS ARMv7 binary: the formation-position table is at `0xBFF28`.
+- [x] Disassembly of the original attack initializer confirms the exact indexing: solo path at `0x19A80` reads byte offset `0x0C + enemySlot*4` (slots 3–5); pair path at `0x19A26` reads `0x18 + enemySlot*8` (slots 6, 8, 10); second-member path at `0x19E26` reads `0x1C + enemySlot*8` (slots 7, 9, 11).
+- [x] Target indexing is the selected enemy fighter ID minus 2; each of the three enemies has a separate solo point and two pair points.
+- [x] Replaced the synthetic `target home + normalized vector + perpendicular offset` for party attacks with the exact formation point selected by enemy fighter ID (2–4) and party fighter ID (0/1).
+- [x] In pair mode the second member now uses the adjacent table point for the same selected enemy; the fighter ID is used rather than loop index, including when only the second member remains in the first actor slot.
+- [x] Preserved the existing generic fallback for enemy-side attacks/non-formation targets, Section 13 movement timing, and the merged M225 in-place exception.
+- [x] Added tests for all three enemy target positions in solo mode and both party positions in pair mode.
+- [ ] CI and in-game verification with formations containing one, two and three enemies.
+
+The previous port ignored slots 3–11 and generated the second member's destination from a perpendicular vector. That did not follow Omega's per-enemy formation layout and could send the second attacker toward the neighbouring target.
+
+- [x] The battle-animation test target links the real `stage_tables.cpp`; tests now validate all target/member positions for three-enemy formations 6, 9 and 13, including the exact six pair points in formation 6 (222).
