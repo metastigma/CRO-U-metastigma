@@ -1607,6 +1607,8 @@ void bootTitle(App& app);
 void padButton(App& app, int b);
 void padStep(App& app, float dt);
 void puzzleTouchStep(App& app, float dt); // used by the controller gesture regression below
+void puzzleTouchPrepare(App& app); // called by the puzzle input self-test before its definition
+void puzzleTouchCacheBindings(App& app); // called by the puzzle input self-test before its definition
 bool padLive(App& app);
 bool padMenus(const App& app);
 bool padField(const App& app);
