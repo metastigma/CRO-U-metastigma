@@ -3075,7 +3075,16 @@ struct ViewerHost : cr::EventHost {
         if (m.level > before) cr::levelUpBoosts(app.game, c, m.level - before);
     }
     void treasureBoxesShown(bool on) override { app.treasureBoxesHidden = !on, buildNpcDraws(app); }
-    void saveEvent() override { cr::writeSave(slotPath(app, currentPair(app)), captureSave(app)); } // SaveData_Save
+    void saveEvent() override { // SaveData_Save
+        std::string error;
+        if (!cr::sanitizeSaveState(app.game, &error)) {
+            if (SDL_getenv("CR_SAVE_DEBUG")) SDL_Log("SaveData_Save skipped: %s", error.c_str());
+            return;
+        }
+        const cr::SaveData save = captureSave(app);
+        if (!cr::writeSave(slotPath(app, currentPair(app)), save, &error) && SDL_getenv("CR_SAVE_DEBUG"))
+            SDL_Log("SaveData_Save failed: %s", error.c_str());
+    }
     bool inBattle() override { return app.battle.active; }
     void changeBattleStage(int stage) override { // Uty_Chg_BtlFld: the stage model swapped mid-battle
         if (!app.battle.active || stage < 0 || stage >= cr::kNumBattleStages) return;
@@ -4684,7 +4693,10 @@ void openSaveScreen(App& app, bool load) {
     ss.open = true;
     ss.load = load;
     if (load) cr::changeScenario(app.game, app.itemTable, app.chosenPair - 1); // SaveLoadSet: __prty_chg(var 0 - 1)
-    ss.haveSave = cr::readSave(slotPath(app, load ? app.chosenPair : currentPair(app)), ss.data);
+    std::string readError;
+    ss.haveSave = cr::readSave(slotPath(app, load ? app.chosenPair : currentPair(app)), ss.data, &readError);
+    if (!ss.haveSave && readError != "no save" && SDL_getenv("CR_SAVE_DEBUG"))
+        SDL_Log("save menu: previous save ignored: %s", readError.c_str());
     if (load) { // __menuu_SaveLoadSet, the title's (Omega): the scenario's load flag (_gkanLoadFlgTbl:
         // 31 / 32, its story cleared) makes New ask about the clear data; no emblems, and the first
         // plate (CR1's last battle) is never shown
@@ -4706,15 +4718,28 @@ void closeSaveScreen(App& app) { app.saveScreen.open = false; }
 void saveScreenYes(App& app) {
     App::SaveScreen& ss = app.saveScreen;
     if (ss.pending == 1) {
-        const cr::SaveData s = captureSave(app);
-        if (cr::writeSave(slotPath(app, currentPair(app)), s)) {
-            ss.data = s;
-            ss.haveSave = true;
-            ss.message = 57082; // Save complete.
-            menuSound(app, se::kSaved);
-        } else {
-            ss.message = -1; // couldn't write
+        std::string error;
+        if (!cr::sanitizeSaveState(app.game, &error)) {
+            if (SDL_getenv("CR_SAVE_DEBUG")) SDL_Log("save menu: state rejected before snapshot: %s", error.c_str());
+            ss.message = -1;
             menuSound(app, se::kBuzzer);
+        } else {
+            if (SDL_getenv("CR_SAVE_DEBUG"))
+                SDL_Log("save menu: snapshot begin (vars=%zu items=%zu other=%zu boxes=%zu)",
+                        app.game.vars.size(), app.game.items.size(), app.game.otherBag.size(), app.game.openedBoxes.size());
+            const cr::SaveData s = captureSave(app);
+            if (SDL_getenv("CR_SAVE_DEBUG")) SDL_Log("save menu: snapshot ready; file write begins");
+            if (cr::writeSave(slotPath(app, currentPair(app)), s, &error)) {
+                ss.data = s;
+                ss.haveSave = true;
+                ss.message = 57082; // Save complete.
+                menuSound(app, se::kSaved);
+                if (SDL_getenv("CR_SAVE_DEBUG")) SDL_Log("save menu: write complete");
+            } else {
+                if (SDL_getenv("CR_SAVE_DEBUG")) SDL_Log("save menu: write failed: %s", error.c_str());
+                ss.message = -1; // couldn't write
+                menuSound(app, se::kBuzzer);
+            }
         }
     } else if (ss.pending == 2) {
         const cr::SaveData s = ss.data;
@@ -7938,7 +7963,14 @@ bool trackerField(const App& app) { // (G+0x388 bit 6 set, bit 3 clear: on the f
 }
 void writeResume(App& app) {
     if (!app.persist || !trackerField(app)) return;
-    cr::writeSave(savePath(app, "resume.dat"), captureSave(app));
+    std::string error;
+    if (!cr::sanitizeSaveState(app.game, &error)) {
+        if (SDL_getenv("CR_SAVE_DEBUG")) SDL_Log("resume save skipped: %s", error.c_str());
+        return;
+    }
+    const cr::SaveData save = captureSave(app);
+    if (!cr::writeSave(savePath(app, "resume.dat"), save, &error) && SDL_getenv("CR_SAVE_DEBUG"))
+        SDL_Log("resume save failed: %s", error.c_str());
 }
 // The Vita's (FORMATS "The Vita's code"): saved as you go, not only when the game is left - every
 // script's end on the field (__EvtReturn / __EvtAbort: _ContData_Save_set_fld, then the save
@@ -16495,6 +16527,40 @@ int sessionUiSelfTest(App& app) {
     save.game.oz = 54321;
     const std::string path = slotPath(app, 1);
     check(cr::writeSave(path, save), "synthetic save created");
+    { // Repeated chest callbacks are idempotent; pathological state and files are bounded.
+        std::vector<uint8_t> originalBytes;
+        cr::readFile(path, originalBytes);
+        const std::string originalText(originalBytes.begin(), originalBytes.end());
+        cr::GameState normalised;
+        std::string why;
+        normalised.openedBoxes.assign(5000, 2001);
+        check(cr::sanitizeSaveState(normalised, &why) && normalised.openedBoxes.size() == 1,
+              "opened-box markers are de-duplicated before snapshotting");
+        std::string duplicateFile = originalText;
+        const size_t boxesAt = duplicateFile.find("\nboxes");
+        const size_t boxesEnd = duplicateFile.find('\n', boxesAt + 1);
+        duplicateFile.replace(boxesAt, boxesEnd - boxesAt, "\nboxes 2001 2001 2001");
+        SDL_SaveFile(path.c_str(), duplicateFile.data(), duplicateFile.size());
+        cr::SaveData got;
+        check(cr::readSave(path, got) && got.game.openedBoxes.size() == 1,
+              "duplicate opened-box markers in an old save are normalised");
+        cr::SaveData repeated = save;
+        repeated.game.openedBoxes.assign(5000, 2001);
+        check(cr::writeSave(path, repeated, &why) && cr::readSave(path, got) &&
+              got.game.openedBoxes.size() == 1 && got.game.openedBoxes[0] == 2001,
+              "duplicate opened-box records collapse to one on write");
+        check(cr::writeSave(path, save, &why), "original test save restored");
+        cr::SaveData oversizedState = save;
+        for (int i = 0; i < 4097; ++i) oversizedState.game.vars[i] = i;
+        check(!cr::writeSave(path, oversizedState, &why) && !why.empty() &&
+              cr::readSave(path, got) && got.game.oz == 54321,
+              "oversized state is rejected without replacing the previous save");
+        const std::string tooLarge(1024 * 1024 + 1, 'x');
+        SDL_SaveFile(path.c_str(), tooLarge.data(), tooLarge.size());
+        check(!cr::readSave(path, got, &why) && why == "save too large",
+              "oversized save file is rejected before parsing");
+        SDL_SaveFile(path.c_str(), originalText.data(), originalText.size());
+    }
     { // a save cut short is refused, here and in the Vita import's order (the party last, no boxes)
         std::vector<uint8_t> whole;
         cr::readFile(path, whole);

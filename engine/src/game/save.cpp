@@ -10,12 +10,55 @@
 #include <cstring>
 #include <map>
 #include <sstream>
+#include <vector>
 
 #include "game/genes.hpp"
 
 namespace cr {
 
-bool writeSave(const std::string& path, const SaveData& s) {
+namespace {
+constexpr size_t kMaxSaveFileBytes = 1024 * 1024;
+constexpr size_t kMaxSaveMapEntries = 4096;
+constexpr size_t kMaxRawOpenedBoxes = 65536;
+constexpr size_t kMaxUniqueOpenedBoxes = 4096;
+constexpr size_t kMaxScenarioTreasure = 15;
+
+bool saveCountsValid(const GameState& g, std::string* error) {
+    auto fail = [&](const char* why) {
+        if (error) *error = why;
+        return false;
+    };
+    if (g.vars.size() > kMaxSaveMapEntries) return fail("too many event variables");
+    if (g.items.size() > kMaxSaveMapEntries) return fail("too many inventory entries");
+    if (g.otherBag.size() > kMaxSaveMapEntries) return fail("too many secondary inventory entries");
+    if (g.openedBoxes.size() > kMaxRawOpenedBoxes) return fail("too many opened-box records");
+    for (const auto& boxes : g.treasure)
+        if (boxes.size() > kMaxScenarioTreasure) return fail("too many scenario treasure records");
+    return true;
+}
+} // namespace
+
+bool sanitizeSaveState(GameState& game, std::string* error) {
+    if (!saveCountsValid(game, error)) return false;
+    std::sort(game.openedBoxes.begin(), game.openedBoxes.end());
+    game.openedBoxes.erase(std::unique(game.openedBoxes.begin(), game.openedBoxes.end()), game.openedBoxes.end());
+    if (game.openedBoxes.size() > kMaxUniqueOpenedBoxes) {
+        if (error) *error = "too many unique opened boxes";
+        return false;
+    }
+    if (error) error->clear();
+    return true;
+}
+
+bool writeSave(const std::string& path, const SaveData& s, std::string* error) {
+    if (!saveCountsValid(s.game, error)) return false;
+    std::vector<int> boxes = s.game.openedBoxes;
+    std::sort(boxes.begin(), boxes.end());
+    boxes.erase(std::unique(boxes.begin(), boxes.end()), boxes.end());
+    if (boxes.size() > kMaxUniqueOpenedBoxes) {
+        if (error) *error = "too many unique opened boxes";
+        return false;
+    }
     std::ostringstream o;
     o.precision(9);
     o << "CRSAVE 1\n";
@@ -55,14 +98,18 @@ bool writeSave(const std::string& path, const SaveData& s) {
     o << "\nwalkexp";
     for (int e : s.game.walkExp) o << ' ' << e;
     o << "\nboxes";
-    for (int b : s.game.openedBoxes) o << ' ' << b;
+    for (int b : boxes) o << ' ' << b;
     for (int sc = 0; sc < kScenarios; ++sc) {
         o << "\ntreasure " << sc;
         for (const auto& e : s.game.treasure[size_t(sc)]) o << ' ' << e[0] << ' ' << e[1];
     }
     o << '\n';
     const std::string text = o.str();
-    return crstorage::replaceFile(path, text);
+    if (text.size() > kMaxSaveFileBytes) {
+        if (error) *error = "save would exceed the size limit";
+        return false;
+    }
+    return crstorage::replaceFile(path, text, error);
 }
 
 bool readSave(const std::string& path, SaveData& s, std::string* error) {
@@ -70,9 +117,16 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
         if (error) *error = why;
         return false;
     };
+    SDL_PathInfo info{};
+    if (!SDL_GetPathInfo(path.c_str(), &info) || info.type != SDL_PATHTYPE_FILE) return fail("no save");
+    if (info.size > kMaxSaveFileBytes) return fail("save too large");
     size_t size = 0;
     char* data = static_cast<char*>(SDL_LoadFile(path.c_str(), &size));
     if (!data) return fail("no save");
+    if (size > kMaxSaveFileBytes) {
+        SDL_free(data);
+        return fail("save too large");
+    }
     const bool lastLineWhole = size > 0 && data[size - 1] == '\n';
     std::istringstream in(std::string(data, size));
     SDL_free(data);
@@ -148,9 +202,16 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
                 const size_t eq = kv.find('=');
                 if (eq == std::string::npos) continue;
                 const int k = std::atoi(kv.c_str()), v = std::atoi(kv.c_str() + eq + 1);
-                if (key == "vars") out.game.vars[k] = v;
-                else if (key == "otherbag") out.game.otherBag[k] = v;
-                else out.game.items[k] = v;
+                if (key == "vars") {
+                    out.game.vars[k] = v;
+                    if (out.game.vars.size() > kMaxSaveMapEntries) return fail("too many event variables");
+                } else if (key == "otherbag") {
+                    out.game.otherBag[k] = v;
+                    if (out.game.otherBag.size() > kMaxSaveMapEntries) return fail("too many secondary inventory entries");
+                } else {
+                    out.game.items[k] = v;
+                    if (out.game.items.size() > kMaxSaveMapEntries) return fail("too many inventory entries");
+                }
             }
         } else if (key == "noencounters") {
             for (size_t r = 0; r < out.game.noEncounters.size(); ++r) {
@@ -162,16 +223,25 @@ bool readSave(const std::string& path, SaveData& s, std::string* error) {
                 if (l >> e) e = std::clamp(e, 0, 100000);
         } else if (key == "boxes") {
             int b;
-            while (l >> b) out.game.openedBoxes.push_back(b);
+            while (l >> b) {
+                if (out.game.openedBoxes.size() >= kMaxRawOpenedBoxes) return fail("too many opened-box records");
+                out.game.openedBoxes.push_back(b);
+            }
         } else if (key == "treasure") {
             int sc = -1, id, item;
-            if (l >> sc && sc >= 0 && sc < kScenarios)
-                while (l >> id >> item) out.game.treasure[size_t(sc)].push_back({id, item});
+            if (l >> sc && sc >= 0 && sc < kScenarios) {
+                size_t count = 0;
+                while (l >> id >> item) {
+                    if (++count > kMaxScenarioTreasure) return fail("too many scenario treasure records");
+                    out.game.treasure[size_t(sc)].push_back({id, item});
+                }
+            }
         }
     }
     // (every line ends in a newline, and a save of any version has these six and all the party, in
     // this file's order or the Vita import's: boxes and what follows it aren't in the import's)
     if (out.area < 0 || out.area >= kNumAreas || out.map < 0 || out.map >= kNumMaps || !lastLineWhole || parts < 6 || partyLines < kCharacters) return fail("incomplete save");
+    if (!sanitizeSaveState(out.game, error)) return false;
     ensureStartingGenes(out.game); // saves from before genes were kept
     out.leader = std::clamp(out.leader, 0, 3);
     out.game.oz = std::clamp(out.game.oz, 0, 9999999);
