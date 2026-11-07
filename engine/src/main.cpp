@@ -16284,7 +16284,7 @@ int inputCancelSelfTest(App& app) {
                                     layout.z0 - cr::kPuzzleCell};
         setActor(app, 0, outsideBoard, nullptr, false);
         int playerRow = -1, playerCol = -1;
-        const bool playerOnBoard = cellOf(app, app.walker.pos, playerRow, playerCol);
+        const bool playerOnBoard = puzzle::cellOf(app, app.walker.pos, playerRow, playerCol);
         problems += playerOnBoard;
         if (playerOnBoard) std::printf("puzzle remote touch: player unexpectedly inside board\\n");
         // Convert an object's projected field position to the renderer's frame pixels.
