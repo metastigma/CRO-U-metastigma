@@ -4693,10 +4693,16 @@ void openSaveScreen(App& app, bool load) {
     ss.open = true;
     ss.load = load;
     if (load) cr::changeScenario(app.game, app.itemTable, app.chosenPair - 1); // SaveLoadSet: __prty_chg(var 0 - 1)
-    std::string readError;
-    ss.haveSave = cr::readSave(slotPath(app, load ? app.chosenPair : currentPair(app)), ss.data, &readError);
-    if (!ss.haveSave && readError != "no save" && SDL_getenv("CR_SAVE_DEBUG"))
-        SDL_Log("save menu: previous save ignored: %s", readError.c_str());
+    // The in-game Save prompt never displays or uses the old slot's contents.
+    // Do not parse it here: a stale/corrupt large save must not block opening the
+    // confirmation screen that can replace it. The title's Load flow still reads it.
+    ss.haveSave = false;
+    if (load) {
+        std::string readError;
+        ss.haveSave = cr::readSave(slotPath(app, app.chosenPair), ss.data, &readError);
+        if (!ss.haveSave && readError != "no save" && SDL_getenv("CR_SAVE_DEBUG"))
+            SDL_Log("save menu: previous save ignored: %s", readError.c_str());
+    }
     if (load) { // __menuu_SaveLoadSet, the title's (Omega): the scenario's load flag (_gkanLoadFlgTbl:
         // 31 / 32, its story cleared) makes New ask about the clear data; no emblems, and the first
         // plate (CR1's last battle) is never shown
@@ -17563,7 +17569,12 @@ int runSelfTest(App& app) {
         app.walker.pos.x += 3;
         const cr::SaveData before = captureSave(app);
         app.menuSoundLog.clear();
+        // Manual Save must not parse the previous slot; it is about to replace it.
+        const std::string previousSlot = slotPath(app, currentPair(app));
+        const std::string oversizedPrevious(1024 * 1024 + 1, 'x');
+        problems += !SDL_SaveFile(previousSlot.c_str(), oversizedPrevious.data(), oversizedPrevious.size());
         openSaveScreen(app, false);
+        problems += !app.saveScreen.open || app.saveScreen.phase != 1;
         saveScreenKey(app, SDLK_RETURN); // Yes
         problems += app.saveScreen.message != 57082;
         problems += expectSounds("save", {11});
