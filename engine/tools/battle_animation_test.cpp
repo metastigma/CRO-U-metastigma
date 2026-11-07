@@ -72,7 +72,6 @@ int main() {
     problems += cr::battleApproachPositionSlot(5, 0, true) != -1;
     problems += cr::battleApproachPositionSlot(2, 2, true) != -1;
 
-    std::printf("battle approach: paired-secondary fallback and solo gating; %d problems\n", problems);
     // Omega's per-participant attack clip selection: secondary uses its own clip, not slot 9.
     auto attack = cr::battleAttackMotion(0, 2, 0, 8, true, false, false);
     problems += attack.slot != 8 || attack.inPlace;
@@ -89,5 +88,6 @@ int main() {
     attack = cr::battleAttackMotion(0, 0x9d, 0, 8, true, false, false);
     problems += attack.slot != 13 || attack.inPlace;
 
+    std::printf("battle approach: timing, formation target slots and M225 gating; %d problems\\n", problems);
     return problems ? 1 : 0;
 }

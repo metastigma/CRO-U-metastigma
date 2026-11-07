@@ -300,8 +300,9 @@ DDS BC6H/BC7, signed BC4/5, arrays, cubemaps и volume textures пока не п
 
 ## Formation-targeted approach for solo and paired attacks — PR #7 (2026-11-07)
 
-- [x] Confirmed in the original Omega iOS ARMv7 binary: the formation-position table is at `0xBFF28`; the battle action code reads target-specific approach coordinates from it.
-- [x] Confirmed table layout from the original data: slots 0–2 are enemy homes; slots 3–5 are solo approach points; slots 6–11 are two separate party approach points per enemy.
+- [x] Confirmed in the original Omega iOS ARMv7 binary: the formation-position table is at `0xBFF28`.
+- [x] Disassembly of the original attack initializer confirms the exact indexing: solo path at `0x19A80` reads byte offset `0x0C + enemySlot*4` (slots 3–5); pair path at `0x19A26` reads `0x18 + enemySlot*8` (slots 6, 8, 10); second-member path at `0x19E26` reads `0x1C + enemySlot*8` (slots 7, 9, 11).
+- [x] Target indexing is the selected enemy fighter ID minus 2; each of the three enemies has a separate solo point and two pair points.
 - [x] Replaced the synthetic `target home + normalized vector + perpendicular offset` for party attacks with the exact formation point selected by enemy fighter ID (2–4) and party fighter ID (0/1).
 - [x] In pair mode the second member now uses the adjacent table point for the same selected enemy; the fighter ID is used rather than loop index, including when only the second member remains in the first actor slot.
 - [x] Preserved the existing generic fallback for enemy-side attacks/non-formation targets, Section 13 movement timing, and the merged M225 in-place exception.
