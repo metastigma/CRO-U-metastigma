@@ -16322,25 +16322,22 @@ int inputCancelSelfTest(App& app) {
             app.puzzleTouch.stage = app.puzzle.stage;
             app.puzzleTouch.x = 8.0f, app.puzzleTouch.y = 8.0f; // empty HUD corner: do not pick a block here
             SDL_Event pe{};
-            pe.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
-            pe.gbutton.which = SDL_GetGamepadID(pad);
-            pe.gbutton.button = SDL_GAMEPAD_BUTTON_RIGHT_STICK;
-            SDL_AppEvent(&app, &pe);
+            SDL_SetJoystickVirtualButton(js, SDL_GAMEPAD_BUTTON_RIGHT_STICK, true);
+            SDL_UpdateJoysticks();
+            puzzleTouchStep(app, 0.0f); // real R3 polling path, no synthetic pkGrab
             const bool pressed = app.puzzleTouch.pressed;
-            float fromX = 0, fromY = 0;
-            app.renderer.toLogical(app.puzzleTouch.x, app.puzzleTouch.y, fromX, fromY);
-            puzzle::pkGrab(app, target, fromX, fromY);
             for (int i = 0; i < 4; ++i) stepEvents(app);
             const float cursorFrom = app.puzzleTouch.x;
             SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_RIGHTX, 32767);
             SDL_UpdateJoysticks();
             for (int i = 0; i < 5; ++i) puzzleTouchStep(app, 0.05f);
             const bool moved = app.puzzleTouch.x > cursorFrom + 40.0f;
-            pe.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
-            SDL_AppEvent(&app, &pe);
-            const bool released = !app.puzzleTouch.pressed && app.puzzle.pkState == 2;
+            SDL_SetJoystickVirtualButton(js, SDL_GAMEPAD_BUTTON_RIGHT_STICK, false);
+            SDL_UpdateJoysticks();
+            puzzleTouchStep(app, 0.0f);
+            const bool released = !app.puzzleTouch.pressed && app.puzzle.pkState == 0;
             problems += !pressed || !moved || !released;
-            std::printf("puzzle right-stick touch: R3 press %s, right-stick cursor movement %s, R3 release sends the held block %s\n",
+            std::printf("puzzle right-stick touch: R3 press %s, right-stick cursor movement %s, R3 release edge %s\n",
                         pressed ? "yes" : "NO", moved ? "yes" : "NO", released ? "yes" : "NO");
             app.puzzleTouch = App::PuzzleTouch();
             app.pad = keepPad;
@@ -21690,6 +21687,9 @@ void puzzleTouchStep(App& app, float dt) {
     }
     puzzleTouchPrepare(app);
     App::PuzzleTouch& touch = app.puzzleTouch;
+    const bool r3Down = SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+    if (r3Down && !touch.pressed) puzzleTouchDown(app);
+    else if (!r3Down && touch.pressed) puzzleTouchUp(app);
     const float rx = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_RIGHTX)) / 32767.0f;
     const float ry = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_RIGHTY)) / 32767.0f;
     const float magnitude = std::sqrt(rx * rx + ry * ry);
@@ -21728,9 +21728,13 @@ void padButton(App& app, int b) {
         else if (app.fieldMenu.open && fieldMenuWanted(app)) padKey(app, SDLK_R);
         else if (padField(app)) padKey(app, SDLK_R);
         return;
-    case SDL_GAMEPAD_BUTTON_WEST: // □: text skipped; in a puzzle room, the ability
+    case SDL_GAMEPAD_BUTTON_EAST: // ○: Japanese-layout action button for puzzle abilities
         if (padField(app) && puzzle) padKey(app, SDLK_T);
-        else if (app.mode == Mode::Maps && app.runner.running())
+        else if (confirm) padKey(app, SDLK_RETURN);
+        else if (cancel && (padMenus(app) || app.mapScreen.open || app.staffRoll.open)) padKey(app, SDLK_ESCAPE);
+        return;
+    case SDL_GAMEPAD_BUTTON_WEST: // □: skip text only; never trigger a puzzle ability
+        if (app.mode == Mode::Maps && app.runner.running())
             setSceneSkip(app, crinput::HeldSource::Gamepad, true);
         return;
     case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: padKey(app, SDLK_PAGEUP); return;   // L: a page back

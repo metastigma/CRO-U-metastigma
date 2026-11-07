@@ -202,6 +202,8 @@ Steam Controller (through Steam Input).
 | Left stick / D-pad | walk (the stick pushed far runs) | move the cursor (held, it repeats) | walk |
 | Right stick | - | - | move the touch pointer |
 | R3 (press right stick) | - | - | touch / release; drag while held for psychokinesis |
+| ○ | - | - | activate the puzzle ability (Japanese layout) |
+| □ | - | - | skip dialogue only; does not activate puzzle abilities |
 | ○ | examine / talk | confirm, turn the page | examine |
 | × | - | cancel, back | - |
 | △ | open the Camp | close the Camp | open the Camp |
