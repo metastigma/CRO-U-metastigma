@@ -1605,6 +1605,7 @@ void startNewGame(App& app, int scenario = 0);
 void bootTitle(App& app);
 void padButton(App& app, int b);
 void padStep(App& app, float dt);
+void puzzleTouchStep(App& app, float dt); // used by the controller gesture regression below
 bool padLive(App& app);
 bool padMenus(const App& app);
 bool padField(const App& app);
