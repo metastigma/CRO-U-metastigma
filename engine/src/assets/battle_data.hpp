@@ -84,6 +84,17 @@ inline int battleApproachMoveEnd(const BattleAnim& animation, bool pairedSeconda
     if (animation.hasMoveWindow()) return animation.moveEnd;
     return pairedSecondary ? std::max(1, hitFrame - 4) : 0;
 }
+// read_btlcpl / btlact_attack_init: formation approach points are target-specific.
+// Slots 3..5 are the solo approach points for enemy fighters 2..4; in pair mode
+// slots 6..11 are two adjacent points per enemy (fighter 0/1). Do not synthesize a
+// perpendicular offset: it can send the second member toward a different enemy.
+inline int battleApproachPositionSlot(int targetFighter, int partyFighter, bool pair) {
+    if (targetFighter < 2 || targetFighter > 4) return -1;
+    const int enemySlot = targetFighter - 2;
+    if (!pair) return 3 + enemySlot;
+    if (partyFighter < 0 || partyFighter > 1) return -1;
+    return 6 + enemySlot * 2 + partyFighter;
+}
 // Omega's btlact_attack_init chooses a different package slot for each participant.
 // The primary may use its long slot 9 or special slot 10; the second normally uses slot 8.
 // Some model families use slot 13 instead. inPlace suppresses approach translation, not the clip.

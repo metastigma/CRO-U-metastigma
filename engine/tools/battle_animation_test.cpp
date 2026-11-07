@@ -59,6 +59,19 @@ int main() {
     problems += cr::battleApproachMoveEnd(invalidWindow, false, 20) != 0;
     problems += cr::battleApproachMoveEnd(invalidWindow, true, 20) != 16;
 
+    // Omega's formation table is keyed by the selected enemy (fighters 2..4).
+    // Solo uses slots 3..5; a pair has two exact points per enemy in slots 6..11.
+    for (int target = 2; target <= 4; ++target) {
+        const int enemy = target - 2;
+        problems += cr::battleApproachPositionSlot(target, 0, false) != 3 + enemy;
+        problems += cr::battleApproachPositionSlot(target, 1, false) != 3 + enemy;
+        problems += cr::battleApproachPositionSlot(target, 0, true) != 6 + enemy * 2;
+        problems += cr::battleApproachPositionSlot(target, 1, true) != 7 + enemy * 2;
+    }
+    problems += cr::battleApproachPositionSlot(1, 0, true) != -1;
+    problems += cr::battleApproachPositionSlot(5, 0, true) != -1;
+    problems += cr::battleApproachPositionSlot(2, 2, true) != -1;
+
     std::printf("battle approach: paired-secondary fallback and solo gating; %d problems\n", problems);
     // Omega's per-participant attack clip selection: secondary uses its own clip, not slot 9.
     auto attack = cr::battleAttackMotion(0, 2, 0, 8, true, false, false);

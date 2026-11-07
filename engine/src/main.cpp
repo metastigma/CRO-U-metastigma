@@ -12896,16 +12896,34 @@ void startTurn(App& app) {
         playSlot(app, *u, slot, playReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
         if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
-        if (approach) { // btlmove_setpos: up to the target, a step short of it
+        if (approach) { // btlmove_setpos: the formation defines the exact approach point per target
             const App::Battle::Actor* tv = battleActor(app, target);
             if (tv) {
-                const LoadedModel &lu = b.models[u->model], &lt = b.models[tv->model];
-                cr::Vec3 d = u->home - tv->home;
-                const float len = std::max(1.0f, std::sqrt(d.x * d.x + d.z * d.z));
-                const float reach = 0.6f * (lu.radius * u->scale + lt.radius * tv->scale) + (k ? 18.0f : 0.0f);
                 u->from = u->pos;
-                u->to = tv->home + cr::Vec3{d.x / len * reach, 0, d.z / len * reach};
-                if (k == 1) u->to = u->to + cr::Vec3{d.z / len * 18, 0, -d.x / len * 18}; // beside the first
+                bool usedFormationPosition = false;
+                const int fighter = t.actors[k];
+                if (fighter >= 0 && fighter < 2 && target >= 2 && target < 5 &&
+                    b.formation >= 0 && b.formation < cr::kNumFormations) {
+                    const int positionSlot = cr::battleApproachPositionSlot(target, fighter, b.rules.pair);
+                    if (positionSlot >= 0) {
+                        const short* position = cr::kBattlePosition[b.formation][positionSlot];
+                        if (position[0] != 0 || position[1] != 0) {
+                            // A pair has two table positions per enemy. Use the fighter id,
+                            // not loop index k: a surviving second member can be t.actors[0].
+                            u->to = {float(position[0]), tv->home.y, float(position[1])};
+                            usedFormationPosition = true;
+                        }
+                    }
+                }
+                if (!usedFormationPosition) {
+                    // Keep the existing fallback for enemy attacks and non-formation targets.
+                    const LoadedModel &lu = b.models[u->model], &lt = b.models[tv->model];
+                    cr::Vec3 d = u->home - tv->home;
+                    const float len = std::max(1.0f, std::sqrt(d.x * d.x + d.z * d.z));
+                    const float reach = 0.6f * (lu.radius * u->scale + lt.radius * tv->scale) + (k ? 18.0f : 0.0f);
+                    u->to = tv->home + cr::Vec3{d.x / len * reach, 0, d.z / len * reach};
+                    if (k == 1) u->to = u->to + cr::Vec3{d.z / len * 18, 0, -d.x / len * 18};
+                }
                 u->moveFrom = cr::battleApproachMoveStart(an);
                 u->moveTo = cr::battleApproachMoveEnd(an, pairedSecondary, b.hitFrame);
             }
