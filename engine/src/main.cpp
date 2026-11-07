@@ -776,9 +776,10 @@ struct App {
         int clock = 0;                     // frames the room has run (the flames' flicker)
     } puzzle;
     struct PuzzleTouch {
-        bool initialized = false, visible = false, pressed = false;
+        bool initialized = false, visible = false, pressed = false, hit = false;
         int stage = -1;
         float x = 0, y = 0;                // screen-frame pixels; the Vita touch point
+        std::vector<int> rawR3Buttons;     // SDL joystick buttons mapped to Gamepad RIGHT_STICK
     } puzzleTouch;
     float playerAlpha = 1, playerAlphaFrom = 1, playerAlphaTo = 1; // mdl_set_alpha on the leader
     int playerFadeFrames = 0, playerFadeLeft = 0;
@@ -6255,7 +6256,9 @@ void drawPuzzleHud(App& app, float a) {
         app.renderer.toLogical(app.puzzleTouch.x, app.puzzleTouch.y, lx, ly);
         const float x = lx - app.renderer.uiX();
         const float shadow[4] = {0.02f, 0.08f, 0.12f, a};
-        const float cursor[4] = {0.25f, 0.95f, 1.0f, a};
+        const float cursor[4] = {app.puzzleTouch.pressed ? (app.puzzleTouch.hit ? 0.15f : 1.0f) : 0.25f,
+                                 app.puzzleTouch.pressed ? (app.puzzleTouch.hit ? 1.0f : 0.45f) : 0.95f,
+                                 app.puzzleTouch.pressed ? 0.25f : 1.0f, a};
         m.quad(x - 10, ly - 2, 20, 4, shadow, shadow);
         m.quad(x - 2, ly - 10, 4, 20, shadow, shadow);
         m.quad(x - 8, ly - 1, 16, 2, cursor, cursor);
@@ -21666,11 +21669,50 @@ bool puzzleTouchAvailable(const App& app) {
            !app.shop.open && !app.mapScreen.open && !app.battle.active;
 }
 
+void puzzleTouchCacheBindings(App& app) {
+    App::PuzzleTouch& touch = app.puzzleTouch;
+    touch.rawR3Buttons.clear();
+    if (!app.pad) return;
+    int count = 0;
+    SDL_GamepadBinding** bindings = SDL_GetGamepadBindings(app.pad, &count);
+    if (!bindings) return;
+    for (int i = 0; i < count; ++i) {
+        const SDL_GamepadBinding* binding = bindings[i];
+        if (binding && binding->input_type == SDL_GAMEPAD_BINDTYPE_BUTTON &&
+            binding->output_type == SDL_GAMEPAD_BINDTYPE_BUTTON &&
+            binding->output.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK)
+            touch.rawR3Buttons.push_back(binding->input.button);
+    }
+    SDL_free(bindings);
+    std::sort(touch.rawR3Buttons.begin(), touch.rawR3Buttons.end());
+    touch.rawR3Buttons.erase(std::unique(touch.rawR3Buttons.begin(), touch.rawR3Buttons.end()),
+                             touch.rawR3Buttons.end());
+}
+
+bool puzzleTouchRawButtonEvent(const App& app, SDL_JoystickID which, int button) {
+    if (!app.pad) return false;
+    SDL_Joystick* joystick = SDL_GetGamepadJoystick(app.pad);
+    if (!joystick || SDL_GetJoystickID(joystick) != which) return false;
+    const auto& raw = app.puzzleTouch.rawR3Buttons;
+    return std::find(raw.begin(), raw.end(), button) != raw.end();
+}
+
+bool puzzleTouchButtonDown(const App& app) {
+    if (!app.pad) return false;
+    if (SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK)) return true;
+    SDL_Joystick* joystick = SDL_GetGamepadJoystick(app.pad);
+    if (!joystick) return false;
+    for (int button : app.puzzleTouch.rawR3Buttons)
+        if (SDL_GetJoystickButton(joystick, button)) return true;
+    return false;
+}
+
 void puzzleTouchCancel(App& app) {
     App::PuzzleTouch& touch = app.puzzleTouch;
     if (touch.pressed && app.puzzle.pkState == 1 && app.puzzle.pkFromX > -1e8f)
         app.puzzle.pkPointerCancelled = true; // keep the lifted block; discard the interrupted swipe
     touch.pressed = false;
+    touch.hit = false;
     touch.visible = false;
 }
 
@@ -21680,9 +21722,11 @@ void puzzleTouchPrepare(App& app) {
         touch.initialized = true;
         touch.stage = app.puzzle.stage;
         touch.pressed = false;
+        touch.hit = false;
         touch.x = float(app.renderer.frameWidth()) * 0.5f;
         touch.y = float(app.renderer.frameHeight()) * 0.5f;
     }
+    if (app.pad && touch.rawR3Buttons.empty()) puzzleTouchCacheBindings(app);
     touch.visible = true;
 }
 
@@ -21700,7 +21744,7 @@ void puzzleTouchDown(App& app) {
         app.puzzle.pkPointerCancelled = false;
         return;
     }
-    puzzle::click(app, touch.x, touch.y);
+    touch.hit = puzzle::click(app, touch.x, touch.y);
 }
 
 void puzzleTouchUp(App& app) {
@@ -21720,7 +21764,7 @@ void puzzleTouchStep(App& app, float dt) {
     }
     puzzleTouchPrepare(app);
     App::PuzzleTouch& touch = app.puzzleTouch;
-    const bool r3Down = SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+    const bool r3Down = puzzleTouchButtonDown(app);
     if (r3Down && !touch.pressed) puzzleTouchDown(app);
     else if (!r3Down && touch.pressed) puzzleTouchUp(app);
     const float rx = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_RIGHTX)) / 32767.0f;
@@ -21864,7 +21908,10 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     case SDL_EVENT_GAMEPAD_ADDED:
         if (!app.pad) {
             app.pad = SDL_OpenGamepad(event->gdevice.which);
-            if (app.pad) SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
+            if (app.pad) {
+                puzzleTouchCacheBindings(app);
+                SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
+            }
         }
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
@@ -21873,6 +21920,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             puzzleTouchCancel(app);
             SDL_CloseGamepad(app.pad);
             app.pad = nullptr;
+            app.puzzleTouch.rawR3Buttons.clear();
         }
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
@@ -21884,6 +21932,12 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             if (event->gbutton.button == SDL_GAMEPAD_BUTTON_WEST)
                 setSceneSkip(app, crinput::HeldSource::Gamepad, false);
         }
+        break;
+    case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
+        if (puzzleTouchRawButtonEvent(app, event->jbutton.which, event->jbutton.button)) puzzleTouchDown(app);
+        break;
+    case SDL_EVENT_JOYSTICK_BUTTON_UP:
+        if (puzzleTouchRawButtonEvent(app, event->jbutton.which, event->jbutton.button)) puzzleTouchUp(app);
         break;
     case SDL_EVENT_KEY_DOWN:
         if (event->key.key == SDLK_X && !event->key.repeat && app.mode == Mode::Maps && app.runner.running())
