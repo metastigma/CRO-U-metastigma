@@ -257,3 +257,10 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
 - [ ] Сборка Windows/Linux/Android и проверка реального старта игры.
 - [ ] Проверка на данных Vita и iOS; текущая реализация использует размеры загруженного листа, не фиксированные 960×640.
 - Источник: DuIslingr/CRO-U commit 869e2fe50aa9cc96e7ee2dac42ca6c4608d8351e.
+
+## Диагностика музыки титульного меню — 07.11.2026
+
+- [x] `CR_BGM_DEBUG=1` logs every BGM request with its track number, area, active script label, audio-device state, and BGM volume.
+- [x] The title startup now logs an explicit error if `EvrStart 0` is missing or cannot start; with tracing enabled it prints its entry offset.
+- [x] Existing MusicPlayer logs distinguish a successfully decoded track from a missing or invalid CAF/Android/Vita asset.
+- [ ] Run once with `CR_BGM_DEBUG=1` and inspect the title startup log before changing track mapping.
