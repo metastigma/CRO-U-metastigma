@@ -16271,9 +16271,16 @@ int inputCancelSelfTest(App& app) {
     w.valid = true, w.area = cr::kPuzzleArea, w.map = cr::kFirstPuzzleMap + pkStage;
     const bool entered = pkStage >= 0 && performWarp(app, w, -1);
     app.runner.stop(), app.pendingEntry = App::Entry::None;
-    int target = -1;
-    for (size_t i = 0; i < app.puzzle.objs.size(); ++i)
-        if (app.puzzle.objs[i].type == cr::kTypeNormal && app.puzzle.objs[i].shown) { target = int(i); break; }
+    int target = -1, dragDirection = 0;
+    const int dragRow[4] = {-1, 1, 0, 0}, dragCol[4] = {0, 0, -1, 1};
+    for (size_t i = 0; i < app.puzzle.objs.size() && target < 0; ++i) {
+        const auto& object = app.puzzle.objs[i];
+        if (object.type != cr::kTypeNormal || !object.shown || object.state != 1 || object.pk != 0) continue;
+        for (int dir = 1; dir <= 4; ++dir) {
+            const int* next = puzzle::cellSlot(app, 1, object.row + dragRow[dir - 1], object.col + dragCol[dir - 1]);
+            if (next && *next < 0) { target = int(i); dragDirection = dir; break; }
+        }
+    }
     if (!entered || target < 0) ++problems;
     else {
         const auto& at = app.puzzle.objs[size_t(target)];
@@ -16379,19 +16386,28 @@ int inputCancelSelfTest(App& app) {
                 const bool pressed = app.puzzleTouch.pressed;
                 const bool selected = app.puzzleTouch.hit && app.puzzle.pkState == 1 && app.puzzle.pkTarget == target;
                 for (int i = 0; i < 4; ++i) stepEvents(app);
-                const float cursorFrom = app.puzzleTouch.x;
-                SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_RIGHTX, 32767);
+                const bool horizontal = dragDirection >= 3;
+                const SDL_GamepadAxis dragAxis = horizontal ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_RIGHTY;
+                const Sint16 dragValue = (dragDirection == 1 || dragDirection == 3) ? Sint16(-32767) : Sint16(32767);
+                const float cursorFrom = horizontal ? app.puzzleTouch.x : app.puzzleTouch.y;
+                SDL_SetJoystickVirtualAxis(js, dragAxis, dragValue);
                 SDL_UpdateJoysticks();
-                for (int i = 0; i < 5; ++i) puzzleTouchStep(app, 0.012f);
-                const bool moved = app.puzzleTouch.x > cursorFrom + 35.0f;
+                // Cross the original psychokinesis swipe threshold (29 horizontal / 35 upward / 20 downward).
+                for (int i = 0; i < 12; ++i) puzzleTouchStep(app, 0.012f);
+                const float cursorTo = horizontal ? app.puzzleTouch.x : app.puzzleTouch.y;
+                const bool moved = dragValue < 0 ? cursorTo < cursorFrom - 60.0f : cursorTo > cursorFrom + 60.0f;
+                SDL_SetJoystickVirtualAxis(js, dragAxis, 0);
                 SDL_SetJoystickVirtualButton(js, rawR3, false);
                 SDL_UpdateJoysticks();
                 puzzleTouchStep(app, 0.0f);
-                const bool released = !app.puzzleTouch.pressed && app.puzzle.pkState == 2;
-                problems += !pressed || !selected || !moved || !released;
-                std::printf("puzzle right-stick touch: R3 press %s, pointer selected target block %s, drag %s, R3 release %s\n",
+                const bool released = !app.puzzleTouch.pressed && app.puzzle.pkState == 2 && app.puzzle.pkMoved;
+                for (int i = 0; i < 120 && app.puzzle.pkState != 0; ++i) stepEvents(app);
+                const auto& movedBlock = app.puzzle.objs[size_t(target)];
+                const bool blockMoved = movedBlock.row != row || movedBlock.col != col;
+                problems += !pressed || !selected || !moved || !released || !blockMoved;
+                std::printf("puzzle right-stick touch: R3 press %s, remote block selected %s, cursor drag %s, block moved %s, release %s\n",
                             pressed ? "yes" : "NO", selected ? "yes" : "NO", moved ? "yes" : "NO",
-                            released ? "yes" : "NO");
+                            blockMoved ? "yes" : "NO", released ? "yes" : "NO");
             }
             app.puzzleTouch = keepTouch;
             app.pad = keepPad;
