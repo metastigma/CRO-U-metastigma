@@ -168,6 +168,10 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
 - [x] the save prompt in every layout as `__menuu_SaveLoadPut` draws it - the message board at
       (0, 220) and the Yes / No plates (`ComUty_MsgBoardDraw`, `ComUty_YesNoChoiceDraw`); the iPad
       layout used CR1's own iPad panel and buttons
+- [x] save-menu reads are bounded before loading the previous file (1 MiB maximum); variable and
+      inventory maps have 4096-entry safety caps, scenario treasure is limited to 15 picks per
+      scenario, and opened-box IDs are de-duplicated in the EVT callback and on save read/write.
+      The session-UI self-test covers duplicate boxes, oversized state rejection and oversized files.
 - [x] the Camp's equipment slots as `__MuCampScrListEquipInit` lists them: a scrolling list of seven
       (an empty jewel / gene slot showing its placeholder item, 0x1c6..0x1ca) in four rows of one
       line with the list's scroll bar, and no section bar under the "Equip" title

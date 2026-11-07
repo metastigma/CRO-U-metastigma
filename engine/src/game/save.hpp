@@ -28,7 +28,9 @@ struct SaveData {
     GameState game;          // flags, vars, items, Oz, party, opened boxes (not the cutscene frame state)
 };
 
-bool writeSave(const std::string& path, const SaveData& s);
+// Normalize redundant opened-box markers and reject unreasonable state before copying it.
+bool sanitizeSaveState(GameState& game, std::string* error = nullptr);
+bool writeSave(const std::string& path, const SaveData& s, std::string* error = nullptr);
 bool readSave(const std::string& path, SaveData& s, std::string* error = nullptr);
 
 } // namespace cr
