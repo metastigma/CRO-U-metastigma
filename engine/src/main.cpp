@@ -7223,7 +7223,12 @@ void drawFieldMenu(App& app) {
         float x, y;
         fieldButtonPos(app, k, x, y);
         const float* src = k == 3 && fieldEncountersOff(app) ? kEncountersOff : kPiece[k];
-        m.piece(x + 16, y + 32, src[0], src[1], kSize[k], kSize[k], a);
+        // Vita's field-menu draw path tints the selected Camp / Save / Map sprite.
+        // Its packed 0xFFFFFF00 color is ABGR, i.e. cyan in this renderer's RGB arguments.
+        if (k < 3 && f.selected == k)
+            m.piece(x + 16, y + 32, src[0], src[1], kSize[k], kSize[k], a, 0.0f, 1.0f, 1.0f);
+        else
+            m.piece(x + 16, y + 32, src[0], src[1], kSize[k], kSize[k], a);
     }
     r.setOrigin(r.uiX());
 }
