@@ -310,3 +310,5 @@ DDS BC6H/BC7, signed BC4/5, arrays, cubemaps и volume textures пока не п
 - [ ] CI and in-game verification with formations containing one, two and three enemies.
 
 The previous port ignored slots 3–11 and generated the second member's destination from a perpendicular vector. That did not follow Omega's per-enemy formation layout and could send the second attacker toward the neighbouring target.
+
+- [x] The battle-animation test target links the real `stage_tables.cpp`; tests now validate all target/member positions for three-enemy formations 6, 9 and 13, including the exact six pair points in formation 6 (222).

@@ -1,4 +1,5 @@
 #include "assets/battle_data.hpp"
+#include "game/stage_tables.hpp"
 
 #include <cstdio>
 
@@ -89,5 +90,30 @@ int main() {
     problems += attack.slot != 13 || attack.inPlace;
 
     std::printf("battle approach: timing, formation target slots and M225 gating; %d problems\\n", problems);
+    // Validate the actual Omega table, not only the index arithmetic. The three
+    // three-enemy formations each provide one solo point and two distinct pair points
+    // for every possible enemy target.
+    for (int formation : {6, 9, 13}) {
+        for (int target = 2; target <= 4; ++target) {
+            const int solo = cr::battleApproachPositionSlot(target, 0, false);
+            const int first = cr::battleApproachPositionSlot(target, 0, true);
+            const int second = cr::battleApproachPositionSlot(target, 1, true);
+            const auto& soloPos = cr::kBattlePosition[formation][solo];
+            const auto& firstPos = cr::kBattlePosition[formation][first];
+            const auto& secondPos = cr::kBattlePosition[formation][second];
+            problems += (soloPos[0] == 0 && soloPos[1] == 0);
+            problems += (firstPos[0] == 0 && firstPos[1] == 0);
+            problems += (secondPos[0] == 0 && secondPos[1] == 0);
+            problems += firstPos[0] == secondPos[0] && firstPos[1] == secondPos[1];
+        }
+    }
+    // Formation 6 is the three-equal-enemy case (222); assert the exact target-specific spots.
+    problems += cr::kBattlePosition[6][6][0] != 490 || cr::kBattlePosition[6][6][1] != 492;
+    problems += cr::kBattlePosition[6][7][0] != 484 || cr::kBattlePosition[6][7][1] != 494;
+    problems += cr::kBattlePosition[6][8][0] != 504 || cr::kBattlePosition[6][8][1] != 494;
+    problems += cr::kBattlePosition[6][9][0] != 496 || cr::kBattlePosition[6][9][1] != 494;
+    problems += cr::kBattlePosition[6][10][0] != 516 || cr::kBattlePosition[6][10][1] != 494;
+    problems += cr::kBattlePosition[6][11][0] != 510 || cr::kBattlePosition[6][11][1] != 492;
+
     return problems ? 1 : 0;
 }
