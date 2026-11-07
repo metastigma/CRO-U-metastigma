@@ -845,6 +845,7 @@ struct App {
         int anim = 0;                      // the bar's 4 frames of sliding (in or out)
         int fade = 0;                      // +32 a frame (to 320) on the field, -32 while a scene runs
         float clock = 0;
+        int selected = 2;                  // button index: Map (2), Save (1), Camp (0)
     } fieldMenu;
     struct TouchPad {                      // CrossKey: the field's touch pad, where a finger went down
         bool down = false;                 // a finger (or the mouse) holds it
@@ -7223,6 +7224,14 @@ void drawFieldMenu(App& app) {
         fieldButtonPos(app, k, x, y);
         const float* src = k == 3 && fieldEncountersOff(app) ? kEncountersOff : kPiece[k];
         m.piece(x + 16, y + 32, src[0], src[1], kSize[k], kSize[k], a);
+        if (f.open && f.anim == 0 && f.selected == k && k < 3) {
+            const float edge[4] = {1.0f, 0.82f, 0.24f, a};
+            constexpr float b = 2.0f;
+            m.quad(x - b, y - b, kSize[k] + 2 * b, b, edge, edge);
+            m.quad(x - b, y + kSize[k], kSize[k] + 2 * b, b, edge, edge);
+            m.quad(x - b, y, b, kSize[k], edge, edge);
+            m.quad(x + kSize[k], y, b, kSize[k], edge, edge);
+        }
     }
     r.setOrigin(r.uiX());
 }
@@ -7232,6 +7241,7 @@ void toggleFieldMenu(App& app) {
     if (f.anim > 0) return;
     f.open = !f.open;
     f.anim = 4;
+    if (f.open) f.selected = fieldButtonShown(app, 2) ? 2 : 1; // Map, or Save where the map is unavailable
     menuSound(app, f.open ? se::kCampOpen : se::kCampClose);
 }
 
@@ -7266,6 +7276,45 @@ void pressFieldButton(App& app, int k) {
     }
 }
 
+// The controller / keyboard cursor follows the three main entries in visual order.
+void moveFieldMenu(App& app, int direction) {
+    App::FieldMenu& f = app.fieldMenu;
+    if (!f.open || f.anim > 0) return;
+    static constexpr int kOrder[3] = {2, 1, 0}; // Map -> Save -> Camp
+    int at = 0;
+    for (int i = 0; i < 3; ++i) if (kOrder[i] == f.selected) { at = i; break; }
+    for (int n = 1; n <= 3; ++n) {
+        const int next = (at + (direction > 0 ? n : -n) + 6) % 3;
+        const int candidate = kOrder[next];
+        if (!fieldButtonShown(app, candidate)) continue;
+        if (candidate != f.selected) {
+            f.selected = candidate;
+            menuSound(app, se::kCursor);
+        }
+        return;
+    }
+}
+
+bool fieldMenuKey(App& app, SDL_Keycode key) {
+    if (!app.fieldMenu.open || !fieldMenuWanted(app) || fieldSceneRunning(app)) return false;
+    switch (key) {
+    case SDLK_UP: case SDLK_LEFT: case SDLK_W: case SDLK_A:
+        moveFieldMenu(app, -1);
+        return true;
+    case SDLK_DOWN: case SDLK_RIGHT: case SDLK_S: case SDLK_D:
+        moveFieldMenu(app, 1);
+        return true;
+    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: case SDLK_E:
+        if (app.fieldMenu.anim == 0) pressFieldButton(app, app.fieldMenu.selected);
+        return true;
+    case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK:
+        if (app.fieldMenu.anim == 0) toggleFieldMenu(app);
+        return true;
+    default:
+        return false;
+    }
+}
+
 // A click in the frame's pixels; true when the field menu took it
 bool fieldMenuClick(App& app, float px, float py) {
     if (!fieldMenuWanted(app) || fieldSceneRunning(app) || app.fieldMenu.fade <= 0) return false;
@@ -7289,6 +7338,7 @@ bool fieldMenuClick(App& app, float px, float py) {
     for (int k = 0; k < 4; ++k) {
         const float dx = tx - kCentre[k][0], dy = ty - kCentre[k][1];
         if (fieldButtonShown(app, k) && dx * dx + dy * dy <= kCentre[k][2] * kCentre[k][2]) {
+            if (k < 3) app.fieldMenu.selected = k;
             pressFieldButton(app, k);
             return true;
         }
@@ -10498,7 +10548,7 @@ void updatePlayer(App& app, float dt, float camYaw) {
     if (!app.havePlayer) return;
     const bool* keys = SDL_GetKeyboardState(nullptr);
     // A running script, its dialogue box or item window hold the player in place
-    const bool talking = fieldSceneRunning(app) || app.optionsOpen || app.campOpen || app.saveScreen.open ||
+    const bool talking = fieldSceneRunning(app) || app.fieldMenu.open || app.optionsOpen || app.campOpen || app.saveScreen.open ||
                          app.shop.open || app.mapScreen.open || app.puzzle.tpState != 0 || app.puzzle.pkState != 0 ||
                          (app.puzzle.stage >= 0 && app.puzzle.scene != 4);
     if (talking) app.walker.gait = cr::Gait::Stand;
@@ -19008,7 +19058,30 @@ int runSelfTest(App& app) {
             padButton(app, SDL_GAMEPAD_BUTTON_NORTH); // △ opens the Map / Save / Camp bar
             const bool opened = app.fieldMenu.open && !app.campOpen;
             for (int f = 0; f < 4; ++f) stepFieldMenu(app); // finish the bar's slide
-            pressFieldButton(app, 0); // choose Camp from that bar
+            const cr::Vec3 panelFrom = app.walker.pos;
+            SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_LEFTX, 32767);
+            SDL_UpdateJoysticks();
+            updatePlayer(app, 1.0f / kFramesPerSecond, 0);
+            const bool panelWalkBlocked = std::sqrt(cr::dot(app.walker.pos - panelFrom, app.walker.pos - panelFrom)) < 0.01f;
+            SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_LEFTX, 0);
+            SDL_UpdateJoysticks();
+            padLive(app);
+            bool cycled = app.fieldMenu.selected == 2; // Map is the initial selection
+            SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_LEFTY, 32767); // stick down -> Save
+            SDL_UpdateJoysticks();
+            padStep(app, 1.0f / 60.0f);
+            cycled = cycled && app.fieldMenu.selected == 1;
+            SDL_SetJoystickVirtualAxis(js, SDL_GAMEPAD_AXIS_LEFTY, 0);
+            SDL_UpdateJoysticks();
+            padStep(app, 1.0f / 60.0f);
+            padButton(app, SDL_GAMEPAD_BUTTON_DPAD_UP); cycled = cycled && app.fieldMenu.selected == 2; // Map
+            padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN); cycled = cycled && app.fieldMenu.selected == 1; // Save
+            padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN); cycled = cycled && app.fieldMenu.selected == 0; // Camp
+            padButton(app, SDL_GAMEPAD_BUTTON_DPAD_UP); cycled = cycled && app.fieldMenu.selected == 1;
+            padButton(app, SDL_GAMEPAD_BUTTON_DPAD_LEFT); cycled = cycled && app.fieldMenu.selected == 2;
+            padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+            padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+            padButton(app, SDL_GAMEPAD_BUTTON_SOUTH); // confirm the selected Camp entry
             const bool campOpened = app.campOpen;
 
             const int c0 = app.camp.cursor;
@@ -19081,12 +19154,13 @@ int runSelfTest(App& app) {
             app.pendingEntry = App::Entry::None;
             problems += !walkStopped;
             std::printf("controller: a stick held through a lost focus stops walking %s\n", walkStopped ? "yes" : "NO");
-            problems += !walked || !fieldQuiet || !opened || !campOpened || !moved || !confirmed || !backed || !swapped || !campClosed || !closed;
-            std::printf("controller: the stick walks %s, △ opens / closes the field bar %s / %s, Camp via the bar %s / cancel %s, "
-                        "D-pad moves %s, ○ confirms %s, × back %s (on the field nothing %s), swapped confirm %s; %d problems\n",
-                        walked ? "yes" : "NO", opened ? "yes" : "NO", closed ? "yes" : "NO", campOpened ? "yes" : "NO",
-                        campClosed ? "yes" : "NO", moved ? "yes" : "NO", confirmed ? "yes" : "NO", backed ? "yes" : "NO",
-                        fieldQuiet ? "yes" : "NO", swapped ? "yes" : "NO", problems);
+            problems += !walked || !fieldQuiet || !opened || !panelWalkBlocked || !cycled || !campOpened ||
+                        !moved || !confirmed || !backed || !swapped || !campClosed || !closed;
+            std::printf("controller: the stick walks %s, △ opens / closes the field bar %s / %s, stick blocked while bar open %s, "
+                        "D-pad cycles Map / Save / Camp %s, confirm opens Camp %s / cancel %s, Camp controls %s, %d problems\n",
+                        walked ? "yes" : "NO", opened ? "yes" : "NO", closed ? "yes" : "NO", panelWalkBlocked ? "yes" : "NO",
+                        cycled ? "yes" : "NO", campOpened ? "yes" : "NO", campClosed ? "yes" : "NO",
+                        moved && confirmed && backed && swapped ? "yes" : "NO", problems);
             app.campOpen = false;
             app.pad = keepPad;
             app.game = keepGame;
@@ -21476,7 +21550,7 @@ namespace {
 // A screen that takes the cursor keys (else, on the field, the stick walks and the arrows would be
 // the viewer's own keys)
 bool padMenus(const App& app) {
-    return app.optionsOpen || app.manualOpen || app.scc.open || app.collection.open || app.saveScreen.open || app.charSelectOpen || app.campOpen ||
+    return app.fieldMenu.open || app.optionsOpen || app.manualOpen || app.scc.open || app.collection.open || app.saveScreen.open || app.charSelectOpen || app.campOpen ||
            app.lastBattle.open || (app.shop.open && app.shop.phase != App::Shop::Talk) || app.resumePrompt ||
            (app.mode == Mode::Maps && (app.titleOpen || app.battle.active || app.worldChoiceOpen || app.choiceFlag >= 0)) ||
            app.puzzle.pkState == 1;
@@ -21502,8 +21576,10 @@ void padButton(App& app, int b) {
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN: if (padMenus(app)) padKey(app, SDLK_DOWN); return;
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT: if (padMenus(app)) padKey(app, SDLK_LEFT); return;
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: if (padMenus(app)) padKey(app, SDLK_RIGHT); return;
-    case SDL_GAMEPAD_BUTTON_NORTH: // △: the field's top bar (Map / Save / Camp)
-        if (padField(app)) padKey(app, SDLK_R);
+    case SDL_GAMEPAD_BUTTON_NORTH: // △: close Camp, or open / close the field's top bar
+        if (app.campOpen) { app.campOpen = false; menuSound(app, se::kCampClose); }
+        else if (app.fieldMenu.open && fieldMenuWanted(app)) padKey(app, SDLK_R);
+        else if (padField(app)) padKey(app, SDLK_R);
         return;
     case SDL_GAMEPAD_BUTTON_WEST: // □: text skipped; in a puzzle room, the ability
         if (padField(app) && puzzle) padKey(app, SDLK_T);
@@ -21704,6 +21780,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             }
             break;
         }
+        if (app.fieldMenu.open && fieldMenuKey(app, event->key.key)) break;
         if (app.puzzle.stage >= 0 && fieldMenuWanted(app) && !fieldSceneRunning(app) &&
             (event->key.key == SDLK_T || event->key.key == SDLK_F5 || event->key.key == SDLK_F6)) {
             if (event->key.key == SDLK_T) puzzle::abilityKey(app); // the ability, straight ahead
