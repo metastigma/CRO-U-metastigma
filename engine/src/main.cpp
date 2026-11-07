@@ -19081,7 +19081,7 @@ int runSelfTest(App& app) {
             padButton(app, SDL_GAMEPAD_BUTTON_DPAD_LEFT); cycled = cycled && app.fieldMenu.selected == 2;
             padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
             padButton(app, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
-            padButton(app, SDL_GAMEPAD_BUTTON_SOUTH); // confirm the selected Camp entry
+            padButton(app, SDL_GAMEPAD_BUTTON_WEST); // □ confirms the selected Camp entry
             const bool campOpened = app.campOpen;
 
             const int c0 = app.camp.cursor;
@@ -21570,6 +21570,12 @@ void padButton(App& app, int b) {
     const bool east = b == SDL_GAMEPAD_BUTTON_EAST, south = b == SDL_GAMEPAD_BUTTON_SOUTH;
     const bool confirm = app.padConfirmEast ? east : south, cancel = app.padConfirmEast ? south : east;
     const bool puzzle = app.puzzle.stage >= 0 && fieldMenuWanted(app) && !fieldSceneRunning(app);
+    // Japanese-layout menu controls: Cross backs out; Square confirms.
+    // In Camp, Cross on the main page returns directly to the field.
+    if (app.fieldMenu.open || app.campOpen) {
+        if (b == SDL_GAMEPAD_BUTTON_SOUTH) { padKey(app, SDLK_ESCAPE); return; } // ×: close / back
+        if (b == SDL_GAMEPAD_BUTTON_WEST) { padKey(app, SDLK_RETURN); return; } // □: confirm
+    }
     if (app.vitaLogo.phase) { if (confirm && app.vitaLogo.phase == 2) app.vitaLogo.skip = true; return; }
     switch (b) {
     case SDL_GAMEPAD_BUTTON_DPAD_UP: if (padMenus(app)) padKey(app, SDLK_UP); return;
