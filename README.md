@@ -200,6 +200,8 @@ Steam Controller (through Steam Input).
 | Button | On the field | In menus and dialogue | In puzzle rooms |
 |---|---|---|---|
 | Left stick / D-pad | walk (the stick pushed far runs) | move the cursor (held, it repeats) | walk |
+| Right stick | - | - | move the touch pointer |
+| R3 (press right stick) | - | - | touch / release; drag while held for psychokinesis |
 | ○ | examine / talk | confirm, turn the page | examine |
 | × | - | cancel, back | - |
 | △ | open the Camp | close the Camp | open the Camp |
