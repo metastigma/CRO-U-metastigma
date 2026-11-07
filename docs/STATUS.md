@@ -360,4 +360,7 @@ The previous port ignored slots 3–11 and generated the second member's destina
 - [x] Read SDL's physical joystick-button binding that maps to Gamepad RIGHT_STICK, with direct SDL joystick-button polling and event fallback.
 - [x] Give the virtual cursor a pressed/hit visual state so a touch miss is distinguishable from an unreceived R3 press.
 - [x] Replaced the empty-corner/button-only self-test with a real block test: project a visible psychokinesis block to screen coordinates, press the virtual joystick's mapped R3 input there, require puzzle::click to select that block, drag the pointer and release.
+- [x] Removed the player-cell gate from direct psychokinesis hit selection; keyboard targeting still uses ahead() and its grid lookup.
+- [x] Cursor hit feedback for psychokinesis now requires an actual held block (pkState == 1 and pkTarget >= 0), not only a successful geometric click.
+- [x] Self-test deliberately positions the player outside the puzzle grid before selecting a remote visible block.
 - [ ] CI and in-game verification.
