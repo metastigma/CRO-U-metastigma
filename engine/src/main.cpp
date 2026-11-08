@@ -9641,7 +9641,6 @@ void pkLanded(App& app) { // the block's message 4: Psychokinesis::onWaitMove
 }
 
 void stepPkBlock(App& app, App::Puzzle::Obj& o) {
-    App::Puzzle& pz = app.puzzle;
     cr::FieldNpc& n = app.npcs[size_t(o.npc)];
     auto setY = [&](float y) { place(app, o, {n.pos[0], y, n.pos[2]}); };
     switch (o.pk) {
