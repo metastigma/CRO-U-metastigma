@@ -16326,7 +16326,7 @@ int inputCancelSelfTest(App& app) {
         const bool playerOnBoard = puzzle::cellOf(app, app.walker.pos, actualRow, actualCol);
         problems += !playerOnBoard || std::abs(actualRow - at.row) + std::abs(actualCol - at.col) <= 1;
         if (!playerOnBoard || std::abs(actualRow - at.row) + std::abs(actualCol - at.col) <= 1)
-            std::printf("puzzle remote touch: player not on a distant in-board cell\\n");
+            std::printf("puzzle remote touch: player not on a distant in-board cell\n");
         // Convert an object's projected field position to the renderer's frame pixels.
         // Both cancellation and the R3 gesture must begin with a real hit-test, not pkGrab().
         auto projectBlock = [&](int objectIndex, float& px, float& py) {
@@ -16441,9 +16441,10 @@ int inputCancelSelfTest(App& app) {
                 const auto& movedBlock = app.puzzle.objs[size_t(target)];
                 const bool blockMoved = movedBlock.row != row || movedBlock.col != col;
                 problems += !pressed || !selected || !liftedWhileHeld || !moved || !sent || !blockMoved;
-                std::printf("puzzle R3 slide: press %s, remote target %s, block lifted while held %s, straight drag %s, release sent slide %s, block moved %s\\n",
+                std::printf("puzzle R3 slide: press %s, remote target %s, block lifted while held %s, straight drag %s, release sent slide %s, block moved %s\n",
                             pressed ? "yes" : "NO", selected ? "yes" : "NO", liftedWhileHeld ? "yes" : "NO",
                             moved ? "yes" : "NO", sent ? "yes" : "NO", blockMoved ? "yes" : "NO");
+            }
             app.puzzleTouch = keepTouch;
             app.pad = keepPad;
             SDL_CloseGamepad(pad);
