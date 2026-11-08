@@ -9642,6 +9642,7 @@ void pkLanded(App& app) { // the block's message 4: Psychokinesis::onWaitMove
 }
 
 void stepPkBlock(App& app, App::Puzzle::Obj& o) {
+    App::Puzzle& pz = app.puzzle;
     cr::FieldNpc& n = app.npcs[size_t(o.npc)];
     auto setY = [&](float y) { place(app, o, {n.pos[0], y, n.pos[2]}); };
     switch (o.pk) {
@@ -16419,14 +16420,13 @@ int inputCancelSelfTest(App& app) {
                 puzzleTouchStep(app, 0.0f);
                 const bool pressed = app.puzzleTouch.pressed;
                 const bool selected = app.puzzleTouch.hit && app.puzzle.pkState == 1 && app.puzzle.pkTarget == target;
-                for (int i = 0; i < 4; ++i) stepEvents(app);
                 const bool horizontal = dragDirection >= 3;
                 const SDL_GamepadAxis dragAxis = horizontal ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_RIGHTY;
                 const Sint16 dragValue = (dragDirection == 1 || dragDirection == 3) ? Sint16(-32767) : Sint16(32767);
                 const float cursorFrom = horizontal ? app.puzzleTouch.x : app.puzzleTouch.y;
                 SDL_SetJoystickVirtualAxis(js, dragAxis, dragValue);
                 SDL_UpdateJoysticks();
-                // Cross the original psychokinesis swipe threshold (29 horizontal / 35 upward / 20 downward).
+                // Keep R3 down while moving the pointer, then release before the two-frame block lift.
                 for (int i = 0; i < 12; ++i) puzzleTouchStep(app, 0.012f);
                 const float cursorTo = horizontal ? app.puzzleTouch.x : app.puzzleTouch.y;
                 const bool moved = dragValue < 0 ? cursorTo < cursorFrom - 60.0f : cursorTo > cursorFrom + 60.0f;
@@ -16434,14 +16434,16 @@ int inputCancelSelfTest(App& app) {
                 SDL_SetJoystickVirtualButton(js, rawR3, false);
                 SDL_UpdateJoysticks();
                 puzzleTouchStep(app, 0.0f);
-                const bool released = !app.puzzleTouch.pressed && app.puzzle.pkState == 2 && app.puzzle.pkMoved;
+                const bool releasedEarly = !app.puzzleTouch.pressed && app.puzzle.pkState == 1 && app.puzzle.pkReleasePending;
+                for (int i = 0; i < 4; ++i) stepEvents(app); // finish the lift; the queued swipe must now start
+                const bool sent = app.puzzle.pkState == 2 && app.puzzle.pkMoved && !app.puzzle.pkReleasePending;
                 for (int i = 0; i < 120 && app.puzzle.pkState != 0; ++i) stepEvents(app);
                 const auto& movedBlock = app.puzzle.objs[size_t(target)];
                 const bool blockMoved = movedBlock.row != row || movedBlock.col != col;
-                problems += !pressed || !selected || !moved || !released || !blockMoved;
-                std::printf("puzzle right-stick touch: R3 press %s, remote block selected %s, cursor drag %s, block moved %s, release %s\n",
+                problems += !pressed || !selected || !moved || !releasedEarly || !sent || !blockMoved;
+                std::printf("puzzle right-stick touch: R3 press %s, remote block selected %s, cursor drag %s, early release queued %s, swipe sent %s, block moved %s\n",
                             pressed ? "yes" : "NO", selected ? "yes" : "NO", moved ? "yes" : "NO",
-                            blockMoved ? "yes" : "NO", released ? "yes" : "NO");
+                            releasedEarly ? "yes" : "NO", sent ? "yes" : "NO", blockMoved ? "yes" : "NO");
             }
             app.puzzleTouch = keepTouch;
             app.pad = keepPad;
@@ -21777,7 +21779,7 @@ bool puzzleTouchButtonDown(const App& app) {
 
 void puzzleTouchCancel(App& app) {
     App::PuzzleTouch& touch = app.puzzleTouch;
-    if (touch.pressed && app.puzzle.pkState == 1 && app.puzzle.pkFromX > -1e8f) {
+    if (app.puzzle.pkState == 1 && app.puzzle.pkFromX > -1e8f) {
         app.puzzle.pkPointerCancelled = true; // keep the lifted block; discard the interrupted swipe
         app.puzzle.pkReleasePending = false;
     }
