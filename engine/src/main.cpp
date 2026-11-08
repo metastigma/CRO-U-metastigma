@@ -9806,7 +9806,9 @@ void toughTap(App& app, int t) {
     App::Puzzle& pz = app.puzzle;
     if (pz.busy || t < 0 || t >= int(pz.objs.size())) return;
     App::Puzzle::Obj& o = pz.objs[size_t(t)];
-    if ((o.type != cr::kTypeFragile && o.type != cr::kTypeRed && o.type != cr::kTypeBlue) || !o.shown)
+    int pr, pc;
+    if ((o.type != cr::kTypeFragile && o.type != cr::kTypeRed && o.type != cr::kTypeBlue) || !o.shown ||
+        !cellOf(app, app.walker.pos, pr, pc))
         return;
     if (pz.esp == 0) { punish(app, t); return; } // no ESP left - only the mark
     ++app.game.vars[13]; // decESPCount
@@ -9961,7 +9963,8 @@ void pyroTap(App& app, int t) {
     App::Puzzle& pz = app.puzzle;
     if (t < 0 || t >= int(pz.objs.size())) return;
     App::Puzzle::Obj& o = pz.objs[size_t(t)];
-    if (o.type != cr::kTypeCandleSwitch || !o.shown) return;
+    int pr, pc;
+    if (o.type != cr::kTypeCandleSwitch || !cellOf(app, app.walker.pos, pr, pc)) return;
     if (pz.esp == 0) { punish(app, t); return; } // no ESP left - only the mark
     ++app.game.vars[13]; // decESPCount
     if (pz.esp > 0) --pz.esp;
