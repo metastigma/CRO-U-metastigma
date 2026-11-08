@@ -363,7 +363,7 @@ The previous port ignored slots 3–11 and generated the second member's destina
 - [x] Removed the player-cell gate from direct psychokinesis hit selection; keyboard targeting still uses ahead() and its grid lookup.
 - [x] Cursor hit feedback for psychokinesis now requires an actual held block (pkState == 1 and pkTarget >= 0), not only a successful geometric click.
 - [x] Self-test deliberately positions the player outside the puzzle grid before selecting a remote visible block.
-- [x] Direct screen touch no longer applies the player's cell lookup to psychokinesis, toughness or pyrokinesis; keyboard targeting still derives its target through the player's cell.
+- [x] Direct psychokinesis touch no longer requires the player to occupy a board cell; the original cell guards remain for the other puzzle abilities.
 - [x] A short R3 tap released during the psychokinesis lift now queues its final pointer position and submits the swipe when the block reaches its draggable state.
 - [x] The R3 regression test exercises early release, the queued swipe and actual block movement.
 - [ ] CI and in-game verification.
