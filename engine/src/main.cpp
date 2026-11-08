@@ -759,8 +759,10 @@ struct App {
         int pkState = 0, pkTarget = -1;    // Psychokinesis: 1 a block held, 2 waiting for it to land
         bool pkPointerCancelled = false; // keep a held block, but require a fresh drag after interruption
         bool pkMoved = false;
+        bool pkReleasePending = false;    // R3 may be released before the two-frame lift has finished
         int pkEffect = 0;                  // effect 5 on the leader while a block is held
         float pkFromX = 0, pkFromY = 0;    // where the mouse took hold (screen pixels); -1e9 = by key
+        float pkReleaseX = 0, pkReleaseY = 0; // queued touch-up position while the block is rising
         bool busy = false;                 // +0x26: an ability under way
         int scene = 4, sceneTimer = 0;     // PuzzleScene: 4 playing, 2 fading out to reset, 3 fading in
         bool asked[2] = {};                // the two buttons' scripts (EvrStart 6 / 7) running
@@ -9613,6 +9615,7 @@ void punish(App& app, int t) {
 // (counted as the block lands); letting go without one costs nothing.
 
 void reset(App& app);
+void pkRelease(App& app, float sx, float sy);
 
 bool crushes(App& app, const App::Puzzle::Obj& o) {
     const cr::FieldNpc& n = app.npcs[size_t(o.npc)];
@@ -9633,7 +9636,7 @@ void pkLanded(App& app) { // the block's message 4: Psychokinesis::onWaitMove
         if (pz.esp > 0) --pz.esp;
     }
     pz.busy = false;
-    pz.pkState = 0, pz.pkTarget = -1, pz.pkMoved = false;
+    pz.pkState = 0, pz.pkTarget = -1, pz.pkMoved = false, pz.pkReleasePending = false;
     stopEffect(app.fieldEffects, pz.pkEffect); // eff3d_delete(5)
     pz.pkEffect = 0;
 }
@@ -9657,6 +9660,11 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
         setY(o.baseY + 5.0f);
         o.bob = 0;
         o.pk = 2;
+        if (pz.pkReleasePending && pz.pkTarget == int(&o - pz.objs.data())) {
+            const float x = pz.pkReleaseX, y = pz.pkReleaseY;
+            pz.pkReleasePending = false;
+            pkRelease(app, x, y);
+        }
         break;
     case 2: { // onWaitSlide: bobbing; dropped (2) or sent (3)
         o.bob = (o.bob + 9) % 360;
@@ -9724,7 +9732,7 @@ void pkGrab(App& app, int t, float sx = -1e9f, float sy = -1e9f) {
     pz.busy = true;
     o.pkMsg = 1;
     pz.pkState = 1, pz.pkTarget = t, pz.pkMoved = false, pz.pkFromX = sx, pz.pkFromY = sy;
-    pz.pkPointerCancelled = false;
+    pz.pkPointerCancelled = false, pz.pkReleasePending = false;
     pz.pkEffect = npcEffect(app, 0x8b, -1, true);
 }
 
@@ -9753,13 +9761,20 @@ void pkSend(App& app, int dir) {
         pz.pkMoved = true;
     }
     pz.pkState = 2;
-    pz.pkPointerCancelled = false;
+    pz.pkPointerCancelled = false, pz.pkReleasePending = false;
 }
 
 // The mouse let go at (sx, sy): the drag's direction, or none inside the dead zone
 void pkRelease(App& app, float sx, float sy) {
     App::Puzzle& pz = app.puzzle;
-    if (pz.pkState != 1 || pz.pkFromX < -1e8f) return;
+    if (pz.pkState != 1 || pz.pkFromX < -1e8f || pz.pkTarget < 0 ||
+        pz.pkTarget >= int(pz.objs.size())) return;
+    if (pz.objs[size_t(pz.pkTarget)].pk != 2) {
+        pz.pkReleasePending = true;
+        pz.pkReleaseX = sx, pz.pkReleaseY = sy;
+        return;
+    }
+    pz.pkReleasePending = false;
     const float dx = (sx - pz.pkFromX) / 2.133f, dy = (sy - pz.pkFromY) / 2.4f; // to the 480 x 320 screen
     int dir = 0;
     if (!(dx > -29 && dx < 29 && dy > -35 && dy < 20)) {
@@ -9790,9 +9805,7 @@ void toughTap(App& app, int t) {
     App::Puzzle& pz = app.puzzle;
     if (pz.busy || t < 0 || t >= int(pz.objs.size())) return;
     App::Puzzle::Obj& o = pz.objs[size_t(t)];
-    int pr, pc;
-    if ((o.type != cr::kTypeFragile && o.type != cr::kTypeRed && o.type != cr::kTypeBlue) || !o.shown ||
-        !cellOf(app, app.walker.pos, pr, pc))
+    if ((o.type != cr::kTypeFragile && o.type != cr::kTypeRed && o.type != cr::kTypeBlue) || !o.shown)
         return;
     if (pz.esp == 0) { punish(app, t); return; } // no ESP left - only the mark
     ++app.game.vars[13]; // decESPCount
@@ -9947,8 +9960,7 @@ void pyroTap(App& app, int t) {
     App::Puzzle& pz = app.puzzle;
     if (t < 0 || t >= int(pz.objs.size())) return;
     App::Puzzle::Obj& o = pz.objs[size_t(t)];
-    int pr, pc;
-    if (o.type != cr::kTypeCandleSwitch || !cellOf(app, app.walker.pos, pr, pc)) return;
+    if (o.type != cr::kTypeCandleSwitch || !o.shown) return;
     if (pz.esp == 0) { punish(app, t); return; } // no ESP left - only the mark
     ++app.game.vars[13]; // decESPCount
     if (pz.esp > 0) --pz.esp;
@@ -10169,12 +10181,34 @@ bool click(App& app, float px, float py) {
     });
     if (t < 0) return false;
     app.puzzle.tapX = tx, app.puzzle.tapY = ty;
-    if (stage(app)->ability == cr::kAbilityPsychokinesis) pkGrab(app, t, lx, ly);
-    else if (stage(app)->ability == cr::kAbilityToughness) toughTap(app, t);
-    else if (stage(app)->ability == cr::kAbilityPyrokinesis) pyroTap(app, t);
-    else teleportTo(app, t);
+    const int usesBefore = app.game.vars[13];
+    const int punishedBefore = app.puzzle.punished;
+    switch (stage(app)->ability) {
+    case cr::kAbilityPsychokinesis:
+        pkGrab(app, t, lx, ly);
+        break;
+    case cr::kAbilityToughness:
+        toughTap(app, t);
+        break;
+    case cr::kAbilityPyrokinesis:
+        pyroTap(app, t);
+        break;
+    default:
+        teleportTo(app, t);
+        break;
+    }
     app.puzzle.tapX = app.puzzle.tapY = -1;
-    return true;
+    if (stage(app)->ability == cr::kAbilityPsychokinesis)
+        return app.puzzle.pkState == 1 && app.puzzle.pkTarget == t;
+    if (stage(app)->ability == cr::kAbilityTeleport) return app.puzzle.tpState != 0 ||
+                                                               app.puzzle.punished > punishedBefore;
+    if (stage(app)->ability == cr::kAbilityToughness)
+        return app.game.vars[13] != usesBefore || app.puzzle.objs[size_t(t)].hit ||
+               app.puzzle.punished > punishedBefore;
+    if (stage(app)->ability == cr::kAbilityPyrokinesis)
+        return app.game.vars[13] != usesBefore || app.puzzle.objs[size_t(t)].csMsg == 10 ||
+               app.puzzle.punished > punishedBefore;
+    return false;
 }
 
 // The mouse let go (the frame's pixels): a held block goes the way it was dragged
@@ -21743,8 +21777,10 @@ bool puzzleTouchButtonDown(const App& app) {
 
 void puzzleTouchCancel(App& app) {
     App::PuzzleTouch& touch = app.puzzleTouch;
-    if (touch.pressed && app.puzzle.pkState == 1 && app.puzzle.pkFromX > -1e8f)
+    if (touch.pressed && app.puzzle.pkState == 1 && app.puzzle.pkFromX > -1e8f) {
         app.puzzle.pkPointerCancelled = true; // keep the lifted block; discard the interrupted swipe
+        app.puzzle.pkReleasePending = false;
+    }
     touch.pressed = false;
     touch.hit = false;
     touch.visible = false;
