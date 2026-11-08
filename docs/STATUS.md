@@ -360,10 +360,8 @@ The previous port ignored slots 3–11 and generated the second member's destina
 - [x] Read SDL's physical joystick-button binding that maps to Gamepad RIGHT_STICK, with direct SDL joystick-button polling and event fallback.
 - [x] Give the virtual cursor a pressed/hit visual state so a touch miss is distinguishable from an unreceived R3 press.
 - [x] Replaced the empty-corner/button-only self-test with a real block test: project a visible psychokinesis block to screen coordinates, press the virtual joystick's mapped R3 input there, require puzzle::click to select that block, drag the pointer and release.
-- [x] Removed the player-cell gate from direct psychokinesis hit selection; keyboard targeting still uses ahead() and its grid lookup.
-- [x] Cursor hit feedback for psychokinesis now requires an actual held block (pkState == 1 and pkTarget >= 0), not only a successful geometric click.
-- [x] Self-test deliberately positions the player outside the puzzle grid before selecting a remote visible block.
-- [x] Direct psychokinesis touch no longer requires the player to occupy a board cell; the original cell guards remain for the other puzzle abilities.
-- [x] A short R3 tap released during the psychokinesis lift now queues its final pointer position and submits the swipe when the block reaches its draggable state.
-- [x] The R3 regression test exercises early release, the queued swipe and actual block movement.
+- [x] Restored the original psychokinesis precondition that the player is on a valid puzzle-grid cell; the test places the player on a distant empty in-board cell, outside the block's slide corridor.
+- [x] Kept the four sys.evt puzzle rules distinct: Teleport, Toughness and Pyrokinesis use a single target tap; only Psychokinesis uses touch-down, hold through the lift, straight slide and touch-up.
+- [x] R3 down/up edges from SDL Gamepad and raw Joystick events are latched until the frame updates the virtual finger position, so a click does not hit the previous frame's coordinates.
+- [x] The R3 regression test holds through NormalBlockPK rising, verifies the block reaches its held state, slides in one direction, releases, and verifies the block's grid cell changes.
 - [ ] CI and in-game verification.
