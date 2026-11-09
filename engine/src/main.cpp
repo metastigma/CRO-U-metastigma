@@ -12019,10 +12019,13 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
         b.shownMp[i] = rules.f[size_t(i)].mp;
     }
     setBattleCamera(app, std::max(0, b.formation - 2)); // btl_main 200: the opening turn
+    // btl_main 0: var 58 names the battle's track (_BGM_FILE index); 38 and over - a random
+    // battle's 999 - play track 31 (bgm43); 997 leaves the field's music playing
     const auto v58 = app.game.vars.find(58);
-    const int track = v58 != app.game.vars.end() && v58->second >= 0 && v58->second <= 28 ? v58->second : 8;
-    b.fieldTrack = app.music.current();
-    playBgm(app, uint32_t(track));
+    const int want = v58 != app.game.vars.end() ? v58->second : 999;
+    const int track = want == 997 ? -1 : want >= 0 && want < cr::kBgmTracks ? want : 31;
+    b.fieldTrack = app.lastFieldBgm; // (G+0x8a97c: the field's last play request, playing or not)
+    if (track >= 0) playBgm(app, uint32_t(track));
     app.dialogue.clear();
     ++app.battlesFought;
     if (SDL_getenv("CR_BATTLE_DEBUG"))
@@ -12098,7 +12101,7 @@ void endBattle(App& app, bool won) {
         if (after == 998) playBgm(app, 1u << 29);
         else if (after == 997) {}
         else if (after >= 0 && after < 100) playBgm(app, uint32_t(after));
-        else playBgm(app, uint32_t(app.lastFieldBgm));
+        else playBgm(app, b.fieldTrack >= 0 ? uint32_t(b.fieldTrack) : 1u << 29);
     }
     cr::EncounterTable table;
     const bool have = cr::encounterTable(app.events, app.mapNumber, table);
