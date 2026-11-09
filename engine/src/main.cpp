@@ -6222,6 +6222,15 @@ void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, fl
     }
 }
 
+// Convert the virtual finger's frame pixels to MenuPainter units. MenuPainter doubles these
+// units when drawing; keeping the pointer in screen pixels here would double its displacement.
+void puzzleTouchCursorMenuPoint(const App& app, float px, float py, float& x, float& y) {
+    float lx, ly;
+    app.renderer.toLogical(px, py, lx, ly);
+    x = (lx - app.renderer.uiX()) * 0.5f;
+    y = ly * 0.5f;
+}
+
 // menuf_mainPut in a puzzle room (G+0x35526 == 1), in tex2d units from the anchor (0, 0): a dark
 // panel (0, 12)-(80, 48) (0xb8 black), the infinity mark (792, 58, 72 x 28) at (4, 16) when the
 // count is unlimited, else "Left" (484, 184, 30 x 12) at (4, 24) and cmd_number_puzzle's two digits
@@ -6255,18 +6264,17 @@ void drawPuzzleHud(App& app, float a) {
     app.renderer.setOrigin(app.renderer.uiX()); // (the mark: where the field was touched)
     if (pz.punished > 0 && pz.punishPhase == 0) piece(pz.punishX, pz.punishY, 448, 120, 64, 64);
     if (app.puzzleTouch.visible) { // the virtual Vita touch point, moved by the right stick
-        float lx, ly;
-        app.renderer.toLogical(app.puzzleTouch.x, app.puzzleTouch.y, lx, ly);
-        const float x = lx - app.renderer.uiX();
+        float x, y;
+        puzzleTouchCursorMenuPoint(app, app.puzzleTouch.x, app.puzzleTouch.y, x, y);
         const float shadow[4] = {0.02f, 0.08f, 0.12f, a};
         const float cursor[4] = {app.puzzleTouch.pressed ? (app.puzzleTouch.hit ? 0.15f : 1.0f) : 0.25f,
                                  app.puzzleTouch.pressed ? (app.puzzleTouch.hit ? 1.0f : 0.45f) : 0.95f,
                                  app.puzzleTouch.pressed ? 0.25f : 1.0f, a};
-        m.quad(x - 10, ly - 2, 20, 4, shadow, shadow);
-        m.quad(x - 2, ly - 10, 4, 20, shadow, shadow);
-        m.quad(x - 8, ly - 1, 16, 2, cursor, cursor);
-        m.quad(x - 1, ly - 8, 2, 16, cursor, cursor);
-        m.quad(x - 2, ly - 2, 4, 4, cursor, cursor);
+        m.quad(x - 10, y - 2, 20, 4, shadow, shadow);
+        m.quad(x - 2, y - 10, 4, 20, shadow, shadow);
+        m.quad(x - 8, y - 1, 16, 2, cursor, cursor);
+        m.quad(x - 1, y - 8, 2, 16, cursor, cursor);
+        m.quad(x - 2, y - 2, 4, 4, cursor, cursor);
     }
 }
 
@@ -16315,6 +16323,21 @@ int inputCancelSelfTest(App& app) {
     }
     if (!entered || target < 0) ++problems;
     else {
+        // The cursor is drawn through MenuPainter, whose coordinates are doubled by design.
+        // Round-trip its centre to screen-logical space and ensure it is the same point used by
+        // the hit-test; this catches drawing/input unit mismatches independently of the pick test.
+        {
+            float cursorMenuX = 0, cursorMenuY = 0, pointerLogicalX = 0, pointerLogicalY = 0;
+            puzzleTouchCursorMenuPoint(app, app.puzzleTouch.x, app.puzzleTouch.y, cursorMenuX, cursorMenuY);
+            app.renderer.toLogical(app.puzzleTouch.x, app.puzzleTouch.y, pointerLogicalX, pointerLogicalY);
+            const float reconstructedX = app.renderer.uiX() + 2.0f * cursorMenuX;
+            const float reconstructedY = 2.0f * cursorMenuY;
+            const bool cursorAligned = std::fabs(reconstructedX - pointerLogicalX) < 0.01f &&
+                                       std::fabs(reconstructedY - pointerLogicalY) < 0.01f;
+            problems += !cursorAligned;
+            if (!cursorAligned) std::printf("puzzle pointer cursor: logical point mismatch (%.2f, %.2f) vs (%.2f, %.2f)\n",
+                                            reconstructedX, reconstructedY, pointerLogicalX, pointerLogicalY);
+        }
         const auto& at = app.puzzle.objs[size_t(target)];
         const auto& layout = cr::kPuzzleStage[pkStage];
         int playerRow = -1, playerCol = -1, remoteDistance = -1;
