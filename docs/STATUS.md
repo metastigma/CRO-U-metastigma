@@ -416,6 +416,7 @@ Original source: [DuIslingr/CRO-U commit 66c5ad2](https://github.com/DuIslingr/C
 - [x] Match the original package-binding order: when multiple textures have the same MCT ID, the last texture entry wins.
 - [x] Apply the rule to both material texture units (`textureRef` and `textureRef2`).
 - [x] Preserve the existing 1-based package-index fallback when no matching texture ID exists.
+- [x] Add CTest coverage for duplicate IDs (including ID 0), a unique match, a missing ID, and an empty package.
 - [ ] CI build and tests.
 - [ ] In-game check: inspect effect 99 at the opening's “Hmm!?” moment; the static painting must remain stable rather than flicker/tile. Also check effects 23 and 52, and models `f0000wap00`, `m215c`, and `m218d` where duplicate IDs occur.
 - [ ] Confirm ordinary packages with unique texture IDs and materials with a missing ID still resolve as before.
