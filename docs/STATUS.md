@@ -401,3 +401,11 @@ The previous port ignored slots 3–11 and generated the second member's destina
 - [ ] In-game verification: start a paired attack and have one member fall before their action; the survivor must perform their own solo attack. Repeat with the other pair slot as the fallen member, then confirm intact paired attacks and ordinary solo attacks are unchanged.
 
 Original source: [DuIslingr/CRO-U commit 31d592a791](https://github.com/DuIslingr/CRO-U/commit/31d592a791), Omega 3.1.0 `btlque_make_que` handling.
+
+## Upstream port: Options audio gauge fill colour — 2026-11-09
+
+- [x] Interpret the packed `0xFFFF0000` fill colour using the renderer's ABGR channel order; the Options BGM, Sound Effects, and Voice gauge fills are blue, matching Omega 3.1.0.
+- [x] Keep the gauge position, fill extent, knob tint, and alpha unchanged; only correct the fill RGB channels.
+- [ ] In-game check: open Options and verify all three audio-level gauges fill blue at low, middle, and high values, while the knob and the rest of the menu remain unchanged.
+
+Original source: [DuIslingr/CRO-U commit 66c5ad2](https://github.com/DuIslingr/CRO-U/commit/66c5ad214ab1b5489d8c19252229a9f24727129a).
