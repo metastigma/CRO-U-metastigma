@@ -16624,14 +16624,28 @@ int fieldLifecycleSelfTest(App& app) {
         if (n == app.npcs.end()) ++problems;
         else {
             const int id = n->id;
+            host.fadeNpc(0, 0, 0, 0); // mdl_set_alpha at zero frames still selects permanent blending
+            const bool playerFadeMode = app.playerFaded && app.playerAlpha == 1.0f && app.playerFadeLeft == 0;
+            int npcInstances = 0;
+            for (const App::NpcDraw& d : app.npcDraws) if (d.id == id) ++npcInstances;
+            host.fadeNpc(id, 0, 0, 0);
+            bool npcFadeMode = npcInstances > 0;
+            for (const App::NpcDraw& d : app.npcDraws)
+                if (d.id == id) npcFadeMode &= d.faded && d.fadeLeft == 0 && d.alpha == 1.0f;
+            const bool fadeMode = playerFadeMode && npcFadeMode;
+
             const float scale[3] = {2, 2, 2};
             host.scaleNpc(id, scale, 100);
             const bool active = host.animBusy(id) && !app.rescales.empty();
             cr::WarpRequest w;
             w.valid = true, w.area = cr::kPuzzleArea, w.map = cr::kFirstPuzzleMap + 1;
-            const bool clean = performWarp(app, w, -1) && app.rescales.empty() && !host.animBusy(id);
-            std::printf("field lifecycle: NPC scale task active %d, next room %s\n", active, clean ? "ok" : "FAILED");
-            problems += !active + !clean;
+            const bool warped = performWarp(app, w, -1);
+            bool fadeReset = !app.playerFaded;
+            for (const App::NpcDraw& d : app.npcDraws) fadeReset &= !d.faded;
+            const bool clean = warped && app.rescales.empty() && !host.animBusy(id) && fadeReset;
+            std::printf("field lifecycle: NPC scale active %d, NpcFade permanent mode %s, room reset %s\n",
+                        active, fadeMode ? "ok" : "FAILED", clean ? "ok" : "FAILED");
+            problems += !active + !fadeMode + !clean;
         }
     } else ++problems;
     // Interrupt an actual Teleport after its fade-out, then reload the captured room.
