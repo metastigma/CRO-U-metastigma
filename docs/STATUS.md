@@ -447,3 +447,16 @@ Original source: [DuIslingr/CRO-U commit 023d23f](https://github.com/DuIslingr/C
 - [ ] Recheck map 71 / `d0550_10` after the PR #21 orientation change: effects 130 and 133 (EVT 602 / 603) must trail the ship.
 
 Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/CRO-U/commit/285bf45cfbcd02740bcfe134ea74338d32fb3aa7). Adapted to this fork's renderer and existing badge geometry; unrelated upstream changes are not included.
+
+## Пакет A — игровая логика Omega 3.1.0 (продолжение PR #22)
+
+- [x] Counter 154: гарантированная контратака на физический удар; русское название и описание вынесены в корневой чек-лист `ПРОВЕРКА_COUNTER_154.md` для проверки при прохождении.
+- [x] NPC table +8: сохранён native ID; native 15 запускает штатную процедуру fire wall при инициализации комнаты.
+- [x] `NpcFade 0` направляется на fade модели игрока.
+- [x] `Uty_ChkLogo_flg`: чтение и запись флага разделены.
+- [x] `Uty_Btl_ParamUp01/02`: используется battle-only Ward/double-stats byte; ошибочный queued +20% buff удалён.
+- [x] BGM bookkeeping: удалена эвристика выбора трека по имени карты; восстановление после боя учитывает var 60 и последний полевой BGM-запрос.
+- [x] CMP KD node: сохраняются floor/wall lists, split/axis/child; классификация пола/стен следует оригинальным спискам, а не только normal.y.
+- [ ] CI / CTest и игровая проверка всех пунктов.
+
+Источники: [NPC natives / ParamUp](https://github.com/DuIslingr/CRO-U/commit/231bf064), [Counter 154](https://github.com/DuIslingr/CRO-U/commit/31d592a7), [BGM](https://github.com/DuIslingr/CRO-U/commit/f2ead07e), [KD floor/wall](https://github.com/DuIslingr/CRO-U/commit/014e146c).
