@@ -409,3 +409,15 @@ Original source: [DuIslingr/CRO-U commit 31d592a791](https://github.com/DuIsling
 - [ ] In-game check: open Options and verify all three audio-level gauges fill blue at low, middle, and high values, while the knob and the rest of the menu remain unchanged.
 
 Original source: [DuIslingr/CRO-U commit 66c5ad2](https://github.com/DuIslingr/CRO-U/commit/66c5ad214ab1b5489d8c19252229a9f24727129a).
+
+
+## Duplicate texture IDs — use the last package entry (upstream bdb4e3e, 2026-11-09)
+
+- [x] Match the original package-binding order: when multiple textures have the same MCT ID, the last texture entry wins.
+- [x] Apply the rule to both material texture units (`textureRef` and `textureRef2`).
+- [x] Preserve the existing 1-based package-index fallback when no matching texture ID exists.
+- [ ] CI build and tests.
+- [ ] In-game check: inspect effect 99 at the opening's “Hmm!?” moment; the static painting must remain stable rather than flicker/tile. Also check effects 23 and 52, and models `f0000wap00`, `m215c`, and `m218d` where duplicate IDs occur.
+- [ ] Confirm ordinary packages with unique texture IDs and materials with a missing ID still resolve as before.
+
+Original source: [DuIslingr/CRO-URO commit bdb4e3e](https://github.com/DuIslingr/CRO-U/commit/bdb4e3e124d392cfa5d6f9f1d11c33295755ec92). The upstream change documents the original 3.1.0 behavior: package textures are bound in order, so a later texture with the same referenced ID replaces the earlier binding.
