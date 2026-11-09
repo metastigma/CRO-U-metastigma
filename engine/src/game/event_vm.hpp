@@ -157,7 +157,8 @@ public:
     virtual void tutoTexDisp(const int32_t* /*g*/) {}
     virtual void exclamationMark() {}
     virtual void battleParamUp(int /*fighter*/) {} // Uty_Btl_ParamUp01 (fighter 1) / 02 (fighter 0)
-    virtual bool logoSeen() { return false; }     // Uty_ChkLogo_flg: the logos already played this run
+    virtual bool logoSeen() { return false; }     // Uty_ChkLogo_flg: read the run flag
+    virtual void setLogoSeen() {}                 // Uty_ChkLogo_flg: set the run flag
     // The Vita's boot opcodes 0x47..0x4a: a logo picture into a slot; shown faded in, held and
     // faded out (frames) - the script waits while it is busy
     virtual void vitaLogo(int /*slot*/, int /*picture*/) {}

@@ -191,6 +191,7 @@ struct App {
     int mapNumber = -1, area = -1;         // the field being shown (map 0..129, area = event file)
     cr::EventFile events;                  // the current area's event file
     std::vector<cr::FieldNpc> npcs;        // this map's NPCs and trigger boxes
+    bool npcNativesPending = false;        // npc_setup table natives run on the room's first frame
     std::vector<bool> npcWarps;            // per NPC: its touch script warps (from a trial run)
     cr::GpuMesh triggerMesh;               // trigger boxes, shown with the collision overlay
     cr::GpuMesh puzzleBeams;               // the candle switches' beams (CandleSwitch::draw3D)
@@ -203,7 +204,6 @@ struct App {
     cr::EventRunner runner;                // the script being played, a frame at a time
     cr::SoundSystem sound;                 // sndeff.bin through SDL audio
     cr::MusicPlayer music;                 // bgmNN.caf (AAC) through FAAD2 + SDL audio
-    int musicArea = -1;                    // area whose default track is playing
     // Mixer, 0..100 like the original's Options sliders (music and effects default to 80 there;
     // master and voice are additions - the original has no voice audio)
     struct Mix { int master = 100, music = 80, effects = 80, voice = 100; } mix;
@@ -676,7 +676,6 @@ struct App {
     std::array<int, 256> fieldEffectCount{};   // started on the field, by id (tests; Omega's field ids run past 0x90)
     int frameEffectCalls = 0, scriptEffectCalls = 0, scriptQuakes = 0;
     int texDispCalls = 0, tutoCalls = 0, tutoPage = -1, exclamationCalls = 0; // (tests)
-    bool paramUp[2] = {};                  // Uty_Btl_ParamUp02 / 01 waiting for the next battle
     bool logoSeen = false;                 // G+0x1f85e6: the logos played (Uty_ChkLogo_flg)
     bool padArt = false;                   // Uty_DrawController: the pad's picture (flag 0)
     std::map<std::string, int> matAnimDraws;   // NPC models drawn with animated materials (tests)
@@ -790,7 +789,8 @@ struct App {
     struct CrystalCam { int npc = -1; int phase = 0; } crystalCam; // Uty_WarpCrystalCamera: 0 to the crystal, 1 back
     float crystalSpin = 0;                // render-time phase, independent of the 20 Hz simulation
     bool puzzleStartPending = false;
-    int bgmNo = 0;                         // G+0x35530: the music last asked for (Uty_GetBgmNo)
+    int bgmNo = 255;                       // G+0x35530: no track requested / stopped / faded
+    int lastFieldBgm = 0;                  // G+0x8a97c: last field request, restored after battle
     struct NowLoading { bool on = false; int frame = 0; } nowLoading; // NowLoadProc's spinner
     struct VitaLogo {                      // the Vita's boot opcodes 0x47..0x4a: a full-screen logo
         cr::Texture tex[2];                // by slot (0x47's slot + 16 in the original's Tex2d)
@@ -1843,7 +1843,10 @@ bool npcDrawn(const App& app, size_t index) {
 // Loads the area's event file if needed, the map's NPC list, and the trigger-box overlay.
 // _bgmgo: the music command; a play request (no stop / fade bits) is the track Uty_GetBgmNo reports
 void playBgm(App& app, uint32_t v) {
-    if (!(v & 0x2e000000u)) app.bgmNo = int(v & 0xff);
+    if (!(v & 0x2e000000u)) {
+        app.bgmNo = int(v & 0xff);
+        if (!app.battle.active && !app.titleOpen && !app.booting) app.lastFieldBgm = int(v & 0xff);
+    } else app.bgmNo = 255;
     app.music.command(v);
 }
 
@@ -1861,6 +1864,7 @@ void endFieldTasks(App& app) {
 
 void enterMap(App& app) {
     endFieldTasks(app);
+    app.npcNativesPending = false;
     app.npcs.clear();
     app.fieldEffects.clear();
     app.frameEffects.clear();
@@ -1886,6 +1890,7 @@ void enterMap(App& app) {
         }
     }
     app.npcs = app.events.npcs(app.mapNumber);
+    app.npcNativesPending = true;
     { // fldencount_init
         cr::EncounterTable table;
         const bool have = cr::encounterTable(app.events, app.mapNumber, table);
@@ -1894,20 +1899,6 @@ void enterMap(App& app) {
     app.pendingEntry = app.area != app.entryArea ? App::Entry::Area : App::Entry::Room;
     if (app.area != app.entryArea) app.game.frmScene = app.game.frmRecord = 0; // offsets into the old file
     app.entryArea = app.area;
-    // Music: each area's usual track (what its entry script mostly plays: dungeons d01-d04 ->
-    // 2-5, d05 -> 17, towns -> 15, puzzle rooms -> 6; event 0 itself isn't run yet). Scripts
-    // change it with Bgm.
-    if (app.area != app.musicArea) {
-        app.musicArea = app.area;
-        const std::string ev = cr::kAreaEventFile[app.area];
-        int track = -1;
-        if (ev.compare(5, 2, "d0") == 0) track = ev[7] == '5' ? 17 : ev[7] - '1' + 2;
-        else if (ev.compare(5, 3, "t01") == 0) track = 15;
-        else if (ev.compare(5, 3, "p01") == 0) track = 6;
-        else if (ev.compare(5, 3, "t91") == 0) track = 1;
-        else if (ev.compare(5, 3, "d91") == 0) track = 4;
-        if (track >= 0) playBgm(app, uint32_t(track));
-    }
     // Treasure boxes (TreasureBoxManager): the first four worlds' (areas 2..5) are drawn again each
     // time the World Select leads into one (fldread_evt_init2 -> _InitDungeon -> randomSelect), the
     // draw kept with the scenario (the save) and its boxes taken there; flags set per map (setup).
@@ -3052,6 +3043,12 @@ struct ViewerHost : cr::EventHost {
         moveNpc(id, v, 0, Facing::Keep, int(std::hypot(p.x - x, p.z - z) / speed), 0);
     }
     void fadeNpc(int id, float from, float to, int frames) override {
+        if (id == 0) {
+            if (frames <= 0) { app.playerFadeLeft = 0; return; }
+            app.playerAlphaFrom = from, app.playerAlphaTo = to, app.playerAlpha = from;
+            app.playerFadeFrames = app.playerFadeLeft = frames;
+            return;
+        }
         for (auto* d : npc(id)) {
             d->alphaFrom = from; d->alphaTo = to; d->alpha = from;
             d->fadeFrames = d->fadeLeft = std::max(frames, 1);
@@ -3280,6 +3277,8 @@ struct ViewerHost : cr::EventHost {
         n.kind = row.kind;
         n.treasure = row.box;
         n.puzzle = row.puzzle;
+        n.native = row.native;
+        n.mdlRead = true;
         n.scale = row.scale;
         if (id >= 400 || !npcActive(app, n)) app.npcShown[id] = false;
         app.npcs.push_back(n);
@@ -3386,15 +3385,14 @@ struct ViewerHost : cr::EventHost {
     void exclamationMark() override { app.exclamation = true; ++app.exclamationCalls; }
     void openWindow(int style, int lines) override { app.msgStyle = style, app.msgLines = lines, app.heldPage = false; }
     void closeWindow() override { app.heldPage = false; } // Close: a page that ended itself goes with its window
-    bool logoSeen() override { const bool seen = app.logoSeen; app.logoSeen = true; return seen; }
+    bool logoSeen() override { return app.logoSeen; }
+    void setLogoSeen() override { app.logoSeen = true; }
     void padArt() override { app.padArt = true; }
-    // Uty_Btl_ParamUp01 / 02: battle fighter 1 / 0's attack, defense, speed and luck up for 6 rounds
-    // (+0x8b..+0x8e = 6); outside a battle, for the next one
+    // Omega 3.1.0 doubles the four base stats for the rest of the active battle.
+    // Outside a battle this native does nothing; it is not queued for the next encounter.
     void battleParamUp(int fighter) override {
-        if (fighter < 0 || fighter > 1) return;
-        if (app.battle.active) {
-            for (int st = cr::kStatusAttackUp; st <= cr::kStatusLuckUp; ++st) app.battle.rules.f[size_t(fighter)].status[st] = 6;
-        } else app.paramUp[fighter] = true;
+        if (fighter < 0 || fighter > 1 || !app.battle.active) return;
+        app.battle.rules.f[size_t(fighter)].status[cr::kStatusWard] = 1;
     }
     void puzzleStart() override { app.puzzleBanner = App::PuzzleBanner(); app.puzzleBanner.on = true; } // Uty_PuzzleStart_Init
     void warpCrystalCamera(int npc) override { // SetFreeCamera, then the camera task
@@ -3455,6 +3453,7 @@ struct ViewerHost : cr::EventHost {
     }
     void battle(int group, int stage, int flags) override { // starts when this frame's script step ends
         app.battle.requested = true;
+        app.lastFieldBgm = 0;
         app.battle.request = {group, stage, -1, 0};
         app.battle.requestFlags = flags;
     }
@@ -10324,6 +10323,15 @@ void stepEvents(App& app) {
     // left them for its updates): the present packs - the second scenario's five extra trials and
     // their presents - open
     for (int f = 101; f <= 106; ++f) app.game.setFlag(f, true);
+    if (app.npcNativesPending) {
+        app.npcNativesPending = false;
+        ViewerHost natives(app);
+        for (const cr::FieldNpc& n : app.npcs)
+            if (n.native == 15 && npcActive(app, n)) {
+                app.game.vars[0] = n.id;
+                natives.fireWall(n.id);
+            }
+    }
     if (app.skipScene) { // fast-forward: every page turns at once (choices still wait for an answer)
         if (!app.runner.running()) clearSceneSkip(app);
         else if (!app.dialogue.empty()) advanceDialogue(app);
@@ -11943,11 +11951,6 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     const int band = app.game.bands[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))];
     rules.setupSpecial(app.game, app.itemTable, start.group, route); // the story battles' line-ups
     rules.setupEnemies(app.battleData, ids, band);
-    for (int k = 0; k < 2; ++k) // Uty_Btl_ParamUp01 / 02 called before this battle began
-        if (app.paramUp[k]) {
-            for (int st = cr::kStatusAttackUp; st <= cr::kStatusLuckUp; ++st) rules.f[size_t(k)].status[st] = 6;
-            app.paramUp[k] = false;
-        }
     for (int k = 0; k < 2; ++k) { // the pair (or who fights): j001..j008
         if (!rules.f[size_t(k)].present) continue;
         const int c = rules.f[size_t(k)].character;
@@ -12055,7 +12058,14 @@ void endBattle(App& app, bool won) {
     app.fieldEffects.clear();
     b.actors.clear();
     b.active = false;
-    playBgm(app, b.fieldTrack >= 0 ? uint32_t(b.fieldTrack) : 1u << 29);
+    {
+        const auto v60 = app.game.vars.find(60);
+        const int after = v60 != app.game.vars.end() ? v60->second : 999;
+        if (after == 998) playBgm(app, 1u << 29);
+        else if (after == 997) {}
+        else if (after >= 0 && after < 100) playBgm(app, uint32_t(after));
+        else playBgm(app, uint32_t(app.lastFieldBgm));
+    }
     cr::EncounterTable table;
     const bool have = cr::encounterTable(app.events, app.mapNumber, table);
     app.encounters.enterMap(have ? &table : nullptr);
@@ -18844,25 +18854,28 @@ int runSelfTest(App& app) {
         openShop(app);
         host.endMenu(2);
         const bool ended = !app.shop.open && host.bgmNo() == 0x13; // SetShopBgmNoRecovery
-        // 2030 / 2031: queued outside a battle, the next battle's fighter 1 / 0 starts with the four ups
+        // 2030 / 2031: a native outside battle does nothing; in battle it sets the doubled byte now.
         host.battleParamUp(1);
-        const bool queued = app.paramUp[1] && !app.paramUp[0];
         app.game = keepGame;
         startBattle(app, {1, 0, -1, 0}, 0);
-        bool boosted = false;
+        bool doubled = false;
         if (app.battle.active) {
-            const cr::Fighter& f1 = app.battle.rules.f[1];
-            boosted = f1.status[cr::kStatusAttackUp] == 6 && f1.status[cr::kStatusDefenseUp] == 6 &&
-                      f1.status[cr::kStatusSpeedUp] == 6 && f1.status[cr::kStatusLuckUp] == 6 &&
-                      app.battle.rules.f[0].status[cr::kStatusAttackUp] == 0 && !app.paramUp[1];
-            host.battleParamUp(0); // in a battle: at once
-            boosted &= app.battle.rules.f[0].status[cr::kStatusSpeedUp] == 6;
+            const bool before = app.battle.rules.f[1].status[cr::kStatusWard] == 0 &&
+                                app.battle.rules.f[0].status[cr::kStatusWard] == 0;
+            host.battleParamUp(1);
+            const bool one = app.battle.rules.f[1].status[cr::kStatusWard] == 1 &&
+                             app.battle.rules.f[0].status[cr::kStatusWard] == 0;
+            host.battleParamUp(0);
+            const bool two = app.battle.rules.f[0].status[cr::kStatusWard] == 1;
+            doubled = before && one && two;
             endBattle(app, false);
         }
-        problems += !queued || !boosted;
+        problems += !doubled;
         // 2029 / 2008: the logos once a run; the pad's picture while flag 0 is set
         app.logoSeen = false;
-        const bool logoOnce = !host.logoSeen() && host.logoSeen();
+        const bool logoWasClear = !host.logoSeen();
+        host.setLogoSeen();
+        const bool logoOnce = logoWasClear && host.logoSeen();
         app.game.setFlag(0, true);
         host.padArt();
         app.lastTicks = 0;
@@ -19980,7 +19993,6 @@ void bootTitle(App& app) {
     app.mapNumber = cr::kAreaFirstMap[0];
     app.entryArea = 0;
     app.pendingEntry = App::Entry::None;
-    app.musicArea = -1;
     playBgm(app, 1u << 29); // the script starts the title music
     std::string err;
     if (!app.events.load(app.dataDir, 0, &err)) {
