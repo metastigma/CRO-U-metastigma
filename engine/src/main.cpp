@@ -1924,6 +1924,7 @@ void enterMap(App& app) {
     cr::applyTreasureFlags(app.events, app.npcs, boxes, app.game, true);
     puzzle::enter(app); // PuzzleScene::init in a puzzle room (stage -1 elsewhere)
     app.puzzleStartPending = app.puzzle.stage >= 0;
+    app.npcDraws.clear(); // npc_setup reads the room's models again: no fade carried over from the last room
     buildNpcDraws(app);
     buildWalkCollision(app);
     cr::Mesh mesh;
