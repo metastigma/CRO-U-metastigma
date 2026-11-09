@@ -3144,7 +3144,7 @@ struct ViewerHost : cr::EventHost {
         const int h = startEffect(app, app.fieldEffects, 0x98 + k, p, true, 1.0f, 0.0f);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.faceCamera = true;
+                if (fx.handle == h) fx.faceCamera = app.battle.active;
     }
     int bgmNo() override { return app.bgmNo; }
     void endMenu(int kind) override { // 2: the shop - SetShopBgmNoRecovery, __mc_SetMenuStat(7, 4)
