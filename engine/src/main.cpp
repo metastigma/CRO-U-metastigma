@@ -2873,7 +2873,17 @@ bool fieldViewPoint(const App& app, const cr::Vec3& p, float& vx, float& vy) {
 // moves `rate` of the way there
 void scrollFieldTo(App& app, float vx, float vy, float rate) {
     const float V = fieldViewW(app), Vh = fieldViewH(app);
-    const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
+    cr::Renderer& r = app.renderer;
+    // The painted field is drawn on layer 3. On phone/Vita layouts that layer is scaled
+    // differently from the 2D UI layer, so clamp the camera to the actual painted viewport.
+    const int keepLayer = r.layer();
+    r.setLayer(3);
+    const float k = r.phoneLayout() ? r.layoutScale() : 1.0f;
+    float cx = r.screenW() / 2, cy = cr::Renderer::kLogicalH / 2.0f;
+    r.layoutToScreen(cx, cy);
+    const float shiftY = (cy - cr::Renderer::kLogicalH / 2.0f) / k;
+    r.setLayer(keepLayer);
+    const float SW = r.screenW() / k, H = cr::Renderer::kLogicalH / k;
     const int* rc = app.stageCam.rect;
     const bool haveRect = rc[2] > 0 && rc[3] > 0;
     const float rx = haveRect ? 2.0f * float(rc[0]) : 0, ry = haveRect ? 2.0f * float(rc[1]) : 0;
@@ -2881,7 +2891,8 @@ void scrollFieldTo(App& app, float vx, float vy, float rate) {
     auto axis = [](float v, float lo, float len, float screen) {
         return len <= screen ? lo + len / 2 : std::clamp(v, lo + screen / 2, lo + len - screen / 2);
     };
-    const float tx = V / 2 - axis(vx, rx, rw, SW), ty = axis(vy, ry, rh, H) - Vh / 2;
+    const float tx = V / 2 - axis(vx, rx, rw, SW);
+    const float ty = axis(vy - shiftY, ry, rh, H) + shiftY - Vh / 2;
     app.scroll.offX += (tx - app.scroll.offX) * rate;
     app.scroll.offY += (ty - app.scroll.offY) * rate;
 }
@@ -14428,8 +14439,19 @@ void drawPrompt(App& app, const cr::Mat4& vp, float rx, float ry, float rw, floa
     const float* m = vp.m;
     const float cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
     if (cw <= 0) return;
-    const float sx = rx + ((m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / cw * 0.5f + 0.5f) * rw;
-    const float sy = ry + (0.5f - (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw * 0.5f) * rh;
+    float sx = rx + ((m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / cw * 0.5f + 0.5f) * rw;
+    float sy = ry + (0.5f - (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw * 0.5f) * rh;
+    { // The projection is in painted layer 3; the prompt and its touch target are on UI layer 0.
+        cr::Renderer& r = app.renderer;
+        const int keep = r.layer();
+        float x = sx, y = sy;
+        r.setLayer(3);
+        r.layoutToScreen(x, y);
+        r.setLayer(0);
+        r.screenToLayout(x, y);
+        r.setLayer(keep);
+        sx = x, sy = y;
+    }
     app.promptX = sx, app.promptY = sy - 20.5f; // (a tap there examines it: touchPadDown)
     if (app.windowTex.id) drawWinPiece(app, kWinBadge, sx - 20, sy - 41, 40, 41); // the "!" badge
     else app.promptHud.drawAt(app.renderer, {"[E]"}, sx - 24, sy - 16, 2.0f, 0, 0, 0.8f);
@@ -14664,8 +14686,10 @@ void drawFrame(App& app, bool present = true) {
             r.setColorWrite(false);
             if (app.showProps) drawLoaded(app, app.model, mvp);
             r.setColorWrite(true);
-            drawNpcs(app, mvp);
+            // mdl_put queues the player's model before the NPCs' draw entries. In particular,
+            // the ship's blended c152 waves must not cover Vieg on the deck.
             if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app));
+            drawNpcs(app, mvp);
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
             drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // only effects flagged by battle-time setup face the camera
             if (app.showCollision && app.collision.vao) {
