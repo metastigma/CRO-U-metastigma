@@ -45,6 +45,7 @@
 #include "assets/hd_texture.hpp"
 #include "audio/at9.hpp"
 #include "scene/smooth.hpp"
+#include "gfx/effect_orientation.hpp"
 #include "assets/gltf_model.hpp"
 #include "game/save.hpp"
 #include "game/shop.hpp"
@@ -119,6 +120,7 @@ struct Effect {
     bool loop = false;
     float scale = 1, yaw = 0;
     float pitch = 0, roll = 0; // FrmPlayEff2: the record's X and Z angles (radians)
+    bool faceCamera = false;   // Omega sets mdl +0xfc7 only for effects started while a battle is active
     int handle = 0;  // for stopping it
     int key = 0;     // FrmPlayEff's (effect + 1) x (actor + 1)
 };
@@ -3127,7 +3129,10 @@ struct ViewerHost : cr::EventHost {
         const int k = npc == 0x1c6 ? 0 : npc == 0x1c5 ? 1 : -1;
         cr::Vec3 p;
         if (k < 0 || app.game.flag(kClear[k][std::clamp(app.game.scenario, 0, 1)]) || !actorPos(app, npc, p)) return;
-        startEffect(app, app.fieldEffects, 0x98 + k, p, true, 1.0f, 0.0f);
+        const int h = startEffect(app, app.fieldEffects, 0x98 + k, p, true, 1.0f, 0.0f);
+        if (h)
+            for (Effect& fx : app.fieldEffects)
+                if (fx.handle == h) fx.faceCamera = app.battle.active;
     }
     int bgmNo() override { return app.bgmNo; }
     void endMenu(int kind) override { // 2: the shop - SetShopBgmNoRecovery, __mc_SetMenuStat(7, 4)
@@ -3404,7 +3409,7 @@ struct ViewerHost : cr::EventHost {
         const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, yaw);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll;
+                if (fx.handle == h) fx.pitch = pitch, fx.yaw = yaw, fx.roll = roll, fx.faceCamera = app.battle.active;
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
@@ -3417,7 +3422,12 @@ struct ViewerHost : cr::EventHost {
     void npcEffect(int effect, int npc, int dy) override {
         ++app.scriptEffectCalls;
         cr::Vec3 p;
-        if (actorPos(app, npc, p)) startEffect(app, app.fieldEffects, effect, p + cr::Vec3{0, float(dy), 0}, false, 1.0f, 0.0f);
+        if (actorPos(app, npc, p)) {
+            const int h = startEffect(app, app.fieldEffects, effect, p + cr::Vec3{0, float(dy), 0}, false, 1.0f, 0.0f);
+            if (h)
+                for (Effect& fx : app.fieldEffects)
+                    if (fx.handle == h) fx.faceCamera = app.battle.active;
+        }
     }
     void mapScroll(int npc, float x, float y, float rate) override {
         ++app.scroll.mapScrolls;
@@ -11640,7 +11650,9 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp, 
             }
         }
         // scaled, turned (Euler XYZ, mdl_put: R = Rz Ry Rx), at its point
-        const float yaw = eye && target ? std::atan2(eye->x - target->x, eye->z - target->z) : e.yaw;
+        const bool battleEffectList = &list == &app.battle.effects;
+        const bool face = cr::effectFacesCamera(eye && target, battleEffectList, e.faceCamera);
+        const float yaw = face ? std::atan2(eye->x - target->x, eye->z - target->z) : e.yaw;
         const float cx = std::cos(e.pitch), sx = std::sin(e.pitch), cy = std::cos(yaw), sy = std::sin(yaw);
         const float cz = std::cos(e.roll), sz = std::sin(e.roll), k = e.scale;
         cr::Mat4 world;
@@ -14655,7 +14667,7 @@ void drawFrame(App& app, bool present = true) {
             drawNpcs(app, mvp);
             if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app));
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
-            drawEffects(app, app.fieldEffects, mvp, nullptr, nullptr);
+            drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // only effects flagged by battle-time setup face the camera
             if (app.showCollision && app.collision.vao) {
                 cr::Material colMat; // translucent so the painted floor shows through
                 colMat.culling = 0;

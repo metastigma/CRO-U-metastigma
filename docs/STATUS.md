@@ -422,3 +422,16 @@ Original source: [DuIslingr/CRO-U commit 66c5ad2](https://github.com/DuIslingr/C
 - [ ] Confirm ordinary packages with unique texture IDs and materials with a missing ID still resolve as before.
 
 Original source: [DuIslingr/CRO-URO commit bdb4e3e](https://github.com/DuIslingr/CRO-U/commit/bdb4e3e124d392cfa5d6f9f1d11c33295755ec92). The upstream change documents the original 3.1.0 behavior: package textures are bound in order, so a later texture with the same referenced ID replaces the earlier binding.
+
+
+## Upstream port: camera-facing effects are battle-only — 2026-11-09
+
+- [x] Add the Omega camera-facing flag to effect instances.
+- [x] Field-script effects, NPC effects, and puzzle fire walls request camera-facing only when started while `app.battle.active` is true.
+- [x] Preserve `FrmPlayEff2` record yaw, pitch, and roll for field effects.
+- [x] Pass the active stage camera to field-effect rendering, but billboard only battle effects or field effects explicitly marked by battle-time setup.
+- [x] Add a focused CTest for missing camera vectors, battle effects, normal field effects, and battle-started field effects.
+- [ ] CI and CTest.
+- [ ] In-game verification: replay the ship crossing (map 71 / `d0550_10`), especially effects 130 and 133 (EVT records 602 / 603). Their wakes must follow the ship's path and stay behind it, not swing toward the camera. Also verify battle effects still face the camera and field fire walls / NPC effects keep their authored angles.
+
+Original source: [DuIslingr/CRO-U commit 023d23f](https://github.com/DuIslingr/CRO-U/commit/023d23fef2ccebeb01ed957afee2b2cd2ef7b687). The unrelated `CR_CAPTURE_EVERY_N` capture-debug option from that commit is deliberately not included.
