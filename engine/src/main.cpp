@@ -3460,7 +3460,6 @@ struct ViewerHost : cr::EventHost {
     }
     void battle(int group, int stage, int flags) override { // starts when this frame's script step ends
         app.battle.requested = true;
-        app.battle.fieldTrack = app.lastFieldBgm; // save the last field play request before __EvtBattle clears it
         app.lastFieldBgm = 0;
         app.battle.request = {group, stage, -1, 0};
         app.battle.requestFlags = flags;
@@ -11910,7 +11909,6 @@ int battleModelOf(const App& app, int c, int slot) {
 void startBattle(App& app, const cr::BattleStart& start, int flags) {
     app.renderer.resetHistory(); // a cut: the upscaler starts over
     App::Battle& b = app.battle;
-    if (b.fieldTrack < 0) b.fieldTrack = app.lastFieldBgm; // random encounters enter here without ViewerHost::battle
     const std::array<int, 3> ids = app.battleData.group(start.group);
     if (!app.battleData.loaded() || !ids[0] || start.stage < 0 || start.stage >= cr::kNumBattleStages) {
         app.unsupported.push_back("battle " + std::to_string(start.group) + " on map " + std::to_string(app.mapNumber));
@@ -12023,6 +12021,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     setBattleCamera(app, std::max(0, b.formation - 2)); // btl_main 200: the opening turn
     const auto v58 = app.game.vars.find(58);
     const int track = v58 != app.game.vars.end() && v58->second >= 0 && v58->second <= 28 ? v58->second : 8;
+    b.fieldTrack = app.music.current();
     playBgm(app, uint32_t(track));
     app.dialogue.clear();
     ++app.battlesFought;
@@ -12099,8 +12098,7 @@ void endBattle(App& app, bool won) {
         if (after == 998) playBgm(app, 1u << 29);
         else if (after == 997) {}
         else if (after >= 0 && after < 100) playBgm(app, uint32_t(after));
-        else playBgm(app, uint32_t(b.fieldTrack));
-        b.fieldTrack = -1; // never carry this battle's saved field request into the next one
+        else playBgm(app, uint32_t(app.lastFieldBgm));
     }
     cr::EncounterTable table;
     const bool have = cr::encounterTable(app.events, app.mapNumber, table);
