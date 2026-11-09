@@ -72,6 +72,16 @@ const BattleActionDef* BattleActionTable::get(int id) const {
     return id >= 1 && id <= int(actions_.size()) ? &actions_[size_t(id - 1)] : nullptr;
 }
 
+// The original's btlque_make_que: a pair attack becomes the surviving member's own attack.
+// Party fighters are slots 0 / 1; character is the member record (0..kCharacters-1).
+int battlePairSurvivorAction(int kind, int action, int firstActor, int secondActor, int character) {
+    if (kind != kCmdAttack || firstActor < 0 || firstActor >= 2 || secondActor >= 0 || character < 0 || character >= kCharacters)
+        return action;
+    if (action == 36 || action == 37) return character + 27; // Omega: pair -> member's action record
+    if (action >= 18 && action <= 21) return character + 10; // CR1's pair records, shared engine path
+    return action;
+}
+
 int BattleRules::random(int n) { return (shared_ ? *shared_ : own_).get(n); }
 
 void BattleRules::setupParty(const GameState& gs, const ItemTable& items, int) {
@@ -714,6 +724,9 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             if (a >= 0 && !f[size_t(a)].alive()) a = -1;
         if (e.actors[0] < 0) std::swap(e.actors[0], e.actors[1]);
         if (e.actors[0] < 0 || e.done) continue;
+        const int survivorAction = battlePairSurvivorAction(e.kind, e.action, e.actors[0], e.actors[1],
+                                                               f[size_t(e.actors[0])].character);
+        if (survivorAction != e.action) e.action = survivorAction, e.paid = false; // announced as its own action again
         out = BattleTurn();
         notices_.clear();
         note_ = 0, noteValue_ = 0;

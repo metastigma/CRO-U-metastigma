@@ -176,6 +176,10 @@ struct BattleHit {
 };
 
 enum BattleCommandKind { kCmdNone = 0, kCmdAttack = 1, kCmdGene = 2, kCmdItem = 3, kCmdDefend = 4, kCmdEscape = 5 };
+
+// btlque_make_que (3.1.0): if one member of an announced pair attack has fallen, resolve the
+// surviving party member's own attack and announce it as a new action. Returns `action` otherwise.
+int battlePairSurvivorAction(int kind, int action, int firstActor, int secondActor, int character);
 struct BattleCommand {
     int kind = kCmdNone;
     int action = 0;       // gene action (kCmdGene)
