@@ -1953,10 +1953,13 @@ void enterMap(App& app) {
 
 // The touch trigger box containing the player, 0 if none (RectWrapper::checkEventKick: x/z only).
 int triggerAt(const App& app, const cr::Vec3& p) {
-    for (const cr::FieldNpc& n : app.npcs)
-        if (n.touchTrigger() && npcActive(app, n) && std::fabs(p.x - n.boxCenterX()) <= n.box[0] / 2 &&
-            std::fabs(p.z - n.boxCenterZ()) <= n.box[2] / 2)
-            return n.id;
+    for (const cr::FieldNpc& n : app.npcs) {
+        if (!n.touchTrigger() || !npcActive(app, n)) continue;
+        const float dx = p.x - n.boxCenterX(), dz = p.z - n.boxCenterZ();
+        const float c = std::cos(n.rectAngle), s = std::sin(n.rectAngle);
+        const float lx = c * dx - s * dz, lz = s * dx + c * dz;
+        if (std::fabs(lx) <= n.box[0] / 2 && std::fabs(lz) <= n.box[2] / 2) return n.id;
+    }
     return 0;
 }
 
@@ -3266,7 +3269,10 @@ struct ViewerHost : cr::EventHost {
         if (pair >= 1 && pair <= 4) newPairParty(app, pair, clearData);
     }
     void loadNpc(int id) override {
-        if (findNpc(app, id)) return;
+        if (cr::FieldNpc* had = findNpc(app, id)) {
+            if (had->model >= 0) had->mdlRead = true;
+            return;
+        }
         cr::NpcRow row;
         if (!app.events.npcRow(id, row)) return;
         cr::FieldNpc n; // __EvtNpcMdlRead: at the origin, facing 0, and hidden (+0x8c bit 0) when its
@@ -3278,7 +3284,7 @@ struct ViewerHost : cr::EventHost {
         n.treasure = row.box;
         n.puzzle = row.puzzle;
         n.native = row.native;
-        n.mdlRead = true;
+        n.mdlRead = n.model >= 0;
         n.scale = row.scale;
         if (id >= 400 || !npcActive(app, n)) app.npcShown[id] = false;
         app.npcs.push_back(n);
@@ -10664,14 +10670,18 @@ void updatePlayer(App& app, float dt, float camYaw) {
         BetweenStep between(app);
         stepEvents(app);
         if (app.battle.active) break;
-        if (fieldSceneRunning(app) || !app.havePlayer) {
+        if (!app.havePlayer) continue;
+        // FieldPCCtrl::checkHit runs after scripts too: read NPC positions and visibility live.
+        const std::vector<cr::WalkBody> bodies = walkBodies(app);
+        if (fieldSceneRunning(app)) {
             app.walker.gait = cr::Gait::Stand;
+            app.walker.velocity = {};
+            cr::checkWalkerHit(app.walker, app.collisionData, bodies, !app.runner.running());
             continue;
         }
-        const cr::Vec3 before = app.walker.pos;
-        cr::stepWalker(app.walker, app.walkCollision, sx, sy, run, camYaw);
-        const cr::Vec3 moved = app.walker.pos - before;
-        fieldWalked(app, std::sqrt(cr::dot(moved, moved)));
+        const float walkedDist = cr::stepWalker(app.walker, app.collisionData, bodies, sx, sy, run, camYaw,
+                                                !app.runner.running());
+        if (walkedDist >= 0) fieldWalked(app, walkedDist);
         checkTriggers(app);
         if (fieldSceneRunning(app) || !app.havePlayer) {
             app.walker.gait = cr::Gait::Stand;
@@ -10816,7 +10826,7 @@ void buildWalkCollision(App& app) {
         if (!(n.kind & 2) || (n.kind & 4) || !npcVisible(app, idx)) continue;
         if (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) continue; // (story actors waiting)
         if (n.box[0] <= 0 || n.box[2] <= 0) continue;
-        const float k = n.model <= 1 ? 1.0f : 0.0f; // npc_setup adds the offset for models 0/1
+        const float k = (n.model == 0 || n.model == 1) ? 1.0f : 0.0f; // npc_setup adds the offset for models 0/1
         const float bx = n.pos[0] + k * n.offset[0], bz = n.pos[2] + k * n.offset[2];
         const float cs = std::cos(n.angle), sn = std::sin(n.angle);
         const float lx[4] = {n.offset[0] - n.box[0] / 2, n.offset[0] + n.box[0] / 2, n.offset[0] + n.box[0] / 2,
@@ -10848,6 +10858,29 @@ void buildWalkCollision(App& app) {
             c.polygons.push_back(poly);
         }
     }
+}
+
+ 
+// RectWrapper bodies are read from live NPC controls every field step. They are not baked into
+// the CMP mesh: FrmSetc / FrmAdjc / Autoadj / Born / Kill can change them between any two steps.
+std::vector<cr::WalkBody> walkBodies(const App& app) {
+    std::vector<cr::WalkBody> out;
+    for (size_t idx = 0; idx < app.npcs.size(); ++idx) {
+        const cr::FieldNpc& n = app.npcs[idx];
+        cr::WalkBody b;
+        b.wall = (n.kind & 2) && !(n.kind & 4);
+        b.floor = (n.kind & 4) != 0;
+        if (!b.wall && !b.floor) continue;
+        b.shown = npcVisible(app, idx) &&
+                  !(n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0));
+        const float k = (n.model == 0 || n.model == 1) ? 1.0f : 0.0f;
+        b.pos = {n.pos[0] + k * n.offset[0], n.pos[1] + k * n.offset[1], n.pos[2] + k * n.offset[2]};
+        for (int c = 0; c < 3; ++c) b.offset[c] = n.offset[c], b.box[c] = n.box[c];
+        b.angle = n.rectAngle;
+        b.scriptModel = n.mdlRead;
+        out.push_back(b);
+    }
+    return out;
 }
 
 // Each NPC instance has its own action and time: action 0 (idle) loops, others play once and
