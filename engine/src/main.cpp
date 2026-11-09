@@ -582,6 +582,7 @@ struct App {
         int frames = 0;
         float clock = 0;
         int fieldTrack = -1;               // music to resume afterwards
+        bool fieldTrackPending = false;     // __EvtBattle saves G+0x8a97c before it resets it
         bool requested = false;            // a script's Battle, started once its step ends
         bool eventBattle = false;          // G+0xa4e: a running script started it - it waits, and goes
                                            // on in the battle's talks and after it
@@ -3467,6 +3468,8 @@ struct ViewerHost : cr::EventHost {
     }
     void battle(int group, int stage, int flags) override { // starts when this frame's script step ends
         app.battle.requested = true;
+        app.battle.fieldTrack = app.lastFieldBgm; // save G+0x8a97c before __EvtBattle resets it
+        app.battle.fieldTrackPending = true;
         app.lastFieldBgm = 0;
         app.battle.request = {group, stage, -1, 0};
         app.battle.requestFlags = flags;
@@ -11929,9 +11932,13 @@ int battleModelOf(const App& app, int c, int slot) {
 void startBattle(App& app, const cr::BattleStart& start, int flags) {
     app.renderer.resetHistory(); // a cut: the upscaler starts over
     App::Battle& b = app.battle;
+    const bool fieldTrackPending = b.fieldTrackPending;
+    const int savedFieldTrack = fieldTrackPending ? b.fieldTrack : app.lastFieldBgm;
+    b.fieldTrackPending = false;
     const std::array<int, 3> ids = app.battleData.group(start.group);
     if (!app.battleData.loaded() || !ids[0] || start.stage < 0 || start.stage >= cr::kNumBattleStages) {
         app.unsupported.push_back("battle " + std::to_string(start.group) + " on map " + std::to_string(app.mapNumber));
+        if (fieldTrackPending && savedFieldTrack >= 0) playBgm(app, uint32_t(savedFieldTrack));
         return;
     }
     app.sound.stopDialogueVoices();
@@ -12044,7 +12051,7 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     const auto v58 = app.game.vars.find(58);
     const int want = v58 != app.game.vars.end() ? v58->second : 999;
     const int track = want == 997 ? -1 : want >= 0 && want < cr::kBgmTracks ? want : 31;
-    b.fieldTrack = app.lastFieldBgm; // (G+0x8a97c: the field's last play request, playing or not)
+    b.fieldTrack = savedFieldTrack; // (G+0x8a97c: the field's last play request, before __EvtBattle resets it)
     if (track >= 0) playBgm(app, uint32_t(track));
     app.dialogue.clear();
     ++app.battlesFought;
