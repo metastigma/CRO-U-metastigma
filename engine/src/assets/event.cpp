@@ -187,6 +187,7 @@ std::vector<FieldNpc> EventFile::npcs(int mapNumber) const {
         n.id = id;
         std::memcpy(n.pos, &data_[p + 4], 12);
         std::memcpy(&n.angle, &data_[p + 20], 4);
+        n.rectAngle = n.angle;
         std::memcpy(n.box, &data_[p + 28], 12);
         std::memcpy(n.offset, &data_[p + 40], 12);
         NpcRow r;
@@ -197,6 +198,7 @@ std::vector<FieldNpc> EventFile::npcs(int mapNumber) const {
             n.kind = r.kind;
             n.treasure = r.box;
             n.puzzle = r.puzzle;
+            n.native = r.native;
             std::memcpy(n.link, r.link, sizeof n.link);
             n.scale = r.scale;
         }
@@ -210,6 +212,7 @@ bool EventFile::npcRow(int id, NpcRow& out) const {
     const size_t row = sec_[3] + 40 * size_t(id);
     int16_t show = -1, hide = -1, model = -1, scale = -1, item = -1;
     uint16_t kind = 0, box = 0, puzzle = 0;
+    int16_t native = 0;
     if (id < 0 || !loaded() || row + 40 > sec_[4] || !rd(data_, row, show) || !rd(data_, row + 2, hide) ||
         !rd(data_, row + 4, model) || !rd(data_, row + 14, kind) || !rd(data_, row + 18, box) ||
         !rd(data_, row + 20, puzzle) ||
@@ -222,6 +225,8 @@ bool EventFile::npcRow(int id, NpcRow& out) const {
     out.kind = kind;
     out.box = box;
     out.puzzle = puzzle;
+    rd(data_, row + 8, native);
+    out.native = native;
     for (int k = 0; k < 4; ++k) rd(data_, row + 22 + 2 * size_t(k), out.link[k]);
     out.scale = scale < 0 ? 1.0f : float(scale) / 100.0f; // npc_setup: +38 / 100, -1 = 1.0
     return true;

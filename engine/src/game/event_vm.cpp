@@ -381,7 +381,7 @@ bool EventRunner::step(EventHost* host) {
             else if (id == 2007 && host) { state.setFlag(0, true); host->exclamationMark(); } // Uty_DrawExclamationMark_Init
             else if ((id == 2030 || id == 2031) && host) host->battleParamUp(id == 2030 ? 1 : 0); // Uty_Btl_ParamUp01 / 02
             else if (id == 2035) {} // Uty_Battle_first_anm_Init: btl_anm_load preloads - the port loads on demand
-            else if (id == 2029 && host) { if (vm.var(0) == 0) state.vars[0] = host->logoSeen() ? 1 : 0; } // Uty_ChkLogo_flg
+            else if (id == 2029 && host) { if (vm.var(0) == 0) state.vars[0] = host->logoSeen() ? 1 : 0; else host->setLogoSeen(); } // Uty_ChkLogo_flg
             else if (id == 2008 && host) { state.setFlag(0, true); host->padArt(); }     // Uty_DrawController_Init
             else if (id == 2002 || id == 2021) {} // init_tex2d (texture setup) / LoadData (the port's boot reads the saves itself)
             else if (id == 2016 && host) { // Uty_TexDisp
@@ -678,7 +678,7 @@ bool EventRunner::step(EventHost* host) {
         case 46: { // NpcFade: u16 npc (0 = stage model), u8 from, u8 to, u8 frames (mdl_set_alpha)
             const int n = vm.u16();
             const uint8_t from = vm.u8(), to = vm.u8(), frames = vm.u8();
-            if (host && n != 0) host->fadeNpc(vm.resolve(n), from / 255.0f, to / 255.0f, frames);
+            if (host) host->fadeNpc(n == 0 ? 0 : vm.resolve(n), from / 255.0f, to / 255.0f, frames);
             break;
         }
         case 49: { // Anim2: u16 npc, u16 slot, s16 loop from, s16 loop to, then 4 bytes

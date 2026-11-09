@@ -447,3 +447,25 @@ Original source: [DuIslingr/CRO-U commit 023d23f](https://github.com/DuIslingr/C
 - [ ] Recheck map 71 / `d0550_10` after the PR #21 orientation change: effects 130 and 133 (EVT 602 / 603) must trail the ship.
 
 Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/CRO-U/commit/285bf45cfbcd02740bcfe134ea74338d32fb3aa7). Adapted to this fork's renderer and existing badge geometry; unrelated upstream changes are not included.
+
+## Пакет A — игровая логика Omega (аудиты разных релизов; продолжение PR #22)
+
+- [x] Counter 154: гарантированная контратака на физический удар; русское название и описание вынесены в корневой чек-лист `ПРОВЕРКА_COUNTER_154.md` для проверки при прохождении.
+- [x] NPC table +8: сохранён native ID; native 15 запускает штатную процедуру `Uty_FireWall_Init` при инициализации комнаты. Это две полевые преграды NPC 453/454 в паззл-комнате, а не боевые объекты.
+- [x] `NpcFade 0` направляется на fade модели игрока; для игрока и NPC сохраняется постоянный blend-режим оригинального `mdl_set_alpha`, включая fade с нулевой длительностью. Состояния моделей сбрасываются при повторной загрузке комнаты.
+- [x] `Uty_ChkLogo_flg`: чтение и запись флага разделены.
+- [x] `Uty_Btl_ParamUp01/02`: используется battle-only Ward/double-stats byte; ошибочный queued +20% buff удалён.
+- [x] BGM bookkeeping: удалена эвристика выбора трека по имени карты; сюжетный бой сохраняет полевой BGM до сброса `__EvtBattle`, случайный — при входе в `startBattle`; восстановление учитывает var 60. Выбор боевого трека использует var 58.
+- [x] CMP KD node: сохраняются floor/wall lists, split/axis/child; классификация пола/стен следует оригинальным спискам, а не только normal.y.
+- [ ] CI / CTest и игровая проверка всех пунктов.
+
+Источники и границы версий:
+- [NPC natives, NpcFade, Logo flag и ParamUp](https://github.com/DuIslingr/CRO-U/commit/231bf064): аудит iOS 2.2.0. Перенос следует ему; совпадение всех деталей с приложенным iOS 1.2.0.4 RC2 ещё отдельно не доказано.
+- [Counter 154](https://github.com/DuIslingr/CRO-U/commit/31d592a7), [BGM](https://github.com/DuIslingr/CRO-U/commit/f2ead07e) и [KD floor/wall](https://github.com/DuIslingr/CRO-U/commit/014e146c): аудит Omega 3.1.0. Их не следует без бинарной сверки считать дословным описанием поведения iOS 1.2.0.4 RC2.
+- В приложенном iOS-бинарнике подтверждены исходники `FieldPCCtrl.mm`, `RectWrapper.mm`, `CmpBasic.mm`, `TreeKD.mm`, `PuzzleManager.mm`; это подтверждает наличие соответствующих подсистем, но не само по себе идентичность каждой поздней детали алгоритма.
+
+### Примечание о версиях аудио
+
+- Проверенный iOS ARMv7 Mach-O `ChaosRingsOmegaHDeng` содержит имена `bgm01–bgm06`, `bgm08–bgm30`, `bgm41–bgm49`, `eff.bin`, `sndeff.bin`, `voicebtl.bin` и `voiceevnt.bin`. В бинарнике есть класс `GBMusicTrack` с `play`, `pause`, `setGain:` и `setRepeatFrame:`, работающий через iOS AudioQueue. Встроенный путь сборки указывает на `20120323_release_iOS51_erp_1_2_0_4_RC2` (23 марта 2012 года).
+- Поэтому BGM 41–49 и ресурсы боевых/сюжетных голосов уже присутствуют в этой iOS-сборке; их нельзя объявлять функциями, появившимися только на Vita или Android.
+- Правила `_setbgm_caf`, `Uty_GetBgmNo`, var 58 / 60 и возврата полевого BGM в upstream commit `f2ead07e` описаны как аудит 3.1.0. Сам перенос оставлен, но точное совпадение каждой детали с iOS 1.2.0.4 RC2 остаётся отдельной задачей бинарной сверки. Наличие ресурса само по себе не доказывает идентичность алгоритма воспроизведения.
