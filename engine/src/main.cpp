@@ -1603,6 +1603,7 @@ void noteWindowAtlas(App& app, const cr::Image& wi);
 void enterMap(App& app);
 void buildNpcDraws(App& app);
 void buildWalkCollision(App& app);
+std::vector<cr::WalkBody> walkBodies(const App& app);
 cr::FieldNpc* findNpc(App& app, int id);
 std::string itemName(const App& app, int item);
 void startNewGame(App& app, int scenario = 0);
@@ -10826,7 +10827,7 @@ void buildWalkCollision(App& app) {
         if (!(n.kind & 2) || (n.kind & 4) || !npcVisible(app, idx)) continue;
         if (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) continue; // (story actors waiting)
         if (n.box[0] <= 0 || n.box[2] <= 0) continue;
-        const float k = (n.model == 0 || n.model == 1) ? 1.0f : 0.0f; // npc_setup adds the offset for models 0/1
+        const float k = n.model <= 1 ? 1.0f : 0.0f; // npc_setup adds the offset for models 0/1
         const float bx = n.pos[0] + k * n.offset[0], bz = n.pos[2] + k * n.offset[2];
         const float cs = std::cos(n.angle), sn = std::sin(n.angle);
         const float lx[4] = {n.offset[0] - n.box[0] / 2, n.offset[0] + n.box[0] / 2, n.offset[0] + n.box[0] / 2,
@@ -18918,7 +18919,7 @@ int runSelfTest(App& app) {
         drawFrame(app, false);
         const bool padGone = !app.padArt;
         problems += !logoOnce || !padGone || app.renderer.takeErrors();
-        std::printf("natives: battle stat ups (2030 / 2031) %s\n", queued && boosted ? "ok" : "WRONG");
+        std::printf("natives: battle stat ups (2030 / 2031) %s\n", doubled ? "ok" : "WRONG");
         app.runner.stop(); // (a script of the run before might turn it off: flag 4086 clear)
         host.nowLoading(true);
         const int frame0 = app.nowLoading.frame;
