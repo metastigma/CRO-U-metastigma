@@ -727,6 +727,7 @@ struct App {
         int loopFrom = 0, loopTo = 0; // Anim: loop frames a..b after the first play (0, 0 = whole)
         float alpha = 1, alphaFrom = 1, alphaTo = 1; // NpcFade / mdl_fadein / mdl_fadeout
         int fadeFrames = 0, fadeLeft = 0;
+        bool faded = false;  // mdl_set_alpha: alpha-blended for good, even when the fade ends at 255
     };
     std::vector<NpcDraw> npcDraws;         // this map's visible NPCs
     // A puzzle room (PuzzleManager, game/puzzle.hpp): its objects - the room's NPCs that have
@@ -785,6 +786,7 @@ struct App {
     } puzzleTouch;
     float playerAlpha = 1, playerAlphaFrom = 1, playerAlphaTo = 1; // mdl_set_alpha on the leader
     int playerFadeFrames = 0, playerFadeLeft = 0;
+    bool playerFaded = false;              // mdl_set_alpha on the player's model: alpha-blended for good
     cr::Vec3 puzzleStart;                  // where the leader came into the puzzle room (FieldPCCtrl::reset)
     struct CrystalCam { int npc = -1; int phase = 0; } crystalCam; // Uty_WarpCrystalCamera: 0 to the crystal, 1 back
     float crystalSpin = 0;                // render-time phase, independent of the 20 Hz simulation
@@ -1861,6 +1863,7 @@ void endFieldTasks(App& app) {
     app.puzzleStartPending = false;
     app.playerAlpha = app.playerAlphaFrom = app.playerAlphaTo = 1;
     app.playerFadeFrames = app.playerFadeLeft = 0;
+    app.playerFaded = false; // fldread_prc reads the player's model again
 }
 
 void enterMap(App& app) {
@@ -3048,12 +3051,15 @@ struct ViewerHost : cr::EventHost {
     }
     void fadeNpc(int id, float from, float to, int frames) override {
         if (id == 0) {
+            app.playerFaded = true;
             if (frames <= 0) { app.playerFadeLeft = 0; return; }
             app.playerAlphaFrom = from, app.playerAlphaTo = to, app.playerAlpha = from;
             app.playerFadeFrames = app.playerFadeLeft = frames;
             return;
         }
         for (auto* d : npc(id)) {
+            d->faded = true;
+            if (frames <= 0) { d->fadeLeft = 0; continue; }
             d->alphaFrom = from; d->alphaTo = to; d->alpha = from;
             d->fadeFrames = d->fadeLeft = std::max(frames, 1);
         }
@@ -10935,7 +10941,7 @@ void animateNpcs(App& app, float dt) {
 }
 
 void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override = nullptr,
-                float alpha = 1.0f, float matTime = -1.0f);
+                float alpha = 1.0f, float matTime = -1.0f, bool faded = false);
 const cr::Action* effectMaterialAction(const LoadedModel& lm, const cr::Material* mt);
 bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2], int unit = 0);
 const cr::Texture* secondUnit(const LoadedModel& lm, size_t mesh, const cr::Material* mt, float time, float uv2[4]);
@@ -10995,13 +11001,24 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
         shownNpc(app, d, world, alpha);
         if (!fieldWarpCrystal && puzzle::shownCrystal(app, d.index))
             world = puzzle::spinCrystalWorld(world, app.crystalSpin);
-        drawLoaded(app, lm, vp * world, nullptr, alpha, matAnim ? d.time : -1.0f);
+        drawLoaded(app, lm, vp * world, nullptr, alpha, matAnim ? d.time : -1.0f, d.faded);
     }
+}
+
+// mdl_set_alpha / mdl_put leaves this blend mode on the model even after its alpha returns to 255.
+// The original uses the model alpha as the texture's colour alpha, not as a multiplier on the material.
+cr::Material fadedMaterial(cr::Material mt, float alpha) {
+    mt.blendSrc = 4, mt.blendDst = 5;
+    mt.properties &= ~0x40u;
+    mt.alphaThreshold = std::min<uint8_t>(mt.alphaThreshold, 1);
+    mt.texBlend = 4;
+    mt.diffuse[3] = std::clamp(alpha, 0.0f, 1.0f);
+    return mt;
 }
 
 // Draws a model's visible meshes: opaque materials first, then blended ones by draw order.
 // `override`, if given, replaces every material (texture unbound); `alpha` < 1 fades it.
-void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override, float alpha, float matTime) {
+void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::Material* override, float alpha, float matTime, bool faded) {
     const cr::Model& cpu = m.cpu;
     static const cr::Material kDefaultMaterial;
     auto baseOf = [&](size_t i) -> const cr::Material& {
@@ -11040,6 +11057,8 @@ void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::M
             mesh.texture >= 0 && mesh.texture < int(m.textures.size()) ? &m.textures[mesh.texture] : nullptr;
         if (override) {
             app.renderer.drawMesh(mesh, nullptr, mvp, *override);
+        } else if (faded) {
+            app.renderer.drawMesh(mesh, tex, mvp, fadedMaterial(materialOf(i), alpha), app.smoothFilter);
         } else if (alpha < 0.999f) {
             // mdl_set_alpha: every Appearance alpha-blended (blend mode 0), its alpha test at most 1;
             // mdl_put: texture unit 0 modulated, colour 1's alpha the model's
@@ -14735,7 +14754,7 @@ void drawFrame(App& app, bool present = true) {
             r.setColorWrite(true);
             // mdl_put queues the player's model before the NPCs' draw entries. In particular,
             // the ship's blended c152 waves must not cover Vieg on the deck.
-            if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app));
+            if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, app.playerFaded);
             drawNpcs(app, mvp);
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
             drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // only effects flagged by battle-time setup face the camera
@@ -14793,7 +14812,7 @@ void drawFrame(App& app, bool present = true) {
             drawLoaded(app, m, mvp);
         }
         if (app.mode == Mode::Maps && app.havePlayer && playerShown(app))
-            drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app));
+            drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, app.playerFaded);
         if (app.mode == Mode::Maps && app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
         if (app.mode == Mode::Maps) drawEffects(app, app.fieldEffects, mvp, nullptr, nullptr);
         if (app.mode == Mode::Maps && app.collision.vao && app.showCollision) {
