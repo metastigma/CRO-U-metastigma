@@ -16620,10 +16620,10 @@ int fieldLifecycleSelfTest(App& app) {
     }
     if (enter(0)) {
         ViewerHost host(app);
-        auto n = std::find_if(app.npcs.begin(), app.npcs.end(), [](const cr::FieldNpc& n) { return n.id > 0; });
-        if (n == app.npcs.end()) ++problems;
+        auto d = std::find_if(app.npcDraws.begin(), app.npcDraws.end(), [](const App::NpcDraw& d) { return d.id > 0; });
+        if (d == app.npcDraws.end() || !findNpc(app, d->id)) ++problems;
         else {
-            const int id = n->id;
+            const int id = d->id;
             host.fadeNpc(0, 0, 0, 0); // mdl_set_alpha at zero frames still selects permanent blending
             const bool playerFadeMode = app.playerFaded && app.playerAlpha == 1.0f && app.playerFadeLeft == 0;
             int npcInstances = 0;
