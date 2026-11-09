@@ -1098,7 +1098,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                 }
                 // 154 (or calc 34's stance): a physical hit may be answered with the target's attack
                 if (calc == 0 && counterBy < 0 && !e.counter &&
-                    (tf.counterStance || (has(t, 154) && random(100) < (holdsBreak(t) ? 20 : 10))))
+                    (tf.counterStance || (has(t, 154) && (random(100), true))))
                     counterBy = t;
             }
             if (calc == 0 && a->id == 201 && h.amount >= 1) { // btlcalc_0404: Trompe-L'oeil
