@@ -177,14 +177,13 @@ void MenuPainter::gauge(float x, float y, int value, float alpha, bool highlight
     picture(104, x + 212, y, alpha);
     picture(108, x - 1, y - 13, alpha);
     picture(107, x + 193, y - 13, alpha);
-    // The fill (red, 0xFFFF0000) up to the knob at 235 + value x 2.03 (SideGuageInit; menus
-    // place gauges at x 224, so it is x + 11 + ...)
+    // tex2d reads 0xFFFF0000 as A B G R: the original gauge fill is blue.
     const float knob = x + 11 + std::floor(value * 2.03f);
     const float fill = knob - (x + 14);
-    const float red[4] = {1, 0, 0, alpha};
+    const float blue[4] = {0, 0, 1, alpha};
     if (fill > 0) {
-        quad(x + 13, y + 6, 1, 2, red, red);
-        quad(x + 14, y + 5, fill, 4, red, red);
+        quad(x + 13, y + 6, 1, 2, blue, blue);
+        quad(x + 14, y + 5, fill, 4, blue, blue);
     }
     const float r = highlight ? 0xEB / 255.0f : 1, b = highlight ? 0x4B / 255.0f : 1;
     const short* p = kMenuPicture[106];
