@@ -327,3 +327,65 @@ The previous port ignored slots 3–11 and generated the second member's destina
 - [x] При открытой панели ввод стика не перемещает персонажа; △ закрывает Camp, оставляя верхнюю панель открытой.
 - [x] Контроллерный self-test проверяет навигацию, блокировку ходьбы и открытие Camp через выбранный пункт.
 - [ ] Проверка на устройстве.
+
+
+## Управление касанием в паззлах с геймпада — PR #17 (2026-11-07)
+
+- [x] Правый стик перемещает экранную точку касания с мёртвой зоной и ограничением по границам экрана; позиция видна как голубой прицел.
+- [x] Нажатие R3 вызывает тот же обработчик касания, что и палец / мышь; отпускание R3 завершает жест.
+- [x] Психокинез использует положение R3-down как начало свайпа и положение R3-up как конец; остальные способности получают обычное касание объекта.
+- [x] После потери фокуса или отключения геймпада незавершённый жест отменяется, поднятый блок сохраняется и может быть продолжен новым нажатием R3.
+- [x] Добавлен self-test виртуального геймпада: R3-down, перемещение правым стиком и R3-up проверяются на настоящем обработчике паззла.
+- [ ] CI и проверка на физическом контроллере.
+
+
+## Уточнение управления паззлами после проверки на контроллере — PR #17
+
+- [x] Перенесено действие способности с □ на ○ (японская раскладка); □ больше не вызывает способность.
+- [x] R3 отслеживается как по SDL button down/up, так и опросом SDL_GamepadButton каждый кадр.
+- [x] Self-test проверяет состояние R3 через виртуальный геймпад и poll path, без искусственного вызова pkGrab.
+- [ ] Проверить попадание виртуального пальца в блоки и полный свайп на физическом контроллере; CI после этого коммита.
+
+
+## Сохранение штатного действия круга у кристалла выхода — PR #17
+
+- [x] Убрана ошибочная подмена ○ на SDLK_T во всех паззл-комнатах.
+- [x] ○ снова передаёт штатный SDLK_RETURN: обычное действие/подтверждение, включая взаимодействие с кристаллом выхода при приближении.
+- [x] Управление виртуальным касанием остаётся отдельным: правый стик + R3; автоматическое приближение к доступным блокам не затрагивается.
+- [ ] Проверить в игре оба сценария: кристалл выхода и паззл с удалённым блоком.
+
+
+## R3 touch selection regression — PR #17
+
+- [x] Read SDL's physical joystick-button binding that maps to Gamepad RIGHT_STICK, with direct SDL joystick-button polling and event fallback.
+- [x] Give the virtual cursor a pressed/hit visual state so a touch miss is distinguishable from an unreceived R3 press.
+- [x] Replaced the empty-corner/button-only self-test with a real block test: project a visible psychokinesis block to screen coordinates, press the virtual joystick's mapped R3 input there, require puzzle::click to select that block, drag the pointer and release.
+- [x] Restored the original psychokinesis precondition that the player is on a valid puzzle-grid cell; the test places the player on a distant empty in-board cell, outside the block's slide corridor.
+- [x] Kept the four sys.evt puzzle rules distinct: Teleport, Toughness and Pyrokinesis use a single target tap; only Psychokinesis uses touch-down, hold through the lift, straight slide and touch-up.
+- [x] R3 down/up edges from SDL Gamepad and raw Joystick events are latched until the frame updates the virtual finger position, so a click does not hit the previous frame's coordinates.
+- [x] The R3 regression test holds through NormalBlockPK rising, verifies the block reaches its held state, slides in one direction, releases, and verifies the block's grid cell changes.
+- [ ] CI and in-game verification.
+
+
+## Исправление попадания виртуального касания — PR #17
+
+- [x] Разделены координаты HUD (layer 0) и 3D-поля (layer 3): прицел остаётся в UI-системе, hit-test и жест психокинеза используют координаты слоя поля.
+- [x] На Vita для слоя 3 учитываются его собственные масштаб и вертикальное смещение; их смешение с координатами HUD сдвигало выбор относительно прицела.
+- [x] Hit-test включает целочисленное смещение viewport от field-camera quake, как и отрисовка поля.
+- [x] Self-test строит позицию виртуального указателя через обратное преобразование того же слоя 3.
+- [ ] CI и проверка попадания на физическом контроллере.
+
+
+## Выравнивание видимого курсора R3 — PR #17
+
+- [x] Исправлено преобразование экранных координат в единицы MenuPainter: его примитивы автоматически масштабируются ×2, поэтому прицел ранее рисовался со смещением от фактической точки указателя.
+- [x] Добавлен round-trip self-test: центр нарисованного прицела должен совпадать с экранной логической координатой виртуального пальца.
+- [ ] Проверка совпадения прицела и выбора блока на физическом контроллере.
+
+
+## Общая проекция паззл-объектов и hit-test — PR #17
+
+- [x] Hit-test больше не дублирует расчёт viewport: выбор использует общую функцию fieldToLogical().
+- [x] Общая проекция учитывает shownScroll() — фактическую промежуточную прокрутку, показанную текущим кадром, а также целочисленное смещение field-camera quake.
+- [x] Self-test получает координаты проверяемого блока из той же функции рендерной проекции, а не повторяет формулу выбора.
+- [ ] CI и проверка на физическом контроллере.

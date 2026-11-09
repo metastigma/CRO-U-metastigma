@@ -775,6 +775,13 @@ struct App {
         float tapX = -1, tapY = -1;        // the touch that asked (tex2d), < 0 from the keyboard
         int clock = 0;                     // frames the room has run (the flames' flicker)
     } puzzle;
+    struct PuzzleTouch {
+        bool initialized = false, visible = false, pressed = false, hit = false;
+        bool downPending = false, upPending = false; // latch SDL R3 edges until after cursor motion
+        int stage = -1;
+        float x = 0, y = 0;                // screen-frame pixels; the Vita touch point
+        std::vector<int> rawR3Buttons;     // SDL joystick buttons mapped to Gamepad RIGHT_STICK
+    } puzzleTouch;
     float playerAlpha = 1, playerAlphaFrom = 1, playerAlphaTo = 1; // mdl_set_alpha on the leader
     int playerFadeFrames = 0, playerFadeLeft = 0;
     cr::Vec3 puzzleStart;                  // where the leader came into the puzzle room (FieldPCCtrl::reset)
@@ -1600,6 +1607,9 @@ void startNewGame(App& app, int scenario = 0);
 void bootTitle(App& app);
 void padButton(App& app, int b);
 void padStep(App& app, float dt);
+void puzzleTouchStep(App& app, float dt); // used by the controller gesture regression below
+void puzzleTouchPrepare(App& app); // called by the puzzle input self-test before its definition
+void puzzleTouchCacheBindings(App& app); // called by the puzzle input self-test before its definition
 bool padLive(App& app);
 bool padMenus(const App& app);
 bool padField(const App& app);
@@ -6212,6 +6222,15 @@ void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, fl
     }
 }
 
+// Convert the virtual finger's frame pixels to MenuPainter units. MenuPainter doubles these
+// units when drawing; keeping the pointer in screen pixels here would double its displacement.
+void puzzleTouchCursorMenuPoint(const App& app, float px, float py, float& x, float& y) {
+    float lx, ly;
+    app.renderer.toLogical(px, py, lx, ly);
+    x = (lx - app.renderer.uiX()) * 0.5f;
+    y = ly * 0.5f;
+}
+
 // menuf_mainPut in a puzzle room (G+0x35526 == 1), in tex2d units from the anchor (0, 0): a dark
 // panel (0, 12)-(80, 48) (0xb8 black), the infinity mark (792, 58, 72 x 28) at (4, 16) when the
 // count is unlimited, else "Left" (484, 184, 30 x 12) at (4, 24) and cmd_number_puzzle's two digits
@@ -6244,6 +6263,19 @@ void drawPuzzleHud(App& app, float a) {
     }
     app.renderer.setOrigin(app.renderer.uiX()); // (the mark: where the field was touched)
     if (pz.punished > 0 && pz.punishPhase == 0) piece(pz.punishX, pz.punishY, 448, 120, 64, 64);
+    if (app.puzzleTouch.visible) { // the virtual Vita touch point, moved by the right stick
+        float x, y;
+        puzzleTouchCursorMenuPoint(app, app.puzzleTouch.x, app.puzzleTouch.y, x, y);
+        const float shadow[4] = {0.02f, 0.08f, 0.12f, a};
+        const float cursor[4] = {app.puzzleTouch.pressed ? (app.puzzleTouch.hit ? 0.15f : 1.0f) : 0.25f,
+                                 app.puzzleTouch.pressed ? (app.puzzleTouch.hit ? 1.0f : 0.45f) : 0.95f,
+                                 app.puzzleTouch.pressed ? 0.25f : 1.0f, a};
+        m.quad(x - 10, y - 2, 20, 4, shadow, shadow);
+        m.quad(x - 2, y - 10, 4, 20, shadow, shadow);
+        m.quad(x - 8, y - 1, 16, 2, cursor, cursor);
+        m.quad(x - 1, y - 8, 2, 16, cursor, cursor);
+        m.quad(x - 2, y - 2, 4, 4, cursor, cursor);
+    }
 }
 
 // menuf_mainPut's counters, a 20 Hz frame: the count's swell (set as it changes:
@@ -9259,18 +9291,26 @@ int npcEffect(App& app, int id, int npc, bool loop = false) {
     return fieldEffect(app, id, {n.pos[0], n.pos[1], n.pos[2]}, loop);
 }
 
-// A world point on the frame (logical 1024 x 768 pixels, the whole screen's width), as drawFrame
-// lays out the stage view (false when it's off the view or behind the camera)
+// Supplied below by the between-frame renderer: camera pans can be interpolated between
+// simulation steps, so hit-testing must use the same scroll position the current frame shows.
+void shownScroll(const App& app, float& x, float& y);
+
+// A world point on the frame (logical 1024 x 768 pixels, the whole screen's width), in the same
+// viewport used by drawFrame (including camera interpolation and quake).
 bool fieldToLogical(const App& app, cr::Vec3 p, float& lx, float& ly) {
     const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
     float vx, vy, vw, vh;
     if (scrollingField(app)) {
         vw = fieldViewW(app), vh = fieldViewH(app);
-        vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
+        float sx = 0, sy = 0;
+        shownScroll(app, sx, sy);
+        vx = (SW - vw) / 2 + sx, vy = (H - vh) / 2 - sy;
     } else {
         vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
         vx = (SW - vw) / 2, vy = (H - vh) / 2;
     }
+    vx += std::trunc(app.fieldQuake.off[0]);
+    vy += std::trunc(app.fieldQuake.off[1]);
     float hx, hy;
     if (!fieldViewPoint(app, p, hx, hy)) return false;
     lx = vx + hx * vw / fieldViewW(app), ly = vy + hy * vh / fieldViewH(app);
@@ -9590,6 +9630,7 @@ void punish(App& app, int t) {
 // (counted as the block lands); letting go without one costs nothing.
 
 void reset(App& app);
+void pkRelease(App& app, float sx, float sy);
 
 bool crushes(App& app, const App::Puzzle::Obj& o) {
     const cr::FieldNpc& n = app.npcs[size_t(o.npc)];
@@ -9633,7 +9674,7 @@ void stepPkBlock(App& app, App::Puzzle::Obj& o) {
         if (--o.pkTimer > 0) break;
         setY(o.baseY + 5.0f);
         o.bob = 0;
-        o.pk = 2;
+        o.pk = 2; // onWaitSlide: the lifted block is ready for the held-finger swipe
         break;
     case 2: { // onWaitSlide: bobbing; dropped (2) or sent (3)
         o.bob = (o.bob + 9) % 360;
@@ -9694,8 +9735,9 @@ void pkGrab(App& app, int t, float sx = -1e9f, float sy = -1e9f) {
     App::Puzzle& pz = app.puzzle;
     if (pz.busy || pz.pkState || t < 0 || t >= int(pz.objs.size())) return;
     App::Puzzle::Obj& o = pz.objs[size_t(t)];
-    int pr, pc;
-    if (o.type != cr::kTypeNormal || o.state != 1 || o.pk != 0 || !cellOf(app, app.walker.pos, pr, pc)) return;
+    int playerRow = -1, playerCol = -1;
+    if (o.type != cr::kTypeNormal || o.state != 1 || o.pk != 0 ||
+        !cellOf(app, app.walker.pos, playerRow, playerCol)) return;
     if (pz.esp == 0) { punish(app, t); return; } // no ESP left - only the mark
     pz.busy = true;
     o.pkMsg = 1;
@@ -9735,7 +9777,8 @@ void pkSend(App& app, int dir) {
 // The mouse let go at (sx, sy): the drag's direction, or none inside the dead zone
 void pkRelease(App& app, float sx, float sy) {
     App::Puzzle& pz = app.puzzle;
-    if (pz.pkState != 1 || pz.pkFromX < -1e8f) return;
+    if (pz.pkState != 1 || pz.pkFromX < -1e8f || pz.pkTarget < 0 ||
+        pz.pkTarget >= int(pz.objs.size()) || pz.objs[size_t(pz.pkTarget)].pk != 2) return;
     const float dx = (sx - pz.pkFromX) / 2.133f, dy = (sy - pz.pkFromY) / 2.4f; // to the 480 x 320 screen
     int dir = 0;
     if (!(dx > -29 && dx < 29 && dy > -35 && dy < 20)) {
@@ -10119,8 +10162,12 @@ void stepCrystalCam(App& app) {
 // A click in the frame's pixels: teleport to the block or gem tapped (true when one was)
 bool click(App& app, float px, float py) {
     if (app.puzzle.stage < 0 || app.runner.running() || !app.dialogue.empty() || !paintedField(app)) return false;
-    float lx, ly;
-    app.renderer.toLogical(px, py, lx, ly);
+    // The puzzle HUD is layer 0, but field objects are drawn through the layer-3 viewport.
+    // On Vita that viewport is enlarged and shifted; using HUD coordinates for picking makes
+    // a visible touch select a different world point.
+    float lx, ly, fx, fy;
+    app.renderer.toLogicalAtLayer(px, py, lx, ly, 0);
+    app.renderer.toLogicalAtLayer(px, py, fx, fy, 3);
     float tx, ty;
     logicalToTex2d(app, lx, ly, tx, ty);
     if (app.puzzle.help) { // the pad's buttons: (8..52, 56..84) Retry (EvrStart 6), (84..124, 14..46) Help (7)
@@ -10128,37 +10175,49 @@ bool click(App& app, float px, float py) {
         if (bx >= 8 && bx < 52 && ty >= 56 && ty < 84) { ask(app, 0); return true; }
         if (bx >= 84 && bx < 124 && ty >= 14 && ty < 46) { ask(app, 1); return true; }
     }
-    const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
-    float vx, vy, vw, vh; // the stage view on screen, as drawFrame lays it out
-    if (scrollingField(app)) {
-        vw = fieldViewW(app), vh = fieldViewH(app);
-        vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
-    } else {
-        vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
-        vx = (SW - vw) / 2, vy = (H - vh) / 2;
-    }
-    const int t = pick(app, lx, ly, [&](cr::Vec3 p, float& x, float& y) {
-        float hx, hy;
-        if (!fieldViewPoint(app, p, hx, hy)) return false;
-        x = vx + hx * vw / fieldViewW(app), y = vy + hy * vh / fieldViewH(app);
-        return true;
+    // Use the same field-to-screen transform as rendering and prompt placement. In particular,
+    // this includes the interpolated script scroll and the viewport quake for the current frame.
+    const int t = pick(app, fx, fy, [&](cr::Vec3 p, float& x, float& y) {
+        return fieldToLogical(app, p, x, y);
     });
     if (t < 0) return false;
     app.puzzle.tapX = tx, app.puzzle.tapY = ty;
-    if (stage(app)->ability == cr::kAbilityPsychokinesis) pkGrab(app, t, lx, ly);
-    else if (stage(app)->ability == cr::kAbilityToughness) toughTap(app, t);
-    else if (stage(app)->ability == cr::kAbilityPyrokinesis) pyroTap(app, t);
-    else teleportTo(app, t);
+    const int usesBefore = app.game.vars[13];
+    const int punishedBefore = app.puzzle.punished;
+    switch (stage(app)->ability) {
+    case cr::kAbilityPsychokinesis:
+        pkGrab(app, t, fx, fy);
+        break;
+    case cr::kAbilityToughness:
+        toughTap(app, t);
+        break;
+    case cr::kAbilityPyrokinesis:
+        pyroTap(app, t);
+        break;
+    default:
+        teleportTo(app, t);
+        break;
+    }
     app.puzzle.tapX = app.puzzle.tapY = -1;
-    return true;
+    if (stage(app)->ability == cr::kAbilityPsychokinesis)
+        return app.puzzle.pkState == 1 && app.puzzle.pkTarget == t;
+    if (stage(app)->ability == cr::kAbilityTeleport) return app.puzzle.tpState != 0 ||
+                                                               app.puzzle.punished > punishedBefore;
+    if (stage(app)->ability == cr::kAbilityToughness)
+        return app.game.vars[13] != usesBefore || app.puzzle.objs[size_t(t)].hit ||
+               app.puzzle.punished > punishedBefore;
+    if (stage(app)->ability == cr::kAbilityPyrokinesis)
+        return app.game.vars[13] != usesBefore || app.puzzle.objs[size_t(t)].csMsg == 10 ||
+               app.puzzle.punished > punishedBefore;
+    return false;
 }
 
 // The mouse let go (the frame's pixels): a held block goes the way it was dragged
 void release(App& app, float px, float py) {
     if (app.puzzle.stage < 0 || app.puzzle.pkState != 1) return;
-    float lx, ly;
-    app.renderer.toLogical(px, py, lx, ly);
-    pkRelease(app, lx, ly);
+    float fx, fy;
+    app.renderer.toLogicalAtLayer(px, py, fx, fy, 3);
+    pkRelease(app, fx, fy);
 }
 
 // The ability's key: teleport to / take hold of the block ahead, or let a held one go
@@ -16247,20 +16306,78 @@ int inputCancelSelfTest(App& app) {
     w.valid = true, w.area = cr::kPuzzleArea, w.map = cr::kFirstPuzzleMap + pkStage;
     const bool entered = pkStage >= 0 && performWarp(app, w, -1);
     app.runner.stop(), app.pendingEntry = App::Entry::None;
-    int target = -1;
-    for (size_t i = 0; i < app.puzzle.objs.size(); ++i)
-        if (app.puzzle.objs[i].type == cr::kTypeNormal && app.puzzle.objs[i].shown) { target = int(i); break; }
+    int target = -1, dragDirection = 0;
+    const int dragRow[4] = {-1, 1, 0, 0}, dragCol[4] = {0, 0, -1, 1};
+    for (size_t i = 0; i < app.puzzle.objs.size() && target < 0; ++i) {
+        const auto& object = app.puzzle.objs[i];
+        if (object.type != cr::kTypeNormal || !object.shown || object.state != 1 || object.pk != 0) continue;
+        for (int dir = 1; dir <= 4; ++dir) {
+            const int* next = puzzle::cellSlot(app, 1, object.row + dragRow[dir - 1], object.col + dragCol[dir - 1]);
+            if (next && *next < 0) { target = int(i); dragDirection = dir; break; }
+        }
+    }
     if (!entered || target < 0) ++problems;
     else {
+        // The cursor is drawn through MenuPainter, whose coordinates are doubled by design.
+        // Round-trip its centre to screen-logical space and ensure it is the same point used by
+        // the hit-test; this catches drawing/input unit mismatches independently of the pick test.
+        {
+            float cursorMenuX = 0, cursorMenuY = 0, pointerLogicalX = 0, pointerLogicalY = 0;
+            puzzleTouchCursorMenuPoint(app, app.puzzleTouch.x, app.puzzleTouch.y, cursorMenuX, cursorMenuY);
+            app.renderer.toLogical(app.puzzleTouch.x, app.puzzleTouch.y, pointerLogicalX, pointerLogicalY);
+            const float reconstructedX = app.renderer.uiX() + 2.0f * cursorMenuX;
+            const float reconstructedY = 2.0f * cursorMenuY;
+            const bool cursorAligned = std::fabs(reconstructedX - pointerLogicalX) < 0.01f &&
+                                       std::fabs(reconstructedY - pointerLogicalY) < 0.01f;
+            problems += !cursorAligned;
+            if (!cursorAligned) std::printf("puzzle pointer cursor: logical point mismatch (%.2f, %.2f) vs (%.2f, %.2f)\n",
+                                            reconstructedX, reconstructedY, pointerLogicalX, pointerLogicalY);
+        }
         const auto& at = app.puzzle.objs[size_t(target)];
         const auto& layout = cr::kPuzzleStage[pkStage];
-        setActor(app, 0, puzzle::centre(app, at.row == 0 ? layout.rows - 1 : 0,
-                                       at.col == 0 ? layout.cols - 1 : 0), nullptr, false);
-        puzzle::pkGrab(app, target, 200, 200);
+        int playerRow = -1, playerCol = -1, remoteDistance = -1;
+        for (int r = 0; r < layout.rows; ++r)
+            for (int c = 0; c < layout.cols; ++c) {
+                const int* slot = puzzle::cellSlot(app, 1, r, c);
+                if (!slot || *slot >= 0) continue;
+                if ((dragDirection <= 2 && c == at.col) || (dragDirection >= 3 && r == at.row)) continue;
+                const int distance = std::abs(r - at.row) + std::abs(c - at.col);
+                if (distance > remoteDistance) playerRow = r, playerCol = c, remoteDistance = distance;
+            }
+        if (remoteDistance <= 1) ++problems;
+        else setActor(app, 0, puzzle::centre(app, playerRow, playerCol), nullptr, false);
+        int actualRow = -1, actualCol = -1;
+        const bool playerOnBoard = puzzle::cellOf(app, app.walker.pos, actualRow, actualCol);
+        problems += !playerOnBoard || std::abs(actualRow - at.row) + std::abs(actualCol - at.col) <= 1;
+        if (!playerOnBoard || std::abs(actualRow - at.row) + std::abs(actualCol - at.col) <= 1)
+            std::printf("puzzle remote touch: player not on a distant in-board cell\n");
+        // Convert an object's projected field position to the renderer's frame pixels.
+        // Both cancellation and the R3 gesture must begin with a real hit-test, not pkGrab().
+        auto projectBlock = [&](int objectIndex, float& px, float& py) {
+            if (objectIndex < 0 || size_t(objectIndex) >= app.puzzle.objs.size()) return false;
+            const auto& object = app.puzzle.objs[size_t(objectIndex)];
+            if (object.npc < 0 || size_t(object.npc) >= app.npcs.size()) return false;
+            const cr::FieldNpc& npc = app.npcs[size_t(object.npc)];
+            float logicalX = 0, logicalY = 0;
+            if (!fieldToLogical(app, {npc.pos[0], npc.pos[1] + 5.0f, npc.pos[2]}, logicalX, logicalY)) return false;
+            float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            const float fw = float(app.renderer.frameWidth()), fh = float(app.renderer.frameHeight());
+            // The field objects are drawn in layer 3; invert that same mapping when aiming
+            // the regression test's virtual pointer at a projected object.
+            app.renderer.toLogicalAtLayer(0, 0, x0, y0, 3);
+            app.renderer.toLogicalAtLayer(fw, fh, x1, y1, 3);
+            if (x1 == x0 || y1 == y0) return false;
+            px = (logicalX - x0) * fw / (x1 - x0);
+            py = (logicalY - y0) * fh / (y1 - y0);
+            return px >= 0 && px < fw && py >= 0 && py < fh;
+        };
+        float cancelTapX = 0, cancelTapY = 0;
+        const bool cancelTapProjected = projectBlock(target, cancelTapX, cancelTapY);
+        const bool cancelTapHit = cancelTapProjected && puzzle::click(app, cancelTapX, cancelTapY);
         for (int i = 0; i < 4; ++i) stepEvents(app);
         const auto& block = app.puzzle.objs[size_t(target)];
         const int row = block.row, col = block.col, esp = app.puzzle.esp, uses = app.game.vars[13];
-        problems += app.puzzle.pkState != 1 || block.pk != 2;
+        problems += !cancelTapHit || app.puzzle.pkState != 1 || block.pk != 2;
         SDL_Event e{};
         e.type = SDL_EVENT_WINDOW_FOCUS_LOST, e.window.windowID = SDL_GetWindowID(app.window);
         SDL_AppEvent(&app, &e);
@@ -16282,6 +16399,72 @@ int inputCancelSelfTest(App& app) {
         problems += !dropped;
         std::printf("puzzle input cancel: block held %s, fresh release drops in place without ESP %s\n",
                     held ? "yes" : "NO", dropped ? "yes" : "NO");
+
+        // Aim at a real visible block, then use the virtual joystick's physical R3 binding.
+        // This verifies the entire path: R3 -> pointer tap -> puzzle::click -> pkGrab -> swipe release.
+        SDL_VirtualJoystickDesc desc;
+        SDL_INIT_INTERFACE(&desc);
+        desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        desc.naxes = 6, desc.nbuttons = 15;
+        desc.axis_mask = (1u << 6) - 1, desc.button_mask = (1u << 15) - 1;
+        desc.name = "puzzle touch selftest";
+        const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+        SDL_Gamepad* pad = id ? SDL_OpenGamepad(id) : nullptr;
+        SDL_Joystick* js = pad ? SDL_GetGamepadJoystick(pad) : nullptr;
+        if (!pad) {
+            std::printf("puzzle right-stick touch: virtual gamepad unavailable (%s), skipped\n", SDL_GetError());
+            ++problems;
+        } else {
+            SDL_Gamepad* keepPad = app.pad;
+            const App::PuzzleTouch keepTouch = app.puzzleTouch;
+            app.pad = pad;
+            app.puzzleTouch = App::PuzzleTouch();
+            puzzleTouchPrepare(app);
+            const bool onScreen = projectBlock(target, app.puzzleTouch.x, app.puzzleTouch.y);
+            puzzleTouchCacheBindings(app);
+            const int rawR3 = app.puzzleTouch.rawR3Buttons.empty() ? -1 : app.puzzleTouch.rawR3Buttons.front();
+            if (!onScreen || rawR3 < 0) {
+                std::printf("puzzle right-stick touch: target projection %s, SDL R3 binding %s\n",
+                            onScreen ? "yes" : "NO", rawR3 >= 0 ? "yes" : "NO");
+                ++problems;
+            } else {
+                SDL_SetJoystickVirtualButton(js, rawR3, true);
+                SDL_UpdateJoysticks();
+                puzzleTouchStep(app, 0.0f);
+                const bool pressed = app.puzzleTouch.pressed;
+                const bool selected = app.puzzleTouch.hit && app.puzzle.pkState == 1 && app.puzzle.pkTarget == target;
+                // sys.evt 56029/56030: hold the virtual finger while NormalBlockPK rises.
+                for (int i = 0; i < 4; ++i) stepEvents(app);
+                const bool liftedWhileHeld = app.puzzleTouch.pressed && app.puzzle.pkState == 1 &&
+                                             app.puzzle.objs[size_t(target)].pk == 2;
+                const bool horizontal = dragDirection >= 3;
+                const SDL_GamepadAxis dragAxis = horizontal ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_RIGHTY;
+                const Sint16 dragValue = (dragDirection == 1 || dragDirection == 3) ? Sint16(-32767) : Sint16(32767);
+                const float cursorFrom = horizontal ? app.puzzleTouch.x : app.puzzleTouch.y;
+                SDL_SetJoystickVirtualAxis(js, dragAxis, dragValue);
+                SDL_UpdateJoysticks();
+                // Keep R3 pressed through a straight slide; only then send finger-up.
+                for (int i = 0; i < 12; ++i) puzzleTouchStep(app, 0.012f);
+                const float cursorTo = horizontal ? app.puzzleTouch.x : app.puzzleTouch.y;
+                const bool moved = dragValue < 0 ? cursorTo < cursorFrom - 60.0f : cursorTo > cursorFrom + 60.0f;
+                SDL_SetJoystickVirtualAxis(js, dragAxis, 0);
+                SDL_SetJoystickVirtualButton(js, rawR3, false);
+                SDL_UpdateJoysticks();
+                puzzleTouchStep(app, 0.0f);
+                const bool sent = !app.puzzleTouch.pressed && app.puzzle.pkState == 2 && app.puzzle.pkMoved;
+                for (int i = 0; i < 120 && app.puzzle.pkState != 0; ++i) stepEvents(app);
+                const auto& movedBlock = app.puzzle.objs[size_t(target)];
+                const bool blockMoved = movedBlock.row != row || movedBlock.col != col;
+                problems += !pressed || !selected || !liftedWhileHeld || !moved || !sent || !blockMoved;
+                std::printf("puzzle R3 slide: press %s, remote target %s, block lifted while held %s, straight drag %s, release sent slide %s, block moved %s\n",
+                            pressed ? "yes" : "NO", selected ? "yes" : "NO", liftedWhileHeld ? "yes" : "NO",
+                            moved ? "yes" : "NO", sent ? "yes" : "NO", blockMoved ? "yes" : "NO");
+            }
+            app.puzzleTouch = keepTouch;
+            app.pad = keepPad;
+            SDL_CloseGamepad(pad);
+        }
+        if (id) SDL_DetachVirtualJoystick(id);
     }
     app.trackerArmed = false;
     std::printf("viewer input cancellation: %d problems\n", problems);
@@ -21563,6 +21746,147 @@ void padKey(App& app, SDL_Keycode key) { // the button as its key, through the s
     e.key.down = true;
     SDL_AppEvent(&app, &e);
 }
+
+bool puzzleTouchAvailable(const App& app) {
+    return app.pad && app.mode == Mode::Maps && app.puzzle.stage >= 0 && app.puzzle.scene == 4 &&
+           fieldMenuWanted(app) && !fieldSceneRunning(app) && app.dialogue.empty() &&
+           !app.fieldMenu.open && !app.optionsOpen && !app.campOpen && !app.saveScreen.open &&
+           !app.shop.open && !app.mapScreen.open && !app.battle.active;
+}
+
+void puzzleTouchCacheBindings(App& app) {
+    App::PuzzleTouch& touch = app.puzzleTouch;
+    touch.rawR3Buttons.clear();
+    if (!app.pad) return;
+    int count = 0;
+    SDL_GamepadBinding** bindings = SDL_GetGamepadBindings(app.pad, &count);
+    if (!bindings) return;
+    for (int i = 0; i < count; ++i) {
+        const SDL_GamepadBinding* binding = bindings[i];
+        if (binding && binding->input_type == SDL_GAMEPAD_BINDTYPE_BUTTON &&
+            binding->output_type == SDL_GAMEPAD_BINDTYPE_BUTTON &&
+            binding->output.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK)
+            touch.rawR3Buttons.push_back(binding->input.button);
+    }
+    SDL_free(bindings);
+    std::sort(touch.rawR3Buttons.begin(), touch.rawR3Buttons.end());
+    touch.rawR3Buttons.erase(std::unique(touch.rawR3Buttons.begin(), touch.rawR3Buttons.end()),
+                             touch.rawR3Buttons.end());
+}
+
+bool puzzleTouchRawButtonEvent(const App& app, SDL_JoystickID which, int button) {
+    if (!app.pad) return false;
+    SDL_Joystick* joystick = SDL_GetGamepadJoystick(app.pad);
+    if (!joystick || SDL_GetJoystickID(joystick) != which) return false;
+    const auto& raw = app.puzzleTouch.rawR3Buttons;
+    return std::find(raw.begin(), raw.end(), button) != raw.end();
+}
+
+bool puzzleTouchButtonDown(const App& app) {
+    if (!app.pad) return false;
+    if (SDL_GetGamepadButton(app.pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK)) return true;
+    SDL_Joystick* joystick = SDL_GetGamepadJoystick(app.pad);
+    if (!joystick) return false;
+    for (int button : app.puzzleTouch.rawR3Buttons)
+        if (SDL_GetJoystickButton(joystick, button)) return true;
+    return false;
+}
+
+void puzzleTouchCancel(App& app) {
+    App::PuzzleTouch& touch = app.puzzleTouch;
+    if (app.puzzle.pkState == 1 && app.puzzle.pkFromX > -1e8f)
+        app.puzzle.pkPointerCancelled = true; // keep the held block; require a fresh finger-down after interruption
+    touch.pressed = false;
+    touch.hit = false;
+    touch.downPending = touch.upPending = false;
+    touch.visible = false;
+}
+
+void puzzleTouchPrepare(App& app) {
+    App::PuzzleTouch& touch = app.puzzleTouch;
+    if (!touch.initialized || touch.stage != app.puzzle.stage) {
+        touch.initialized = true;
+        touch.stage = app.puzzle.stage;
+        touch.pressed = false;
+        touch.hit = false;
+        touch.downPending = touch.upPending = false;
+        touch.x = float(app.renderer.frameWidth()) * 0.5f;
+        touch.y = float(app.renderer.frameHeight()) * 0.5f;
+    }
+    if (app.pad && touch.rawR3Buttons.empty()) puzzleTouchCacheBindings(app);
+    touch.visible = true;
+}
+
+void puzzleTouchDown(App& app) {
+    if (!puzzleTouchAvailable(app)) return;
+    puzzleTouchPrepare(app);
+    App::PuzzleTouch& touch = app.puzzleTouch;
+    if (touch.pressed) return;
+    touch.pressed = true;
+    float fx, fy;
+    app.renderer.toLogicalAtLayer(touch.x, touch.y, fx, fy, 3);
+    if (app.puzzle.pkState == 1 &&
+        app.puzzle.pkTarget < int(app.puzzle.objs.size())) {
+        // Re-pressing R3 while a block is still held establishes the swipe origin.
+        app.puzzle.pkFromX = fx, app.puzzle.pkFromY = fy;
+        app.puzzle.pkPointerCancelled = false;
+        touch.hit = true;
+        return;
+    }
+    const bool clicked = puzzle::click(app, touch.x, touch.y);
+    touch.hit = clicked;
+    if (app.puzzle.stage >= 0 && app.puzzle.stage < cr::kPuzzleStages &&
+        cr::kPuzzleStage[size_t(app.puzzle.stage)].ability == cr::kAbilityPsychokinesis)
+        touch.hit = clicked && app.puzzle.pkState == 1 && app.puzzle.pkTarget >= 0;
+}
+
+void puzzleTouchUp(App& app) {
+    App::PuzzleTouch& touch = app.puzzleTouch;
+    if (!touch.pressed) return;
+    touch.pressed = false;
+    if (app.mode == Mode::Maps && app.puzzle.stage >= 0 && app.puzzle.pkState == 1 &&
+        !app.puzzle.pkPointerCancelled)
+        puzzle::release(app, touch.x, touch.y);
+}
+
+void puzzleTouchStep(App& app, float dt) {
+    if (!puzzleTouchAvailable(app)) {
+        if (app.puzzleTouch.pressed) puzzleTouchCancel(app);
+        else app.puzzleTouch.visible = false;
+        app.puzzleTouch.downPending = app.puzzleTouch.upPending = false;
+        return;
+    }
+    puzzleTouchPrepare(app);
+    App::PuzzleTouch& touch = app.puzzleTouch;
+
+    // Update the Vita virtual finger position before applying R3 down/up edges.
+    // This makes same-frame stick motion + R3 use the new pointer coordinate.
+    const float rx = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_RIGHTX)) / 32767.0f;
+    const float ry = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_RIGHTY)) / 32767.0f;
+    const float magnitude = std::sqrt(rx * rx + ry * ry);
+    constexpr float kDeadZone = 0.18f;
+    if (magnitude > kDeadZone) {
+        const float strength = std::clamp((magnitude - kDeadZone) / (1.0f - kDeadZone), 0.0f, 1.0f);
+        const float seconds = std::clamp(dt, 0.0f, 0.05f);
+        const float frameScaleX = float(app.renderer.frameWidth()) / 1024.0f;
+        const float frameScaleY = float(app.renderer.frameHeight()) / 768.0f;
+        const float speed = 720.0f * strength * seconds;
+        const float nx = rx / magnitude, ny = ry / magnitude;
+        touch.x = std::clamp(touch.x + nx * speed * frameScaleX, 4.0f,
+                             float(std::max(8, app.renderer.frameWidth() - 4)));
+        touch.y = std::clamp(touch.y + ny * speed * frameScaleY, 4.0f,
+                             float(std::max(8, app.renderer.frameHeight() - 4)));
+    }
+
+    // Preserve short hardware-button edges until this frame has applied pointer movement.
+    const bool r3Down = puzzleTouchButtonDown(app);
+    const bool down = touch.downPending || (r3Down && !touch.pressed);
+    const bool up = touch.upPending || (!r3Down && touch.pressed);
+    touch.downPending = touch.upPending = false;
+    if (down && !touch.pressed) puzzleTouchDown(app);
+    if (up && touch.pressed) puzzleTouchUp(app);
+}
+
 void padButton(App& app, int b) {
     const bool east = b == SDL_GAMEPAD_BUTTON_EAST, south = b == SDL_GAMEPAD_BUTTON_SOUTH;
     const bool confirm = app.padConfirmEast ? east : south, cancel = app.padConfirmEast ? south : east;
@@ -21584,9 +21908,12 @@ void padButton(App& app, int b) {
         else if (app.fieldMenu.open && fieldMenuWanted(app)) padKey(app, SDLK_R);
         else if (padField(app)) padKey(app, SDLK_R);
         return;
-    case SDL_GAMEPAD_BUTTON_WEST: // □: text skipped; in a puzzle room, the ability
-        if (padField(app) && puzzle) padKey(app, SDLK_T);
-        else if (app.mode == Mode::Maps && app.runner.running())
+    case SDL_GAMEPAD_BUTTON_EAST: // ○: the normal Japanese-layout action / confirm button, including the puzzle exit crystal
+        if (confirm) padKey(app, SDLK_RETURN);
+        else if (cancel && (padMenus(app) || app.mapScreen.open || app.staffRoll.open)) padKey(app, SDLK_ESCAPE);
+        return;
+    case SDL_GAMEPAD_BUTTON_WEST: // □: skip text only; never trigger a puzzle ability
+        if (app.mode == Mode::Maps && app.runner.running())
             setSceneSkip(app, crinput::HeldSource::Gamepad, true);
         return;
     case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: padKey(app, SDLK_PAGEUP); return;   // L: a page back
@@ -21598,6 +21925,9 @@ void padButton(App& app, int b) {
     case SDL_GAMEPAD_BUTTON_BACK: // SELECT: a puzzle's help; on the field the corner bar
         if (puzzle) padKey(app, SDLK_F6);
         else if (padField(app)) padKey(app, SDLK_R);
+        return;
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: // R3: queue finger-down at the virtual right-stick pointer
+        if (puzzle) app.puzzleTouch.downPending = true;
         return;
     default: break;
     }
@@ -21653,6 +21983,7 @@ void consumeInputCancel(App& app) {
     app.padHeldOver.cancel();
     app.pointerCancelled = true;
     app.puzzle.tapX = app.puzzle.tapY = -1;
+    puzzleTouchCancel(app);
     if (app.puzzle.pkState == 1 && app.puzzle.pkFromX > -1e8f) app.puzzle.pkPointerCancelled = true;
 }
 
@@ -21680,22 +22011,36 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     case SDL_EVENT_GAMEPAD_ADDED:
         if (!app.pad) {
             app.pad = SDL_OpenGamepad(event->gdevice.which);
-            if (app.pad) SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
+            if (app.pad) {
+                puzzleTouchCacheBindings(app);
+                SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
+            }
         }
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
         if (app.pad && SDL_GetGamepadID(app.pad) == event->gdevice.which) {
             setSceneSkip(app, crinput::HeldSource::Gamepad, false);
+            puzzleTouchCancel(app);
             SDL_CloseGamepad(app.pad);
             app.pad = nullptr;
+            app.puzzleTouch.rawR3Buttons.clear();
         }
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         if (app.pad && SDL_GetGamepadID(app.pad) == event->gbutton.which) padButton(app, event->gbutton.button);
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
-        if (app.pad && SDL_GetGamepadID(app.pad) == event->gbutton.which && event->gbutton.button == SDL_GAMEPAD_BUTTON_WEST)
-            setSceneSkip(app, crinput::HeldSource::Gamepad, false);
+        if (app.pad && SDL_GetGamepadID(app.pad) == event->gbutton.which) {
+            if (event->gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) app.puzzleTouch.upPending = true;
+            if (event->gbutton.button == SDL_GAMEPAD_BUTTON_WEST)
+                setSceneSkip(app, crinput::HeldSource::Gamepad, false);
+        }
+        break;
+    case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
+        if (puzzleTouchRawButtonEvent(app, event->jbutton.which, event->jbutton.button)) app.puzzleTouch.downPending = true;
+        break;
+    case SDL_EVENT_JOYSTICK_BUTTON_UP:
+        if (puzzleTouchRawButtonEvent(app, event->jbutton.which, event->jbutton.button)) app.puzzleTouch.upPending = true;
         break;
     case SDL_EVENT_KEY_DOWN:
         if (event->key.key == SDLK_X && !event->key.repeat && app.mode == Mode::Maps && app.runner.running())
@@ -22116,6 +22461,7 @@ SDL_AppResult SDL_AppIterate(void* state) {
     App& app = *static_cast<App*>(state);
     const float activeDt = app.clock.step();
     padStep(app, activeDt);
+    puzzleTouchStep(app, activeDt);
     app.music.update(activeDt);
     // the frame rate's limit: each frame no sooner than its slot (vsync may hold it longer)
     if (app.video.frameLimit > 0) {
