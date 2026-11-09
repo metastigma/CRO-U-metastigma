@@ -338,9 +338,13 @@ void Renderer::fillQuad(const float xy[8], float r, float g, float b, float a) {
 }
 
 void Renderer::toLogical(float px, float py, float& lx, float& ly) const {
+    toLogicalAtLayer(px, py, lx, ly, layer_);
+}
+
+void Renderer::toLogicalAtLayer(float px, float py, float& lx, float& ly, int layer) const {
     lx = (px - offX_) / scaleX_;
     ly = (py - offY_) / scaleY_;
-    if (phone_) screenToLayout(lx, ly);
+    if (phone_) screenToLayout(lx, ly, layer);
 }
 
 // The layout's centre stays the screen's; (·, 64) - tex2d y 0 - goes to the top (on the Vita's
@@ -354,9 +358,13 @@ void Renderer::layoutToScreen(float& x, float& y) const {
 }
 
 void Renderer::screenToLayout(float& x, float& y) const {
+    screenToLayout(x, y, layer_);
+}
+
+void Renderer::screenToLayout(float& x, float& y, int layer) const {
     if (!phone_) return;
-    const float k = layoutScale();
-    const float dy = !vitaScreen() ? 0.0f : layer_ == 3 ? -12.0f * kLogicalH / 544.0f : layer_ == 7 ? 48.0f * kLogicalH / 544.0f : 0.0f;
+    const float k = layoutScale(layer);
+    const float dy = !vitaScreen() ? 0.0f : layer == 3 ? -12.0f * kLogicalH / 544.0f : layer == 7 ? 48.0f * kLogicalH / 544.0f : 0.0f;
     x = screenW_ * 0.5f + (x - screenW_ * 0.5f) / k;
     y = kLogicalH * 0.5f + (y - dy - kLogicalH * 0.5f) / k;
 }

@@ -365,3 +365,12 @@ The previous port ignored slots 3–11 and generated the second member's destina
 - [x] R3 down/up edges from SDL Gamepad and raw Joystick events are latched until the frame updates the virtual finger position, so a click does not hit the previous frame's coordinates.
 - [x] The R3 regression test holds through NormalBlockPK rising, verifies the block reaches its held state, slides in one direction, releases, and verifies the block's grid cell changes.
 - [ ] CI and in-game verification.
+
+
+## Исправление попадания виртуального касания — PR #17
+
+- [x] Разделены координаты HUD (layer 0) и 3D-поля (layer 3): прицел остаётся в UI-системе, hit-test и жест психокинеза используют координаты слоя поля.
+- [x] На Vita для слоя 3 учитываются его собственные масштаб и вертикальное смещение; их смешение с координатами HUD сдвигало выбор относительно прицела.
+- [x] Hit-test включает целочисленное смещение viewport от field-camera quake, как и отрисовка поля.
+- [x] Self-test строит позицию виртуального указателя через обратное преобразование того же слоя 3.
+- [ ] CI и проверка попадания на физическом контроллере.

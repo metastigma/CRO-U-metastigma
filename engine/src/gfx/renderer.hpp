@@ -73,8 +73,10 @@ public:
     // A plain colour over any four corners (top left, top right, bottom right, bottom left)
     void fillQuad(const float xy[8], float r, float g, float b, float a);
 
-    // Converts window pixel coordinates to logical coordinates.
+    // Converts window pixels to the active UI layout's logical coordinates.
     void toLogical(float px, float py, float& lx, float& ly) const;
+    // Converts window pixels to a specific layout layer (e.g. the field's layer 3).
+    void toLogicalAtLayer(float px, float py, float& lx, float& ly, int layer) const;
 
     // 3D path. begin3D clears depth and sets the viewport to the letterboxed screen.
     GpuMesh upload(const Mesh& mesh);
@@ -121,14 +123,18 @@ public:
     static constexpr float kAndroidScale = 16.0f / 15.0f;
     void setLayer(int kind) { layer_ = kind; }
     int layer() const { return layer_; }
-    float layoutScale() const {
-        return androidScreen() ? kAndroidScale : vitaScreen() && (layer_ == 3 || layer_ == 7) ? kPhoneScale / 0.85f : kPhoneScale;
+    float layoutScale() const { return layoutScale(layer_); }
+    // A field painting is drawn in layer 3; on the Vita this layer is enlarged and shifted
+    // relative to the normal HUD layer. Hit-tests can explicitly request its coordinate mapping.
+    float layoutScale(int layer) const {
+        return androidScreen() ? kAndroidScale : vitaScreen() && (layer == 3 || layer == 7) ? kPhoneScale / 0.85f : kPhoneScale;
     }
     void layoutToScreen(float& x, float& y) const;
     // The visible screen's right / top edge in the layout's units (toLogical's)
     float layoutRight() const { return phone_ ? screenW_ * 0.5f + screenW_ * 0.5f / layoutScale() : screenW_; }
     float layoutTop() const { return phone_ ? 384.0f - 384.0f / layoutScale() : 0.0f; }
     void screenToLayout(float& x, float& y) const;
+    void screenToLayout(float& x, float& y, int layer) const;
     // Frames rendered at `scale` x the window's pixels and with `samples` x MSAA, where the
     // device renders offscreen (Vulkan); the frame is then scaled to the window
     void setRenderScale(float scale) { renderScale_ = scale; }

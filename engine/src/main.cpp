@@ -10146,8 +10146,12 @@ void stepCrystalCam(App& app) {
 // A click in the frame's pixels: teleport to the block or gem tapped (true when one was)
 bool click(App& app, float px, float py) {
     if (app.puzzle.stage < 0 || app.runner.running() || !app.dialogue.empty() || !paintedField(app)) return false;
-    float lx, ly;
-    app.renderer.toLogical(px, py, lx, ly);
+    // The puzzle HUD is layer 0, but field objects are drawn through the layer-3 viewport.
+    // On Vita that viewport is enlarged and shifted; using HUD coordinates for picking makes
+    // a visible touch select a different world point.
+    float lx, ly, fx, fy;
+    app.renderer.toLogicalAtLayer(px, py, lx, ly, 0);
+    app.renderer.toLogicalAtLayer(px, py, fx, fy, 3);
     float tx, ty;
     logicalToTex2d(app, lx, ly, tx, ty);
     if (app.puzzle.help) { // the pad's buttons: (8..52, 56..84) Retry (EvrStart 6), (84..124, 14..46) Help (7)
@@ -10164,7 +10168,10 @@ bool click(App& app, float px, float py) {
         vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
         vx = (SW - vw) / 2, vy = (H - vh) / 2;
     }
-    const int t = pick(app, lx, ly, [&](cr::Vec3 p, float& x, float& y) {
+    // Match drawFrame: the field's 3D viewport moves by the integer camera-quake offset.
+    vx += std::trunc(app.fieldQuake.off[0]);
+    vy += std::trunc(app.fieldQuake.off[1]);
+    const int t = pick(app, fx, fy, [&](cr::Vec3 p, float& x, float& y) {
         float hx, hy;
         if (!fieldViewPoint(app, p, hx, hy)) return false;
         x = vx + hx * vw / fieldViewW(app), y = vy + hy * vh / fieldViewH(app);
@@ -10176,7 +10183,7 @@ bool click(App& app, float px, float py) {
     const int punishedBefore = app.puzzle.punished;
     switch (stage(app)->ability) {
     case cr::kAbilityPsychokinesis:
-        pkGrab(app, t, lx, ly);
+        pkGrab(app, t, fx, fy);
         break;
     case cr::kAbilityToughness:
         toughTap(app, t);
@@ -10205,9 +10212,9 @@ bool click(App& app, float px, float py) {
 // The mouse let go (the frame's pixels): a held block goes the way it was dragged
 void release(App& app, float px, float py) {
     if (app.puzzle.stage < 0 || app.puzzle.pkState != 1) return;
-    float lx, ly;
-    app.renderer.toLogical(px, py, lx, ly);
-    pkRelease(app, lx, ly);
+    float fx, fy;
+    app.renderer.toLogicalAtLayer(px, py, fx, fy, 3);
+    pkRelease(app, fx, fy);
 }
 
 // The ability's key: teleport to / take hold of the block ahead, or let a held one go
@@ -16348,8 +16355,10 @@ int inputCancelSelfTest(App& app) {
             const float logicalY = vy + hy * vh / fieldViewH(app);
             float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
             const float fw = float(app.renderer.frameWidth()), fh = float(app.renderer.frameHeight());
-            app.renderer.toLogical(0, 0, x0, y0);
-            app.renderer.toLogical(fw, fh, x1, y1);
+            // The field objects are drawn in layer 3; invert that same mapping when aiming
+            // the regression test's virtual pointer at a projected object.
+            app.renderer.toLogicalAtLayer(0, 0, x0, y0, 3);
+            app.renderer.toLogicalAtLayer(fw, fh, x1, y1, 3);
             if (x1 == x0 || y1 == y0) return false;
             px = (logicalX - x0) * fw / (x1 - x0);
             py = (logicalY - y0) * fh / (y1 - y0);
@@ -21807,12 +21816,12 @@ void puzzleTouchDown(App& app) {
     App::PuzzleTouch& touch = app.puzzleTouch;
     if (touch.pressed) return;
     touch.pressed = true;
-    float lx, ly;
-    app.renderer.toLogical(touch.x, touch.y, lx, ly);
-    if (app.puzzle.pkState == 1 && app.puzzle.pkTarget >= 0 &&
+    float fx, fy;
+    app.renderer.toLogicalAtLayer(touch.x, touch.y, fx, fy, 3);
+    if (app.puzzle.pkState == 1 &&
         app.puzzle.pkTarget < int(app.puzzle.objs.size())) {
         // Re-pressing R3 while a block is still held establishes the swipe origin.
-        app.puzzle.pkFromX = lx, app.puzzle.pkFromY = ly;
+        app.puzzle.pkFromX = fx, app.puzzle.pkFromY = fy;
         app.puzzle.pkPointerCancelled = false;
         touch.hit = true;
         return;
