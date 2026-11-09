@@ -9617,7 +9617,7 @@ void teleportTo(App& app, int t) {
     if (pz.esp > 0) --pz.esp;
     o.pending = 8; // TeleportMessage(the player's cell, 4, 4, 6, 6)
     o.toRow = pr, o.toCol = pc, o.outFrames = 4, o.inFrames = 4, o.waitOut = 6, o.waitIn = 6;
-    app.playerAlphaFrom = 1, app.playerAlphaTo = 0, app.playerFadeFrames = app.playerFadeLeft = 4;
+    app.playerAlphaFrom = 1, app.playerAlphaTo = 0, app.playerFadeFrames = app.playerFadeLeft = 4, app.playerFaded = true;
     npcEffect(app, 0x8d, -1);
     npcEffect(app, 0x8e, -1);
     app.sound.play(0x134);
@@ -16620,10 +16620,10 @@ int fieldLifecycleSelfTest(App& app) {
     }
     if (enter(0)) {
         ViewerHost host(app);
-        auto d = std::find_if(app.npcDraws.begin(), app.npcDraws.end(), [](const App::NpcDraw& d) { return d.id > 0; });
-        if (d == app.npcDraws.end() || !findNpc(app, d->id)) ++problems;
+        auto n = std::find_if(app.npcs.begin(), app.npcs.end(), [](const cr::FieldNpc& n) { return n.id > 0; });
+        if (n == app.npcs.end()) ++problems;
         else {
-            const int id = d->id;
+            const int id = n->id;
             host.fadeNpc(0, 0, 0, 0); // mdl_set_alpha at zero frames still selects permanent blending
             const bool playerFadeMode = app.playerFaded && app.playerAlpha == 1.0f && app.playerFadeLeft == 0;
             int npcInstances = 0;
@@ -16664,7 +16664,7 @@ int fieldLifecycleSelfTest(App& app) {
             setActor(app, 0, puzzle::centre(app, 0, 0), nullptr, false);
             puzzle::teleportTo(app, target);
             for (int f = 0; f < 4; ++f) stepEvents(app);
-            const bool faded = app.puzzle.tpState != 0 && app.playerAlpha < 0.01f;
+            const bool faded = app.puzzle.tpState != 0 && app.playerAlpha < 0.01f && app.playerFaded;
             const bool loaded = applySave(app, saved);
             const bool visible = loaded && app.playerAlpha == 1 && app.playerFadeLeft == 0 && !app.puzzle.tpState;
             std::printf("field lifecycle: interrupted teleport faded %d, reload visible %s\n", faded, visible ? "ok" : "FAILED");
