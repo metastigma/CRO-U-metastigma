@@ -452,7 +452,7 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 
 - [x] Counter 154: гарантированная контратака на физический удар; русское название и описание вынесены в корневой чек-лист `ПРОВЕРКА_COUNTER_154.md` для проверки при прохождении.
 - [x] NPC table +8: сохранён native ID; native 15 запускает штатную процедуру fire wall при инициализации комнаты.
-- [x] `NpcFade 0` направляется на fade модели игрока.
+- [x] `NpcFade 0` направляется на fade модели игрока; для игрока и NPC сохраняется постоянный blend-режим оригинального `mdl_set_alpha`, включая fade с нулевой длительностью. Состояния моделей сбрасываются при повторной загрузке комнаты.
 - [x] `Uty_ChkLogo_flg`: чтение и запись флага разделены.
 - [x] `Uty_Btl_ParamUp01/02`: используется battle-only Ward/double-stats byte; ошибочный queued +20% buff удалён.
 - [x] BGM bookkeeping: удалена эвристика выбора трека по имени карты; восстановление после боя учитывает var 60 и последний полевой BGM-запрос.
@@ -460,3 +460,9 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [ ] CI / CTest и игровая проверка всех пунктов.
 
 Источники: [NPC natives / ParamUp](https://github.com/DuIslingr/CRO-U/commit/231bf064), [Counter 154](https://github.com/DuIslingr/CRO-U/commit/31d592a7), [BGM](https://github.com/DuIslingr/CRO-U/commit/f2ead07e), [KD floor/wall](https://github.com/DuIslingr/CRO-U/commit/014e146c).
+
+### Примечание о версиях аудио
+
+- Проверенный iOS ARMv7 Mach-O `ChaosRingsOmegaHDeng` содержит имена `bgm01–bgm30`, `bgm41–bgm49`, `voicebtl.bin` и `voiceevnt.bin`. Встроенный путь сборки указывает на `20120323_release_iOS51_erp_1_2_0_4_RC2` (23 марта 2012 года).
+- Поэтому BGM 41–49 и ресурсы боевых/сюжетных голосов уже присутствуют в этой iOS-сборке; их нельзя объявлять функциями, появившимися только на Vita или Android.
+- Правила `_setbgm_caf`, `Uty_GetBgmNo`, var 58 / 60 и возврата полевого BGM в upstream commit `f2ead07e` описаны как аудит 3.1.0. Сам перенос оставлен, но точное совпадение каждой детали с iOS 1.2.0.4 RC2 остаётся отдельной задачей бинарной сверки. Наличие ресурса само по себе не доказывает идентичность алгоритма воспроизведения.
