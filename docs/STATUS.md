@@ -466,6 +466,6 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 
 ### Примечание о версиях аудио
 
-- Проверенный iOS ARMv7 Mach-O `ChaosRingsOmegaHDeng` содержит имена `bgm01–bgm30`, `bgm41–bgm49`, `eff.bin`, `sndeff.bin`, `voicebtl.bin` и `voiceevnt.bin`. В бинарнике есть класс `GBMusicTrack` с `play`, `pause`, `setGain:` и `setRepeatFrame:`, работающий через iOS AudioQueue. Встроенный путь сборки указывает на `20120323_release_iOS51_erp_1_2_0_4_RC2` (23 марта 2012 года).
+- Проверенный iOS ARMv7 Mach-O `ChaosRingsOmegaHDeng` содержит имена `bgm01–bgm06`, `bgm08–bgm30`, `bgm41–bgm49`, `eff.bin`, `sndeff.bin`, `voicebtl.bin` и `voiceevnt.bin`. В бинарнике есть класс `GBMusicTrack` с `play`, `pause`, `setGain:` и `setRepeatFrame:`, работающий через iOS AudioQueue. Встроенный путь сборки указывает на `20120323_release_iOS51_erp_1_2_0_4_RC2` (23 марта 2012 года).
 - Поэтому BGM 41–49 и ресурсы боевых/сюжетных голосов уже присутствуют в этой iOS-сборке; их нельзя объявлять функциями, появившимися только на Vita или Android.
 - Правила `_setbgm_caf`, `Uty_GetBgmNo`, var 58 / 60 и возврата полевого BGM в upstream commit `f2ead07e` описаны как аудит 3.1.0. Сам перенос оставлен, но точное совпадение каждой детали с iOS 1.2.0.4 RC2 остаётся отдельной задачей бинарной сверки. Наличие ресурса само по себе не доказывает идентичность алгоритма воспроизведения.
