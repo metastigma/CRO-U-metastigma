@@ -45,6 +45,7 @@
 #include "assets/hd_texture.hpp"
 #include "audio/at9.hpp"
 #include "scene/smooth.hpp"
+#include "gfx/effect_orientation.hpp"
 #include "assets/gltf_model.hpp"
 #include "game/save.hpp"
 #include "game/shop.hpp"
@@ -119,6 +120,7 @@ struct Effect {
     bool loop = false;
     float scale = 1, yaw = 0;
     float pitch = 0, roll = 0; // FrmPlayEff2: the record's X and Z angles (radians)
+    bool faceCamera = false;   // Omega sets mdl +0xfc7 only for effects started while a battle is active
     int handle = 0;  // for stopping it
     int key = 0;     // FrmPlayEff's (effect + 1) x (actor + 1)
 };
@@ -2871,7 +2873,17 @@ bool fieldViewPoint(const App& app, const cr::Vec3& p, float& vx, float& vy) {
 // moves `rate` of the way there
 void scrollFieldTo(App& app, float vx, float vy, float rate) {
     const float V = fieldViewW(app), Vh = fieldViewH(app);
-    const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
+    cr::Renderer& r = app.renderer;
+    // The painted field is drawn on layer 3. On phone/Vita layouts that layer is scaled
+    // differently from the 2D UI layer, so clamp the camera to the actual painted viewport.
+    const int keepLayer = r.layer();
+    r.setLayer(3);
+    const float k = r.phoneLayout() ? r.layoutScale() : 1.0f;
+    float cx = r.screenW() / 2, cy = cr::Renderer::kLogicalH / 2.0f;
+    r.layoutToScreen(cx, cy);
+    const float shiftY = (cy - cr::Renderer::kLogicalH / 2.0f) / k;
+    r.setLayer(keepLayer);
+    const float SW = r.screenW() / k, H = cr::Renderer::kLogicalH / k;
     const int* rc = app.stageCam.rect;
     const bool haveRect = rc[2] > 0 && rc[3] > 0;
     const float rx = haveRect ? 2.0f * float(rc[0]) : 0, ry = haveRect ? 2.0f * float(rc[1]) : 0;
@@ -2879,7 +2891,8 @@ void scrollFieldTo(App& app, float vx, float vy, float rate) {
     auto axis = [](float v, float lo, float len, float screen) {
         return len <= screen ? lo + len / 2 : std::clamp(v, lo + screen / 2, lo + len - screen / 2);
     };
-    const float tx = V / 2 - axis(vx, rx, rw, SW), ty = axis(vy, ry, rh, H) - Vh / 2;
+    const float tx = V / 2 - axis(vx, rx, rw, SW);
+    const float ty = axis(vy - shiftY, ry, rh, H) + shiftY - Vh / 2;
     app.scroll.offX += (tx - app.scroll.offX) * rate;
     app.scroll.offY += (ty - app.scroll.offY) * rate;
 }
@@ -3127,7 +3140,10 @@ struct ViewerHost : cr::EventHost {
         const int k = npc == 0x1c6 ? 0 : npc == 0x1c5 ? 1 : -1;
         cr::Vec3 p;
         if (k < 0 || app.game.flag(kClear[k][std::clamp(app.game.scenario, 0, 1)]) || !actorPos(app, npc, p)) return;
-        startEffect(app, app.fieldEffects, 0x98 + k, p, true, 1.0f, 0.0f);
+        const int h = startEffect(app, app.fieldEffects, 0x98 + k, p, true, 1.0f, 0.0f);
+        if (h)
+            for (Effect& fx : app.fieldEffects)
+                if (fx.handle == h) fx.faceCamera = app.battle.active;
     }
     int bgmNo() override { return app.bgmNo; }
     void endMenu(int kind) override { // 2: the shop - SetShopBgmNoRecovery, __mc_SetMenuStat(7, 4)
@@ -3404,7 +3420,7 @@ struct ViewerHost : cr::EventHost {
         const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, yaw);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.pitch = pitch, fx.roll = roll;
+                if (fx.handle == h) fx.pitch = pitch, fx.yaw = yaw, fx.roll = roll, fx.faceCamera = app.battle.active;
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
@@ -3417,7 +3433,12 @@ struct ViewerHost : cr::EventHost {
     void npcEffect(int effect, int npc, int dy) override {
         ++app.scriptEffectCalls;
         cr::Vec3 p;
-        if (actorPos(app, npc, p)) startEffect(app, app.fieldEffects, effect, p + cr::Vec3{0, float(dy), 0}, false, 1.0f, 0.0f);
+        if (actorPos(app, npc, p)) {
+            const int h = startEffect(app, app.fieldEffects, effect, p + cr::Vec3{0, float(dy), 0}, false, 1.0f, 0.0f);
+            if (h)
+                for (Effect& fx : app.fieldEffects)
+                    if (fx.handle == h) fx.faceCamera = app.battle.active;
+        }
     }
     void mapScroll(int npc, float x, float y, float rate) override {
         ++app.scroll.mapScrolls;
@@ -11640,7 +11661,9 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp, 
             }
         }
         // scaled, turned (Euler XYZ, mdl_put: R = Rz Ry Rx), at its point
-        const float yaw = eye && target ? std::atan2(eye->x - target->x, eye->z - target->z) : e.yaw;
+        const bool battleEffectList = &list == &app.battle.effects;
+        const bool face = cr::effectFacesCamera(eye && target, battleEffectList, e.faceCamera);
+        const float yaw = face ? std::atan2(eye->x - target->x, eye->z - target->z) : e.yaw;
         const float cx = std::cos(e.pitch), sx = std::sin(e.pitch), cy = std::cos(yaw), sy = std::sin(yaw);
         const float cz = std::cos(e.roll), sz = std::sin(e.roll), k = e.scale;
         cr::Mat4 world;
@@ -14416,8 +14439,19 @@ void drawPrompt(App& app, const cr::Mat4& vp, float rx, float ry, float rw, floa
     const float* m = vp.m;
     const float cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
     if (cw <= 0) return;
-    const float sx = rx + ((m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / cw * 0.5f + 0.5f) * rw;
-    const float sy = ry + (0.5f - (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw * 0.5f) * rh;
+    float sx = rx + ((m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / cw * 0.5f + 0.5f) * rw;
+    float sy = ry + (0.5f - (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw * 0.5f) * rh;
+    { // The projection is in painted layer 3; the prompt and its touch target are on UI layer 0.
+        cr::Renderer& r = app.renderer;
+        const int keep = r.layer();
+        float x = sx, y = sy;
+        r.setLayer(3);
+        r.layoutToScreen(x, y);
+        r.setLayer(0);
+        r.screenToLayout(x, y);
+        r.setLayer(keep);
+        sx = x, sy = y;
+    }
     app.promptX = sx, app.promptY = sy - 20.5f; // (a tap there examines it: touchPadDown)
     if (app.windowTex.id) drawWinPiece(app, kWinBadge, sx - 20, sy - 41, 40, 41); // the "!" badge
     else app.promptHud.drawAt(app.renderer, {"[E]"}, sx - 24, sy - 16, 2.0f, 0, 0, 0.8f);
@@ -14652,10 +14686,12 @@ void drawFrame(App& app, bool present = true) {
             r.setColorWrite(false);
             if (app.showProps) drawLoaded(app, app.model, mvp);
             r.setColorWrite(true);
-            drawNpcs(app, mvp);
+            // mdl_put queues the player's model before the NPCs' draw entries. In particular,
+            // the ship's blended c152 waves must not cover Vieg on the deck.
             if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app));
+            drawNpcs(app, mvp);
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
-            drawEffects(app, app.fieldEffects, mvp, nullptr, nullptr);
+            drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // only effects flagged by battle-time setup face the camera
             if (app.showCollision && app.collision.vao) {
                 cr::Material colMat; // translucent so the painted floor shows through
                 colMat.culling = 0;
