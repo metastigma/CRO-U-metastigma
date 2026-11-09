@@ -9291,18 +9291,26 @@ int npcEffect(App& app, int id, int npc, bool loop = false) {
     return fieldEffect(app, id, {n.pos[0], n.pos[1], n.pos[2]}, loop);
 }
 
-// A world point on the frame (logical 1024 x 768 pixels, the whole screen's width), as drawFrame
-// lays out the stage view (false when it's off the view or behind the camera)
+// Supplied below by the between-frame renderer: camera pans can be interpolated between
+// simulation steps, so hit-testing must use the same scroll position the current frame shows.
+void shownScroll(const App& app, float& x, float& y);
+
+// A world point on the frame (logical 1024 x 768 pixels, the whole screen's width), in the same
+// viewport used by drawFrame (including camera interpolation and quake).
 bool fieldToLogical(const App& app, cr::Vec3 p, float& lx, float& ly) {
     const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
     float vx, vy, vw, vh;
     if (scrollingField(app)) {
         vw = fieldViewW(app), vh = fieldViewH(app);
-        vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
+        float sx = 0, sy = 0;
+        shownScroll(app, sx, sy);
+        vx = (SW - vw) / 2 + sx, vy = (H - vh) / 2 - sy;
     } else {
         vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
         vx = (SW - vw) / 2, vy = (H - vh) / 2;
     }
+    vx += std::trunc(app.fieldQuake.off[0]);
+    vy += std::trunc(app.fieldQuake.off[1]);
     float hx, hy;
     if (!fieldViewPoint(app, p, hx, hy)) return false;
     lx = vx + hx * vw / fieldViewW(app), ly = vy + hy * vh / fieldViewH(app);
@@ -10167,23 +10175,10 @@ bool click(App& app, float px, float py) {
         if (bx >= 8 && bx < 52 && ty >= 56 && ty < 84) { ask(app, 0); return true; }
         if (bx >= 84 && bx < 124 && ty >= 14 && ty < 46) { ask(app, 1); return true; }
     }
-    const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
-    float vx, vy, vw, vh; // the stage view on screen, as drawFrame lays it out
-    if (scrollingField(app)) {
-        vw = fieldViewW(app), vh = fieldViewH(app);
-        vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
-    } else {
-        vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
-        vx = (SW - vw) / 2, vy = (H - vh) / 2;
-    }
-    // Match drawFrame: the field's 3D viewport moves by the integer camera-quake offset.
-    vx += std::trunc(app.fieldQuake.off[0]);
-    vy += std::trunc(app.fieldQuake.off[1]);
+    // Use the same field-to-screen transform as rendering and prompt placement. In particular,
+    // this includes the interpolated script scroll and the viewport quake for the current frame.
     const int t = pick(app, fx, fy, [&](cr::Vec3 p, float& x, float& y) {
-        float hx, hy;
-        if (!fieldViewPoint(app, p, hx, hy)) return false;
-        x = vx + hx * vw / fieldViewW(app), y = vy + hy * vh / fieldViewH(app);
-        return true;
+        return fieldToLogical(app, p, x, y);
     });
     if (t < 0) return false;
     app.puzzle.tapX = tx, app.puzzle.tapY = ty;
@@ -16363,19 +16358,8 @@ int inputCancelSelfTest(App& app) {
             const auto& object = app.puzzle.objs[size_t(objectIndex)];
             if (object.npc < 0 || size_t(object.npc) >= app.npcs.size()) return false;
             const cr::FieldNpc& npc = app.npcs[size_t(object.npc)];
-            float hx = 0, hy = 0;
-            if (!fieldViewPoint(app, {npc.pos[0], npc.pos[1] + 5.0f, npc.pos[2]}, hx, hy)) return false;
-            const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
-            float vx = 0, vy = 0, vw = 0, vh = 0;
-            if (scrollingField(app)) {
-                vw = fieldViewW(app), vh = fieldViewH(app);
-                vx = (SW - vw) / 2 + app.scroll.offX, vy = (H - vh) / 2 - app.scroll.offY;
-            } else {
-                vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
-                vx = (SW - vw) / 2, vy = (H - vh) / 2;
-            }
-            const float logicalX = vx + hx * vw / fieldViewW(app);
-            const float logicalY = vy + hy * vh / fieldViewH(app);
+            float logicalX = 0, logicalY = 0;
+            if (!fieldToLogical(app, {npc.pos[0], npc.pos[1] + 5.0f, npc.pos[2]}, logicalX, logicalY)) return false;
             float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
             const float fw = float(app.renderer.frameWidth()), fh = float(app.renderer.frameHeight());
             // The field objects are drawn in layer 3; invert that same mapping when aiming
