@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 namespace cr {
@@ -8,7 +9,7 @@ namespace cr {
 // same MCT ID replaces the earlier binding, so retain the last matching index.
 inline int lastTextureIndexById(const std::vector<int>& textureIds, int id) {
     int result = -1;
-    for (size_t i = 0; i < textureIds.size(); ++i)
+    for (std::size_t i = 0; i < textureIds.size(); ++i)
         if (textureIds[i] == id) result = static_cast<int>(i);
     return result;
 }
