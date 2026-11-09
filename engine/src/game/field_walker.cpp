@@ -31,6 +31,8 @@ bool heightOnPolygon(const Collision& col, const CollisionPolygon& p, float x, f
 constexpr float kLegacyBodyHeight = 10.0f;
 constexpr float kLegacyStepUp = 5.0f;
 
+bool isWall(const CollisionPolygon& p) { return p.isWall(); }
+
 Vec3 closestOnSegment(Vec3 p, Vec3 a, Vec3 b) {
     const Vec3 ab = b - a;
     const float l = dot(ab, ab);
