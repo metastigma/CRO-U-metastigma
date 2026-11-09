@@ -624,7 +624,8 @@ bool loadModelPackage(const std::vector<uint8_t>& file, Model& out, std::string*
         // materials use a 1-based package index instead
         if (m.appearance >= 0) {
             const int ref = out.materials[m.appearance].textureRef;
-            for (size_t t = 0; t < out.textureIds.size() && m.texture < 0; ++t)
+            // Package binding is ordered: a later texture with the same MCT id replaces an earlier one.
+            for (size_t t = 0; t < out.textureIds.size(); ++t)
                 if (out.textureIds[t] == ref) m.texture = int(t);
             if (ref < 0) {
                 ++out.stats.untextured;
@@ -637,7 +638,7 @@ bool loadModelPackage(const std::vector<uint8_t>& file, Model& out, std::string*
                 ++out.stats.texMissing;
             }
             const int ref2 = out.materials[m.appearance].textureRef2; // texture unit 1, the same way
-            for (size_t t = 0; t < out.textureIds.size() && ref2 >= 0 && m.texture2 < 0; ++t)
+            for (size_t t = 0; t < out.textureIds.size() && ref2 >= 0; ++t)
                 if (out.textureIds[t] == ref2) m.texture2 = int(t);
             if (ref2 >= 1 && m.texture2 < 0 && ref2 <= int(out.textures.size())) m.texture2 = ref2 - 1;
         }
