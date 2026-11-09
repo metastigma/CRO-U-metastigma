@@ -391,13 +391,13 @@ The previous port ignored slots 3–11 and generated the second member's destina
 - [ ] CI и проверка на физическом контроллере.
 
 
-## Перенос из upstream: парная атака после выбытия участника — 09.11.2026
+## Upstream port: paired-attack survivor rule — 2026-11-09
 
-- [x] После фильтрации выбывших участников парная атака 36/37 переводится в индивидуальную атаку оставшегося бойца: запись персонажа + 27, как в CRO-U 3.1.0.
-- [x] Сброшен признак уже объявленного действия: индивидуальная атака объявляется заново.
-- [x] Тесты охватывают все 10 записей `_prty` (0..9); отдельно проверяется `reannounce`, даже если вычисленный ID совпадает с исходным.
-- [x] Логика вынесена в отдельную функцию; тесты проверяют обоих участников пары, оба Omega action ID, общий CR1 mapping и защиту от изменений для живой пары, врагов, других команд и некорректных записей персонажей.
-- [ ] CI: battle-rules, CTest и сборки всех платформ.
-- [ ] Проверка в игре: начать парную атаку и до действия второго участника вывести первого из строя; выживший должен выполнить собственную одиночную атаку. Повторить для обратного порядка участников и убедиться, что обычная парная атака при двух живых участниках не изменилась.
+- [x] After fallen party members are filtered out, paired attack actions 36/37 become the surviving character's individual attack record (`character + 27`), matching Omega 3.1.0.
+- [x] Clear the already-announced flag so the survivor's individual attack is announced again.
+- [x] Cover all 10 `_prty` records (0–9); explicitly test `reannounce`, including cases where the resolved action ID equals the original ID.
+- [x] Isolate the rule in a helper and test both pair slots, both Omega action IDs, the shared CR1 mapping, and negative cases (intact pairs, enemies, other command kinds, and invalid character records).
+- [x] CI: all tests passed; the user confirmed the successful run before merging PR #18.
+- [ ] In-game verification: start a paired attack and have one member fall before their action; the survivor must perform their own solo attack. Repeat with the other pair slot as the fallen member, then confirm intact paired attacks and ordinary solo attacks are unchanged.
 
-Источник поведения: DuIslingr/CRO-U commit 31d592a791 (3.1.0, btlque_make_que).
+Original source: [DuIslingr/CRO-U commit 31d592a791](https://github.com/DuIslingr/CRO-U/commit/31d592a791), Omega 3.1.0 `btlque_make_que` handling.
