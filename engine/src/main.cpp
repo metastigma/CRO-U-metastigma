@@ -829,6 +829,7 @@ struct App {
     int puzzleTeleports = 0;               // Uty_puzzle_teleport_cnt
     LoadedModel player;
     std::string playerName;
+    bool playerByReadMdl = false, playerLoadedByReadMdl = false; // Set_Prtyno uses read_mdl; map loading uses read_mdl_mem_mcm
     cr::FieldWalker walker;
     bool havePlayer = false;
     float walkClock = 0;                   // movement runs in fixed 20 Hz steps like the original
@@ -1584,6 +1585,19 @@ void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool cha
     out.radius = std::max(0.5f * std::sqrt(cr::dot(ext, ext)), 0.01f);
 }
 
+// fldread_prc's read_mdl_mem_mcm: the model keeps colour 1 from its Appearance.
+void mdlMemRules(LoadedModel& lm) {
+    for (cr::Material& mt : lm.cpu.materials) mt.unlit = 1;
+}
+
+// Set_Prtyno's read_mdl: clear lighting and set colour 1 to opaque white.
+void readMdlRules(LoadedModel& lm) {
+    for (cr::Material& mt : lm.cpu.materials) {
+        mt.unlit = 1;
+        for (float& c : mt.diffuse) c = 1.0f;
+    }
+}
+
 void showModel(App& app, int index) {
     app.renderer.resetHistory(); // a cut: the upscaler starts over
     if (app.models.empty()) return;
@@ -1804,6 +1818,7 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
     app.area = app.haveStageCam ? app.stageCam.area : cr::areaForMap(app.mapNumber, forcedArea);
     if (forcedMap >= 0) { app.mapNumber = forcedMap; app.area = forcedArea >= 0 ? forcedArea : app.area; }
     enterMap(app);
+    app.playerByReadMdl = false; // map entry follows fldread_prc's read_mdl_mem_mcm path
     placePlayer(app);
     updateTitle(app);
 }
@@ -2395,10 +2410,13 @@ void placePlayer(App& app) {
     app.havePlayer = false;
     if (!app.showPlayer || app.collisionData.polygons.empty()) return;
     const std::string name = playerModelName(app);
-    if (app.playerName != name) {
+    if (app.playerName != name || app.playerLoadedByReadMdl != app.playerByReadMdl) {
         unloadLoaded(app, app.player);
         loadModelFile(app, name, app.player, true);
+        if (app.playerByReadMdl) readMdlRules(app.player);
+        else mdlMemRules(app.player);
         app.playerName = name;
+        app.playerLoadedByReadMdl = app.playerByReadMdl;
     }
     if (app.player.meshes.empty()) return;
     const cr::Collision& col = app.collisionData;
@@ -3131,6 +3149,7 @@ struct ViewerHost : cr::EventHost {
         if (lead == c) return;
         lead = c;
         app.playerChar = c;
+        app.playerByReadMdl = true; // Set_Prtyno loads the leader through read_mdl
         placePlayer(app);
     }
     int omuItemValue() override {
