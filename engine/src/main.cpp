@@ -20115,8 +20115,16 @@ void bootTitle(App& app) {
     app.booting = true;
     app.bootClock = 0;
     app.titleOpen = false;
-    if (const uint32_t at = app.events.returnEntry(0))
-        if (app.runner.startAt(app.events, at, 0, app.game, 0, app.mapNumber)) app.runnerWhat = "title";
+    const uint32_t titleEntry = app.events.returnEntry(0);
+    if (!titleEntry) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "title: EvrStart 0 has no entry point");
+    } else if (!app.runner.startAt(app.events, titleEntry, 0, app.game, 0, app.mapNumber)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "title: failed to start EvrStart 0 at 0x%08x", titleEntry);
+    } else {
+        app.runnerWhat = "title";
+        if (SDL_getenv("CR_BGM_DEBUG"))
+            SDL_Log("title: EvrStart 0 started at 0x%08x", titleEntry);
+    }
     updateTitle(app);
 }
 
