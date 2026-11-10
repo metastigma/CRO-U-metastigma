@@ -543,6 +543,7 @@ bool applyGltfReplacement(Model& model, const std::string& path, std::string* er
             m.positions.resize(nv * 3);
             m.uvs.assign(nv * 2, 0.0f);
             m.colors.assign(nv * 4, 255);
+            m.hasColors = colour != nullptr; // preserve the source glTF COLOR_0 array for Appearance bit 0x40
             m.posOf.resize(nv);
             m.bindPositions.resize(nv * 3);
             m.influenceCount.assign(nv, 0);
