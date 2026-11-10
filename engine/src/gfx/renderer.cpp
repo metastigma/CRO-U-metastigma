@@ -76,7 +76,9 @@ std::string Renderer::description() const { return dev_ ? dev_->description() : 
 
 GpuMesh Renderer::upload(const Mesh& mesh) {
     interleave(mesh.positions, mesh.uvs, mesh.colors, scratch_);
-    return dev_->upload(scratch_, mesh.indices, mesh.texture);
+    GpuMesh gpu = dev_->upload(scratch_, mesh.indices, mesh.texture);
+    gpu.vertexColors = mesh.hasColors;
+    return gpu;
 }
 
 void Renderer::updatePositions(GpuMesh& mesh, const std::vector<float>& positions, const std::vector<float>& uvs,
@@ -128,8 +130,17 @@ void Renderer::drawMesh(const GpuMesh& mesh, const Texture* tex, const Mat4& mvp
     // Light records are decoded: rgb = emission + ambient + diffuse, alpha = diffuse alpha.
     // 357 materials rely on this (black ambient, white diffuse - or the other way), so one alone is not enough.
     MeshShading sh;
-    for (int i = 0; i < 3; ++i) sh.color[i] = std::min(1.0f, mat.emission[i] + mat.ambient[i] + mat.diffuse[i]);
-    sh.color[3] = mat.diffuse[3];
+    // Original iOS ES1 state: Appearance bit 6 controls the colour array. The native path
+    // enables GL_COLOR_MATERIAL (0x0B57) for lit materials when this bit and a real colour
+    // array are present; with lighting off, the array replaces glColor / diffuse instead.
+    const bool array = (mat.properties & 0x40u) != 0 && mesh.vertexColors;
+    sh.vertexColor = array;
+    if (mat.unlit) {
+        for (int i = 0; i < 4; ++i) sh.color[i] = array ? 1.0f : mat.diffuse[i];
+    } else {
+        for (int i = 0; i < 3; ++i) sh.color[i] = std::min(1.0f, mat.emission[i] + mat.ambient[i] + mat.diffuse[i]);
+        sh.color[3] = mat.diffuse[3];
+    }
     sh.alphaRef = mat.alphaThreshold / 255.0f;
     const bool textured = tex && tex->id;
     sh.texMode = textured ? int(mat.texBlend <= 4 ? mat.texBlend : 4) : -1;

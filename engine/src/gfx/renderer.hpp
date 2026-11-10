@@ -29,6 +29,7 @@ struct GpuMesh {
     unsigned vao = 0, vbo = 0, ebo = 0; // opaque mesh handle in vao (0 = none); vbo/ebo reserved
     int indexCount = 0;
     int texture = -1;
+    bool vertexColors = false; // source mesh had an actual colour array
 };
 
 class Renderer {
