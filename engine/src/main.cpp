@@ -18901,7 +18901,7 @@ int runSelfTest(App& app) {
         std::string titleError;
         const bool titleCaf = cr::decodeTrack(app.dataDir, 29, titleFrames, titleHash, &titleError) && titleFrames > 1000000;
         mapErrors += !titleCaf;
-        std::printf("music: track 10 %s (%lld frames), title Bgm 29 / bgm41.caf %s (%lld frames)\\n",
+        std::printf("music: track 10 %s (%lld frames), title Bgm 29 / bgm41.caf %s (%lld frames)\n",
                     ok ? "decoded" : ("FAILED: " + err).c_str(), (long long)frames,
                     titleCaf ? "decoded" : ("FAILED: " + titleError).c_str(), (long long)titleFrames);
         }
