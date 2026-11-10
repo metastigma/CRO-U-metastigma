@@ -543,7 +543,7 @@ bool applyGltfReplacement(Model& model, const std::string& path, std::string* er
             m.positions.resize(nv * 3);
             m.uvs.assign(nv * 2, 0.0f);
             m.colors.assign(nv * 4, 255);
-            m.hasColors = colour != nullptr; // preserve the source glTF COLOR_0 array for Appearance bit 0x40
+            m.hasColors = colour && colour->count == nv; // preserve a full source glTF COLOR_0 array for Appearance bit 0x40
             m.posOf.resize(nv);
             m.bindPositions.resize(nv * 3);
             m.influenceCount.assign(nv, 0);
@@ -597,7 +597,7 @@ bool applyGltfReplacement(Model& model, const std::string& path, std::string* er
                     m.positions[v * 3] = q.x, m.positions[v * 3 + 1] = q.y, m.positions[v * 3 + 2] = q.z;
                     m.posOf[v] = uint32_t(v);
                     if (uv) cgltf_accessor_read_float(uv, v, &m.uvs[v * 2], 2);
-                    if (colour) {
+                    if (m.hasColors) {
                         float c[4] = {1, 1, 1, 1};
                         cgltf_accessor_read_float(colour, v, c, colour->type == cgltf_type_vec3 ? 3 : 4);
                         for (int k = 0; k < 4; ++k) m.colors[v * 4 + size_t(k)] = uint8_t(std::clamp(c[k], 0.0f, 1.0f) * 255 + 0.5f);
@@ -623,7 +623,7 @@ bool applyGltfReplacement(Model& model, const std::string& path, std::string* er
                     std::memcpy(&m.bindPositions[v * 3], rest, sizeof rest);
                 }
                 if (uv) cgltf_accessor_read_float(uv, v, &m.uvs[v * 2], 2);
-                if (colour) {
+                if (m.hasColors) {
                     float c[4] = {1, 1, 1, 1};
                     cgltf_accessor_read_float(colour, v, c, colour->type == cgltf_type_vec3 ? 3 : 4);
                     for (int k = 0; k < 4; ++k) m.colors[v * 4 + size_t(k)] = uint8_t(std::clamp(c[k], 0.0f, 1.0f) * 255 + 0.5f);
