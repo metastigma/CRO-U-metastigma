@@ -130,12 +130,15 @@ void Renderer::drawMesh(const GpuMesh& mesh, const Texture* tex, const Mat4& mvp
     // Light records are decoded: rgb = emission + ambient + diffuse, alpha = diffuse alpha.
     // 357 materials rely on this (black ambient, white diffuse - or the other way), so one alone is not enough.
     MeshShading sh;
+    // ES1's colour array is controlled by Appearance property bit 6, independently of
+    // whether lighting is enabled. Do not multiply a mesh's stored colour stream when the
+    // Appearance did not enable it (the stream may contain transparent body-part values).
+    const bool array = (mat.properties & 0x40u) != 0 && mesh.vertexColors;
+    sh.vertexColor = array;
     if (mat.unlit) {
-        // Original hwalSetAppearanceColor_ES1: with lighting disabled, colour 1 is glColor;
-        // the vertex array replaces it only when Appearance property bit 0x40 is enabled.
-        const bool array = (mat.properties & 0x40u) != 0 && mesh.vertexColors;
+        // hwalSetAppearanceColor_ES1 with lighting disabled: colour 1 is glColor;
+        // an enabled vertex array replaces it rather than multiplying it.
         for (int i = 0; i < 4; ++i) sh.color[i] = array ? 1.0f : mat.diffuse[i];
-        sh.vertexColor = array;
     } else {
         for (int i = 0; i < 3; ++i) sh.color[i] = std::min(1.0f, mat.emission[i] + mat.ambient[i] + mat.diffuse[i]);
         sh.color[3] = mat.diffuse[3];
