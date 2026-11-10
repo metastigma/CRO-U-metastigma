@@ -4,7 +4,7 @@
 
 namespace cr {
 
-bool decodeGxt(const std::vector<uint8_t>& f, Image& out, std::string* error, int* mctFormat) {
+bool decodeGxt(const std::vector<uint8_t>& f, Image& out, std::string* error) {
     auto fail = [&](const char* why) { if (error) *error = why; return false; };
     size_t g = 0;
     if (f.size() >= 9 && std::memcmp(f.data(), "MCT_", 4) == 0) g = 9;
