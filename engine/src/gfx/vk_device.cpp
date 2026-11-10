@@ -85,7 +85,8 @@ struct PushConstants {
     float alphaRef;
     float reactive;
     int32_t texMode2; // texture unit 1 (set 1): its environment, -1 none
-    int32_t pad[3];
+    int32_t noVertexColor; // 1 disables the vertex colour array
+    int32_t pad[2];
     float uv2[4];     // its coordinates: uv * xy + zw
 };
 static_assert(sizeof(PushConstants) == 128, "push constant layout");
@@ -824,6 +825,7 @@ public:
         std::memcpy(pc.base.color, sh.color, sizeof pc.base.color);
         pc.base.texMode = sh.texMode;
         pc.base.alphaTex = sh.alphaTex ? 1 : sh.noAlphaTex ? 2 : 0;
+        pc.base.noVertexColor = sh.vertexColor ? 0 : 1;
         pc.base.alphaRef = sh.alphaRef;
         const bool second = sh.tex2 && sh.tex2->id && sh.tex2->id <= textures_.size() && textures_[sh.tex2->id - 1].image &&
                             sh.texMode2 >= 0;
