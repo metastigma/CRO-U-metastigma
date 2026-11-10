@@ -50,6 +50,9 @@ public:
     // Reads a file of the Vita's bgm.psarc by name; empty: the data folder's tracks only
     using VitaReader = std::function<bool(const std::string& name, std::vector<uint8_t>& out)>;
     void setVitaSource(VitaReader read) { vita_ = std::move(read); }
+    // Resolve the Vita archive entry: cr_mNN.at9 normally, cr2_mNN.at9 for Omega's bgm41..49.
+    // Returns the first name the reader has and copies its bytes to `out` when provided.
+    static std::string vitaTrackFile(int track, const VitaReader& read, std::vector<uint8_t>* out = nullptr);
     bool playingVita() const; // the current track is the Vita's
     // Reads a file of the Android expansion file by name; empty: none
     void setAndroidSource(VitaReader read) { android_ = std::move(read); }
