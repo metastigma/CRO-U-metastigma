@@ -17862,10 +17862,16 @@ int runSelfTest(App& app) {
         problems += expectSounds("options Enter, Back", {2, 3});
         // The title: the boot script reaches the title menu; its Options are title mode (Reset
         // Data); Start begins a new game; in a game, Return to Title boots again
+        app.soundLog.clear();
         bootTitle(app);
         int bootFrames = 0;
         for (; bootFrames < 1000 && !app.titleOpen; ++bootFrames) stepEvents(app);
         problems += !app.titleOpen;
+        const bool titleBgmRequested =
+            std::find(app.soundLog.begin(), app.soundLog.end(), 0x40000000u | 29u) != app.soundLog.end();
+        problems += !titleBgmRequested;
+        std::printf("title BGM: EVT requested Bgm 29 (bgm41) %s; %d frames to menu\\n",
+                    titleBgmRequested ? "yes" : "NO", bootFrames);
         openOptions(app, 0);
         const std::vector<OptRow> titlePage = optionRows(app, 0);
         problems += titlePage.size() != 13 || titlePage.back().label != sysLabel(app, 58122, "Reset Data");
