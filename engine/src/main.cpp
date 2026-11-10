@@ -18896,7 +18896,14 @@ int runSelfTest(App& app) {
         else {
         const bool ok = cr::decodeTrack(app.dataDir, 10, frames, hash, &err) && frames > 1000000;
         mapErrors += !ok;
-        std::printf("music: track 10 decoded %s (%lld frames)\n", ok ? "ok" : ("FAILED: " + err).c_str(), (long long)frames);
+        int64_t titleFrames = 0;
+        uint64_t titleHash = 0;
+        std::string titleError;
+        const bool titleCaf = cr::decodeTrack(app.dataDir, 29, titleFrames, titleHash, &titleError) && titleFrames > 1000000;
+        mapErrors += !titleCaf;
+        std::printf("music: track 10 %s (%lld frames), title Bgm 29 / bgm41.caf %s (%lld frames)\\n",
+                    ok ? "decoded" : ("FAILED: " + err).c_str(), (long long)frames,
+                    titleCaf ? "decoded" : ("FAILED: " + titleError).c_str(), (long long)titleFrames);
         }
 #else
         std::printf("music: built without an AAC decoder\n");
