@@ -303,8 +303,10 @@ void MusicPlayer::command(uint32_t v) {
     { // the Vita's cr_mNN.at9 for bgmNN
         std::vector<uint8_t> file;
         At9File at9;
-        const std::string name = std::string("cr_m") + (kBgmFile[t] + 3) + ".at9";
-        if (vita_ && vita_(name, file) && parseAt9(file, at9, &err)) {
+        const std::string name = vitaTrackFile(t, [this](const std::string& n, std::vector<uint8_t>& out) {
+            return vita_ && vita_(n, out);
+        }, &file);
+        if (!name.empty() && parseAt9(file, at9, &err)) {
             stopNow();
             Impl& m = *impl_;
             m.at9Bytes = std::move(file);
