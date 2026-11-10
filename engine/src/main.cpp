@@ -1589,6 +1589,38 @@ void mdlMemRules(LoadedModel& lm) {
     for (cr::Material& mt : lm.cpu.materials) mt.unlit = 1;
 }
 
+// read_mdl (npc_setup / EvtNpcMdlRead): unlit, colour 1 opaque white, with the
+// original per-model draw-order, blend, and texture-alpha exceptions.
+void readMdlRules(LoadedModel& lm, const std::string& name) {
+    cr::Model& m = lm.cpu;
+    const bool glass = name == "c302.bin" || name == "c303.bin" || name == "c304.bin" ||
+                       name == "c305.bin" || name == "c306.bin";
+    for (cr::Material& mt : m.materials) {
+        mt.unlit = 1;
+        for (float& c : mt.diffuse) c = 1.0f;
+        if (name == "d0552bt.bin") mt.drawOrder = mt.drawOrder == 900 ? 0 : mt.drawOrder > 0 ? int16_t(mt.drawOrder - 2000) : mt.drawOrder;
+        else if (name == "d0451bt.bin") mt.drawOrder = mt.drawOrder == 400 ? -400 : mt.drawOrder;
+        else if (glass) mt.alphaThreshold = 0, mt.blendSrc = 4, mt.blendDst = 5, mt.properties &= ~16u;
+        if (mt.textureRef < 0) continue;
+        for (size_t k = 0; k < m.textureIds.size() && k < m.textures.size(); ++k)
+            if (m.textureIds[k] == mt.textureRef && (m.textures[k].format == 1 || m.textures[k].format == 6))
+                mt.alphaThreshold = 0;
+        if (name == "c321.bin") mt.properties &= ~16u;
+    }
+}
+
+// NPC table models are read through read_mdl and shared by field actors and scripted cutscenes.
+LoadedModel& npcModel(App& app, const std::string& file) {
+    auto it = app.npcModels.find(file);
+    if (it == app.npcModels.end()) {
+        LoadedModel lm;
+        loadModelFile(app, file, lm, true);
+        readMdlRules(lm, file);
+        it = app.npcModels.emplace(file, std::move(lm)).first;
+    }
+    return it->second;
+}
+
 void showModel(App& app, int index) {
     app.renderer.resetHistory(); // a cut: the upscaler starts over
     if (app.models.empty()) return;
@@ -1690,6 +1722,7 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
     if (std::find(app.models.begin(), app.models.end(), field + ".bin") != app.models.end()) {
         app.mapProps = field + ".bin";
         loadModelFile(app, app.mapProps, app.model, false);
+        mdlMemRules(app.model);
     }
 
     cr::Mesh mesh;
@@ -2994,13 +3027,7 @@ struct ViewerHost : cr::EventHost {
         const cr::FieldNpc* n = findNpc(app, id);
         if (!n || n->model < 0 || n->model >= cr::kNumNpcModels || action < 0 || action >= cr::kNumActionFiles) return;
         const std::string file = cr::kNpcModelFile[n->model];
-        auto it = app.npcModels.find(file);
-        if (it == app.npcModels.end()) {
-            LoadedModel lm;
-            loadModelFile(app, file, lm, true);
-            it = app.npcModels.emplace(file, std::move(lm)).first;
-        }
-        LoadedModel& lm = it->second;
+        LoadedModel& lm = npcModel(app, file);
         const std::string mca = cr::kActionFile[action];
         auto known = lm.loaded.find(mca);
         if (known == lm.loaded.end()) {
@@ -10813,13 +10840,8 @@ void buildNpcDraws(App& app) {
         if (!stageModel && (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) &&
             !app.placedNpcs.count(n.id)) // (a table NPC below 400 may stand at a room's origin: c101_d07's 142)
             continue;
-        auto it = app.npcModels.find(file);
-        if (it == app.npcModels.end()) {
-            LoadedModel lm;
-            loadModelFile(app, file, lm, true);
-            it = app.npcModels.emplace(file, std::move(lm)).first;
-        }
-        if (it->second.meshes.empty()) continue;
+        LoadedModel& lm = npcModel(app, file);
+        if (lm.meshes.empty()) continue;
         const cr::Mat4 w = npcWorld(n);
         App::NpcDraw d;
         for (const App::NpcDraw& o : old) // the same NPC: keep its animation and fade
