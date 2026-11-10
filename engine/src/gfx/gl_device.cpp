@@ -65,7 +65,7 @@ uniform int uTexMode2;  // unit 1's environment over unit 0's result, -1 none
 uniform vec4 uUv2;      // unit 1's coordinates: uv * xy + zw
 uniform int uAlphaTex;  // GL_ALPHA texture: colour always comes from the fragment
 uniform float uAlphaRef;
-uniform int uVertexColor; // Appearance property bit 0x40 enables the colour array
+uniform int uVertexColor; // original ES1 colour array, gated by Appearance property bit 0x40 (lit: GL_COLOR_MATERIAL)
 out vec4 fragColor;
 vec4 texEnv(int mode, vec4 base, vec4 t) {
     if (mode == 0) return t;
