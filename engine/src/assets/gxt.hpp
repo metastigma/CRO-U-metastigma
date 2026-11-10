@@ -14,7 +14,6 @@
 
 namespace cr {
 
-// `mctFormat` receives the equivalent original MCT pixel-format code (e.g. RGB888=1, PAL8_RGB8=6).
-bool decodeGxt(const std::vector<uint8_t>& file, Image& out, std::string* error = nullptr, int* mctFormat = nullptr);
+bool decodeGxt(const std::vector<uint8_t>& file, Image& out, std::string* error = nullptr);
 
 } // namespace cr
