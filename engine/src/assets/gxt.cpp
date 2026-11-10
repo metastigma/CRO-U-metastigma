@@ -32,7 +32,6 @@ bool decodeGxt(const std::vector<uint8_t>& f, Image& out, std::string* error) {
     // metadata on Image as well as the optional output, so all GXT loading paths retain it.
     out.format = uint8_t(format == 0x98001000 ? 1 : format == 0x95005000 ? 6 :
                          format == 0x0C001000 ? 2 : format == 0x95001000 ? 7 : 0);
-    if (mctFormat) *mctFormat = out.format;
     if (w <= 0 || h <= 0 || g + data + size_t(w) * h * bpp > f.size()) return fail("bad GXT size");
     const bool swizzled = (type & 0xF0000000u) == 0;
     if (swizzled && ((w & (w - 1)) || (h & (h - 1)))) return fail("swizzled texture is not a power of two");
