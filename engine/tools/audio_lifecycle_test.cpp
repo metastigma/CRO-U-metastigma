@@ -33,7 +33,7 @@ int main() {
         std::vector<std::string> tried;
         const cr::MusicPlayer::VitaReader omegaReader = [&](const std::string& name, std::vector<uint8_t>& out) {
             tried.push_back(name);
-            if (name == "cr2_m43.at9" || name == "cr_m03.at9") { out = {1, 2, 3}; return true; }
+            if (name == "cr2_m41.at9" || name == "cr2_m43.at9" || name == "cr_m03.at9") { out = {1, 2, 3}; return true; }
             return false;
         };
         std::vector<uint8_t> trackBytes;
@@ -42,12 +42,18 @@ int main() {
                     tried != std::vector<std::string>({"cr_m43.at9", "cr2_m43.at9"});
         tried.clear();
         trackBytes.clear();
+        const std::string titleTrack = cr::MusicPlayer::vitaTrackFile(29, omegaReader, &trackBytes);
+        problems += titleTrack != "cr2_m41.at9" || trackBytes != std::vector<uint8_t>({1, 2, 3}) ||
+                    tried != std::vector<std::string>({"cr_m41.at9", "cr2_m41.at9"});
+        tried.clear();
+        trackBytes.clear();
         const std::string fieldTrack = cr::MusicPlayer::vitaTrackFile(2, omegaReader, &trackBytes);
         problems += fieldTrack != "cr_m03.at9" || trackBytes != std::vector<uint8_t>({1, 2, 3}) ||
                     tried != std::vector<std::string>({"cr_m03.at9"});
         tried.clear();
         problems += !cr::MusicPlayer::vitaTrackFile(38, omegaReader, &trackBytes).empty() || !tried.empty();
-        std::printf("Vita BGM names: battle bgm43 %s, ordinary bgm03 %s; %d problems\n",
+        std::printf("Vita BGM names: title bgm41 %s, battle bgm43 %s, ordinary bgm03 %s; %d problems\n",
+                    titleTrack == "cr2_m41.at9" ? "cr2_m fallback" : "FAILED",
                     battleTrack == "cr2_m43.at9" ? "cr2_m fallback" : "FAILED",
                     fieldTrack == "cr_m03.at9" ? "cr_m" : "FAILED", problems);
     }
