@@ -17870,7 +17870,7 @@ int runSelfTest(App& app) {
         const bool titleBgmRequested =
             std::find(app.soundLog.begin(), app.soundLog.end(), 0x40000000u | 29u) != app.soundLog.end();
         problems += !titleBgmRequested;
-        std::printf("title BGM: EVT requested Bgm 29 (bgm41) %s; %d frames to menu\\n",
+        std::printf("title BGM: EVT requested Bgm 29 (bgm41) %s; %d frames to menu\n",
                     titleBgmRequested ? "yes" : "NO", bootFrames);
         openOptions(app, 0);
         const std::vector<OptRow> titlePage = optionRows(app, 0);
