@@ -13917,6 +13917,9 @@ void stepBattle(App& app) {
 
 // btl_prc: the whole screen through the formation's camera (btl_main: camera formation - 2;
 // perspective 0.0792 turns = 28.5 degrees vertical, 4:3, near 9, far 2000)
+// Original _btl_prc projection planes (btl_prc 8040-8042).
+constexpr float kBattleNear = 1.0f, kBattleFar = 3500.0f;
+
 void drawBattle(App& app, float dt) {
     App::Battle& b = app.battle;
     auto& r = app.renderer;
@@ -13951,13 +13954,13 @@ void drawBattle(App& app, float dt) {
     if (SDL_getenv("CR_BETWEEN_DEBUG"))
         std::printf("battle frame: valid %d alpha %.2f camera %s (cam %d %d now %d)\n", int(bt.valid), bt.alpha, camBetween ? "between" : "as is",
                     bt.cam[0], bt.cam[1], b.cam);
-    cr::Mat4 proj = cr::Mat4::perspective(b.fov * 3.14159265f / 180.0f, W / H, 9.0f, 2000.0f);
+    cr::Mat4 proj = cr::Mat4::perspective(b.fov * 3.14159265f / 180.0f, W / H, kBattleNear, kBattleFar);
     // btl_prc: the quake shifts the frustum by its offset in the 1024 x 768 screen's pixels
     proj.m[8] -= 2.0f * b.quake.off[0] / W;
     proj.m[9] -= 2.0f * b.quake.off[1] / H;
     const cr::Mat4 vp = proj * cr::Mat4::lookAt(eye, target, {0, 1, 0});
     b.vp = vp;
-    r.setCamera(9.0f, 2000.0f, app.battle.fov * 3.14159265f / 180.0f);
+    r.setCamera(kBattleNear, kBattleFar, app.battle.fov * 3.14159265f / 180.0f);
     if (r.vitaScreen()) r.begin3D(); // (CRView: the Vita's whole screen)
     else r.begin3DRect(0, 0, W, H);
     drawLoaded(app, b.stage, vp);
