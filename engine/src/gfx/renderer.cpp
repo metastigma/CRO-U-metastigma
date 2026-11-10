@@ -130,16 +130,14 @@ void Renderer::drawMesh(const GpuMesh& mesh, const Texture* tex, const Mat4& mvp
     // Light records are decoded: rgb = emission + ambient + diffuse, alpha = diffuse alpha.
     // 357 materials rely on this (black ambient, white diffuse - or the other way), so one alone is not enough.
     MeshShading sh;
+    // Original iOS ES1 state: Appearance bit 6 controls the colour array. The native path
+    // enables GL_COLOR_MATERIAL (0x0B57) for lit materials when this bit and a real colour
+    // array are present; with lighting off, the array replaces glColor / diffuse instead.
+    const bool array = (mat.properties & 0x40u) != 0 && mesh.vertexColors;
+    sh.vertexColor = array;
     if (mat.unlit) {
-        // hwalSetAppearanceColor_ES1 with lighting disabled: colour 1 is glColor;
-        // the vertex colour array replaces it only when Appearance property bit 6 is set.
-        const bool array = (mat.properties & 0x40u) != 0 && mesh.vertexColors;
-        sh.vertexColor = array;
         for (int i = 0; i < 4; ++i) sh.color[i] = array ? 1.0f : mat.diffuse[i];
     } else {
-        // With GL_LIGHTING enabled the original ES1 path uses material colours; its colour
-        // client array is not GL_COLOR_MATERIAL and therefore does not modulate the material.
-        sh.vertexColor = false;
         for (int i = 0; i < 3; ++i) sh.color[i] = std::min(1.0f, mat.emission[i] + mat.ambient[i] + mat.diffuse[i]);
         sh.color[3] = mat.diffuse[3];
     }
