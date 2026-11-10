@@ -1,3 +1,4 @@
+#include "audio/music.hpp"
 #include "audio/sound.hpp"
 #include <SDL3/SDL.h>
 #include <cstdio>
