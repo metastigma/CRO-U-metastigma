@@ -1,3 +1,4 @@
+#include "audio/music.hpp"
 #include "audio/sound.hpp"
 #include <SDL3/SDL.h>
 #include <cstdio>
@@ -26,6 +27,30 @@ int main() {
     const auto file=folder/"sndeff.bin";
     if (!SDL_SaveFile(file.string().c_str(), bank.data(), bank.size())) return 1;
     int problems=0;
+    {
+        // Omega's additional BGM slots (bgm41..49) live under cr2_mNN.at9 in the Vita archive.
+        // Check the random-battle default (slot 31 = bgm43) and ensure ordinary tracks keep cr_mNN.
+        std::vector<std::string> tried;
+        const cr::MusicPlayer::VitaReader omegaReader = [&](const std::string& name, std::vector<uint8_t>& out) {
+            tried.push_back(name);
+            if (name == "cr2_m43.at9" || name == "cr_m03.at9") { out = {1, 2, 3}; return true; }
+            return false;
+        };
+        std::vector<uint8_t> trackBytes;
+        const std::string battleTrack = cr::MusicPlayer::vitaTrackFile(31, omegaReader, &trackBytes);
+        problems += battleTrack != "cr2_m43.at9" || trackBytes != std::vector<uint8_t>({1, 2, 3}) ||
+                    tried != std::vector<std::string>({"cr_m43.at9", "cr2_m43.at9"});
+        tried.clear();
+        trackBytes.clear();
+        const std::string fieldTrack = cr::MusicPlayer::vitaTrackFile(2, omegaReader, &trackBytes);
+        problems += fieldTrack != "cr_m03.at9" || trackBytes != std::vector<uint8_t>({1, 2, 3}) ||
+                    tried != std::vector<std::string>({"cr_m03.at9"});
+        tried.clear();
+        problems += !cr::MusicPlayer::vitaTrackFile(38, omegaReader, &trackBytes).empty() || !tried.empty();
+        std::printf("Vita BGM names: battle bgm43 %s, ordinary bgm03 %s; %d problems\n",
+                    battleTrack == "cr2_m43.at9" ? "cr2_m fallback" : "FAILED",
+                    fieldTrack == "cr_m03.at9" ? "cr_m" : "FAILED", problems);
+    }
     {
         cr::SoundSystem sound;
         if (!sound.init(folder.string()+"/")) return 1;
