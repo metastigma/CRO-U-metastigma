@@ -14028,17 +14028,17 @@ void drawBattleButton(cr::MenuPainter& m, float x, float y, int icon, int word, 
     m.piece(x + 40, y + 8, float(word % 5 * 88), float(word / 5 * 24 + 512), 88, 24, a, c, c, c);
 }
 
-// The red -> orange HP bar of the plates and rows (tex2d_add4 on slot 45), `w` long when full
+// The original's HP / MP bar: a 3-high parallelogram leaning right by 3, with a 1-pixel offset shadow.
 void drawBattleHpBar(cr::MenuPainter& m, float x, float y, float w, int value, int most, bool mp, float a) {
     const float black[4] = {0, 0, 0, a};
-    m.quad(x + 1, y + 1, w, 3, black, black);
+    m.slant(x + 1, y + 1, w, 3, 3, black, black);
     if (value <= 0 || most <= 0) return;
     const float f = std::clamp(float(value) / float(most), 0.0f, 1.0f);
-    const float fill = std::max(1.0f, w * f);
+    const float fill = float(std::max(1, int(w) * std::min(value, most) / most));
     const float left[4] = {mp ? 0x07 / 255.f : 0xdd / 255.f, mp ? 0xaf / 255.f : 0x02 / 255.f, mp ? 0x73 / 255.f : 0, a};
     const float right[4] = {left[0] + (1 - left[0]) * f, left[1] + (0xc3 / 255.f - left[1]) * f,
                             left[2] + (0x73 / 255.f - left[2]) * f, a};
-    m.quad(x, y, fill, 3, left, right);
+    m.slant(x, y, fill, 3, 3, left, right);
 }
 
 // menub_param_put: the element, then each status on, 20 apart
@@ -14065,7 +14065,7 @@ void drawBattlePlate(App& app, cr::MenuPainter& m, float x, float y, int fighter
     m.piece(x + 240, y, face + 28, 184, 16, 40, a);
     m.piece(x + 6, y + 25, 116, 14, 38, 10, a); // "Lv"
     drawBattleNumber(m, f.level, x + 6, y + 12, 3, false, a, true);
-    drawBattleHpBar(m, x + 96, y + 25, 100, b.shownHp[fighter], f.hpMax, false, a);
+    drawBattleHpBar(m, x + 96, y + 25, 96, b.shownHp[fighter], f.hpMax, false, a); // Original plate width: 0x60
     std::string name;
     for (const App::Battle::Actor& ac : b.actors)
         if (ac.fighter == fighter) name = ac.name;
