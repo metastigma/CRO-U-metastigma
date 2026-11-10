@@ -206,6 +206,7 @@ bool decodeMct(const std::vector<uint8_t>& file, Image& out, MctInfo* info, std:
             *info = MctInfo();
             info->texId = rd16(file.data() + 4);
             info->width = out.width, info->height = out.height;
+            info->format = out.format;
         }
         return true;
     }
