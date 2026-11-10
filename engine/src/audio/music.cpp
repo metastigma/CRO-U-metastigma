@@ -286,7 +286,11 @@ bool MusicPlayer::init(const std::string& dataDir) {
 }
 
 void MusicPlayer::command(uint32_t v) {
-    if (!impl_ || !impl_->device) return;
+    const bool trace = SDL_getenv("CR_BGM_DEBUG") != nullptr;
+    if (!impl_ || !impl_->device) {
+        if (trace) SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "music: ignored 0x%08x (player/device not ready)", unsigned(v));
+        return;
+    }
     auto stopNow = [&] {
         if (impl_->stream) SDL_DestroyAudioStream(impl_->stream);
         impl_->stream = nullptr;
@@ -300,38 +304,60 @@ void MusicPlayer::command(uint32_t v) {
     if (t >= kBgmTracks) return; // any play request restarts the track, even the current one
     std::string err;
 #ifdef CR_HAVE_ATRAC9
-    { // the Vita's cr_mNN.at9 for bgmNN
+    {
         std::vector<uint8_t> file;
         At9File at9;
         const std::string name = vitaTrackFile(t, [this](const std::string& n, std::vector<uint8_t>& out) {
             return vita_ && vita_(n, out);
         }, &file);
-        if (!name.empty() && parseAt9(file, at9, &err)) {
-            stopNow();
-            Impl& m = *impl_;
-            m.at9Bytes = std::move(file);
-            if (!parseAt9(m.at9Bytes, m.at9, &err) || !m.at9Seek(0)) return; // (re-parsed: its pointers into the kept bytes)
-            SDL_AudioSpec spec{SDL_AUDIO_S16, m.at9.channels, m.at9.rate};
-            m.stream = SDL_CreateAudioStream(&spec, nullptr);
-            if (!m.stream || !SDL_BindAudioStream(m.device, m.stream)) { stopNow(); return; }
-            m.vita = true;
-            m.finished = false;
-            m.loops = kBgmRepeat[t] > 0 && m.at9.loopStart >= 0;
-            m.end = m.loops ? m.at9.loopEnd + 1 : m.at9.samples;
-            track_ = t;
-            fade_ = 1.0f;
-            fadeStep_ = 0.0f;
-            update(0);
-            SDL_Log("music: %s (Vita, %.1f s, loop %.3f..%.3f s)", name.c_str(), double(m.at9.samples) / m.at9.rate,
-                    double(m.at9.loopStart) / m.at9.rate, double(m.at9.loopEnd) / m.at9.rate);
-            return;
+        if (!name.empty()) {
+            if (!parseAt9(file, at9, &err)) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "%s: invalid Vita ATRAC9 track: %s", name.c_str(), err.c_str());
+            } else {
+                stopNow();
+                Impl& m = *impl_;
+                m.at9Bytes = std::move(file);
+                if (!parseAt9(m.at9Bytes, m.at9, &err) || !m.at9Seek(0)) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "%s: could not initialise Vita ATRAC9 decoder: %s", name.c_str(),
+                                err.empty() ? "seek to start failed" : err.c_str());
+                    stopNow();
+                    return;
+                }
+                SDL_AudioSpec spec{SDL_AUDIO_S16, m.at9.channels, m.at9.rate};
+                m.stream = SDL_CreateAudioStream(&spec, nullptr);
+                if (!m.stream) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "%s: SDL_CreateAudioStream failed: %s", name.c_str(), SDL_GetError());
+                    stopNow();
+                    return;
+                }
+                if (!SDL_BindAudioStream(m.device, m.stream)) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "%s: SDL_BindAudioStream failed: %s", name.c_str(), SDL_GetError());
+                    stopNow();
+                    return;
+                }
+                m.vita = true;
+                m.finished = false;
+                m.loops = kBgmRepeat[t] > 0 && m.at9.loopStart >= 0;
+                m.end = m.loops ? m.at9.loopEnd + 1 : m.at9.samples;
+                track_ = t;
+                fade_ = 1.0f;
+                fadeStep_ = 0.0f;
+                update(0);
+                SDL_Log("music: %s (Vita, %.1f s, loop %.3f..%.3f s)", name.c_str(), double(m.at9.samples) / m.at9.rate,
+                        double(m.at9.loopStart) / m.at9.rate, double(m.at9.loopEnd) / m.at9.rate);
+                return;
+            }
+        } else if (trace && vita_) {
+            const std::string base = kBgmFile[t] + 3;
+            SDL_Log("music: Vita archive has neither cr_m%s.at9 nor cr2_m%s.at9", base.c_str(), base.c_str());
         }
     }
 #endif
     { // Android's j001mNN.mca for bgmNN: Ogg Vorbis after its 1 KB header
         std::vector<uint8_t> file;
         const std::string name = std::string("j001m") + (kBgmFile[t] + 3) + ".mca";
-        if (android_ && android_(name, file) && file.size() > 0x400) {
+        const bool found = android_ && android_(name, file);
+        if (found && file.size() > 0x400) {
             stopNow();
             Impl& m = *impl_;
             m.oggBytes = std::move(file);
@@ -356,13 +382,22 @@ void MusicPlayer::command(uint32_t v) {
                 return;
             }
             SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "%s: not Ogg Vorbis (stb_vorbis error %d)", name.c_str(), e);
+        } else if (trace && android_ && !found) {
+            SDL_Log("music: Android archive has no %s", name.c_str());
+        } else if (trace && found) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "%s: Android music entry is only %zu bytes", name.c_str(), file.size());
         }
     }
 #ifdef CR_HAVE_FAAD2
     std::vector<uint8_t> file;
     CafAac caf;
-    if (!readFile(dataDir_ + kBgmFile[t] + ".caf", file) || !parseCafAac(file, caf, &err)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "%s: %s", kBgmFile[t], err.c_str());
+    const std::string cafName = dataDir_ + kBgmFile[t] + ".caf";
+    if (!readFile(cafName, file)) {
+        if (trace) SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "music: no Vita/Android track and could not read %s", cafName.c_str());
+        return;
+    }
+    if (!parseCafAac(file, caf, &err)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "%s: invalid AAC/CAF: %s", cafName.c_str(), err.c_str());
         return;
     }
     stopNow();
@@ -384,6 +419,10 @@ void MusicPlayer::command(uint32_t v) {
     update(0);
     SDL_Log("music: %s (%zu packets, loop from packet %d), %d bytes queued", kBgmFile[t], impl_->track.size.size(),
             impl_->loopPacket, SDL_GetAudioStreamQueued(impl_->stream));
+#else
+    if (trace)
+        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "music: track %s unavailable: Vita/Android entry not found and this build has no FAAD2 AAC decoder",
+                    kBgmFile[t]);
 #endif
 }
 
