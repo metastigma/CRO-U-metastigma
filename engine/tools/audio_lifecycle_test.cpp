@@ -47,7 +47,7 @@ int main() {
                     tried != std::vector<std::string>({"cr_m03.at9"});
         tried.clear();
         problems += !cr::MusicPlayer::vitaTrackFile(38, omegaReader, &trackBytes).empty() || !tried.empty();
-        std::printf("Vita BGM names: battle bgm43 %s, ordinary bgm03 %s; %d problems\\n",
+        std::printf("Vita BGM names: battle bgm43 %s, ordinary bgm03 %s; %d problems\n",
                     battleTrack == "cr2_m43.at9" ? "cr2_m fallback" : "FAILED",
                     fieldTrack == "cr_m03.at9" ? "cr_m" : "FAILED", problems);
     }
