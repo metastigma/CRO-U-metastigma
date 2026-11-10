@@ -18938,9 +18938,20 @@ int runSelfTest(App& app) {
         const bool music = app.vitaBgm.read("cr_m01.at9", f) && cr::parseAt9(f, track) && track.loopStart > 0 &&
                            track.loopEnd > track.loopStart && cr::decodeAt9(f, pcm, rate, ch) && (frames = int64_t(pcm.size()) / std::max(ch, 1)) == track.samples;
         problems += !music;
-        std::printf("vita assets: %d languages, voices %s (%d / 2 clips decoded), track 1 %s (%lld frames, loop %.3f..%.3f s); %d problems\n",
+        // The title's Bgm 29 is bgm41, which Omega stores as cr2_m41.at9 (not cr_m41.at9).
+        std::vector<uint8_t> titleBytes;
+        const std::string titleFile = cr::MusicPlayer::vitaTrackFile(
+            29, [&app](const std::string& n, std::vector<uint8_t>& out) { return app.vitaBgm.read(n, out); }, &titleBytes);
+        cr::At9File titleTrack;
+        int64_t titleFrames = 0;
+        const bool titleMusic = titleFile == "cr2_m41.at9" && cr::parseAt9(titleBytes, titleTrack) &&
+                                titleTrack.loopStart >= 0 && titleTrack.loopEnd > titleTrack.loopStart &&
+                                cr::decodeAt9(titleBytes, pcm, rate, ch) &&
+                                (titleFrames = int64_t(pcm.size()) / std::max(ch, 1)) == titleTrack.samples;
+        problems += !titleMusic;
+        std::printf("vita assets: %d languages, voices %s (%d / 2 clips decoded), track 1 %s (%lld frames), title Bgm 29 %s (%lld frames); %d problems\n",
                     languages, voices ? "yes" : "NO", decoded, music ? "decoded" : "NOT decoded", (long long)frames,
-                    double(track.loopStart) / 48000, double(track.loopEnd) / 48000, problems);
+                    titleMusic ? titleFile.c_str() : "NOT decoded", (long long)titleFrames, problems);
         mapErrors += problems;
     }
     { // The scripts' small natives: 2018 the pair's HP / MP, 2024 / 2026 the music by var, 2025 the shop
