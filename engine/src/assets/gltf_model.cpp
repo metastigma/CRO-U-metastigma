@@ -298,7 +298,7 @@ bool exportGlb(const Model& model, const std::vector<Action>& actions, const std
             for (int c = 0; c < 3; ++c) mn[c] = std::min(mn[c], pos[v * 3 + c]), mx[c] = std::max(mx[c], pos[v * 3 + c]);
         std::string attrs = "\"POSITION\":" + std::to_string(w.accessor(pos.data(), nv, 3, 5126, "VEC3", 34962, false, mn, mx));
         if (mesh.uvs.size() >= nv * 2) attrs += ",\"TEXCOORD_0\":" + std::to_string(w.accessor(mesh.uvs.data(), nv, 2, 5126, "VEC2", 34962));
-        if (mesh.colors.size() >= nv * 4)
+        if (mesh.hasColors && mesh.colors.size() >= nv * 4)
             attrs += ",\"COLOR_0\":" + std::to_string(w.accessor(mesh.colors.data(), nv, 4, 5121, "VEC4", 34962, true));
         if (skinned && !rigid) {
             std::vector<uint16_t> joints(nv * 4, 0);
