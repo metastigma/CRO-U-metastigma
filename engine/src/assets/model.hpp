@@ -37,7 +37,8 @@ struct Material {
     uint8_t shading = 1;
     uint8_t culling = 2;               // 0 none, 1 front, 2 back (verified: meshes are CCW-outward)
     int16_t drawOrder = 0;
-    uint32_t properties = 0;           // bit3 depth test, bit4 depth write, bit7 polygon offset
+    uint32_t properties = 0;           // bit0 lighting, bit3 depth test, bit4 depth write, bit6 vertex colours, bit7 polygon offset
+    uint8_t unlit = 0;                 // loader cleared Appearance lighting: use colour 1, with vertex colours only when bit 6 is set
     int textureRef = -1;               // MCT texture id, -1 = untextured
     uint8_t texBlend = 4;              // 0 replace, 1 add, 2 blend, 3 decal, 4 modulate
     uint8_t wrapS = 0, wrapT = 0;      // 0 repeat, 1 clamp
@@ -67,6 +68,7 @@ struct Mesh {
     int attachNode = -1;              // skeleton node this mesh's figure is attached to
     bool skinned = false;
     bool visible = true;             // initial visibility from the NodeDeformer (false: hidden helper)
+    bool hasColors = false;          // source vertex buffer contains a colour array (slot 4); colors are otherwise filled white
     std::vector<int> boneNodes;               // skeleton node of each bone
     std::vector<uint8_t> influenceCount;      // per position, 0..4
     std::vector<uint8_t> influenceBone;       // 4 per position
