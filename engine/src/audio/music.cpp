@@ -257,6 +257,16 @@ bool checkAndroidTrack(const std::function<bool(const std::string&, std::vector<
     return samples > 0;
 }
 
+std::string MusicPlayer::vitaTrackFile(int track, const VitaReader& read, std::vector<uint8_t>* out) {
+    if (track < 0 || track >= kBgmTracks || !read) return {};
+    std::vector<uint8_t> local;
+    for (const char* prefix : {"cr_m", "cr2_m"}) {
+        const std::string name = std::string(prefix) + (kBgmFile[track] + 3) + ".at9";
+        if (read(name, out ? *out : local)) return name;
+    }
+    return {};
+}
+
 MusicPlayer::MusicPlayer() = default;
 MusicPlayer::~MusicPlayer() = default;
 
