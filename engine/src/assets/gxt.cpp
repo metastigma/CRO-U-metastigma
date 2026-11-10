@@ -4,7 +4,7 @@
 
 namespace cr {
 
-bool decodeGxt(const std::vector<uint8_t>& f, Image& out, std::string* error) {
+bool decodeGxt(const std::vector<uint8_t>& f, Image& out, std::string* error, int* mctFormat) {
     auto fail = [&](const char* why) { if (error) *error = why; return false; };
     size_t g = 0;
     if (f.size() >= 9 && std::memcmp(f.data(), "MCT_", 4) == 0) g = 9;
@@ -28,6 +28,11 @@ bool decodeGxt(const std::vector<uint8_t>& f, Image& out, std::string* error) {
         palette = &f[end - n8 * 1024 + idx * 1024];
         paletteAlpha = format == 0x95001000;
     } else return fail("unsupported GXT format");
+    if (mctFormat) {
+        // Preserve the original engine's MCT format classes for Appearance alpha-test rules.
+        *mctFormat = format == 0x98001000 ? 1 : format == 0x95005000 ? 6 :
+                     format == 0x0C001000 ? 2 : format == 0x95001000 ? 7 : 0;
+    }
     if (w <= 0 || h <= 0 || g + data + size_t(w) * h * bpp > f.size()) return fail("bad GXT size");
     const bool swizzled = (type & 0xF0000000u) == 0;
     if (swizzled && ((w & (w - 1)) || (h & (h - 1)))) return fail("swizzled texture is not a power of two");
