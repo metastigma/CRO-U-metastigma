@@ -11535,6 +11535,38 @@ void castCamera(App& app, int kind, int user, bool userPair) {
     else setBattleCamera(app, monsterSize(app, user) + first + 4, user);
 }
 
+// _btlact_gene / _btlact_item at the hit: the cast camera gives way to the target's view.
+// Side-wide genes frame the affected side; selected-target genes frame that fighter. A short
+// list of presentation-only actions intentionally keeps the formation camera (as on the Vita).
+void hitCamera(App& app, const cr::BattleTurn& t, int target, bool bounce) {
+    App::Battle& b = app.battle;
+    const cr::BattleActionDef* a = app.battleActions.get(t.action);
+    if (!a || target < 0) return;
+    if (a->scope == 3 || a->scope == 5) {
+        const int id = target < 2 ? (b.rules.pair ? 0x68 : 0x67)
+                                  : monsterSize(app, target) == 1 ? (b.rules.enemyPair ? 0x6a : 0x69)
+                                                                  : b.formation + 0x67;
+        return setBattleCamera(app, id, 0);
+    }
+    const int x = t.action;
+    const bool keepFormation = bounce
+        ? (x >= 0xd7 && x <= 0xd9) || x == 0xde || x == 0xe8 || x == 0x197 || x == 0x19a ||
+              (t.kind == cr::kCmdItem && x == 0xe0)
+        : t.kind == cr::kCmdItem ? x >= 0x76 && x <= 0x78
+                                 : (x >= 0xd7 && x <= 0xd9) || x == 0xde || x == 0xe8 || x == 0xf0 ||
+                                       x == 0xf2 || x == 0x197 || x == 0x19a || x == 0x1b1 || x == 0x1b6 ||
+                                       x == 0x1fc || x == 0x1fe;
+    if (keepFormation) return setBattleCamera(app, b.formation + 0xc, 0);
+    if (!bounce && target == t.actors[0]) return; // a self-target keeps the casting view
+    if (target < 2) {
+        if (b.rules.pair) setBattleCamera(app, 0x5f, 0);
+        else setBattleCamera(app, target + 0x5d, target);
+    } else if (monsterSize(app, target) == 1)
+        setBattleCamera(app, b.rules.enemyPair ? 0x62 : target + 0x5e, target);
+    else
+        setBattleCamera(app, monsterSize(app, target) + 0x61, target);
+}
+
 // ---- Battle effects (eff3d_*) ----
 // eff.bin is an index of 100 (u32 offset, u32 size) entries, each a model package. An effect plays
 // its first action once at a point (an actor's origin, or the node of its bone whose record user
@@ -13178,7 +13210,7 @@ void startTurn(App& app) {
         return;          // then 40; stayed - 40
     }
     const cr::BattleActionDef* a = app.battleActions.get(t.action);
-    setBanner(app, sysText(app, 54000 + t.action - 1));
+    if (!t.repeat) setBanner(app, sysText(app, 54000 + t.action - 1));
     for (int k : t.actors) // the gene's MP leaves as it's cast
         if (k >= 0) b.shownMp[k] = b.rules.f[size_t(k)].mp;
     b.stageAction = 0;
@@ -13221,7 +13253,7 @@ void startTurn(App& app) {
             inPlace = motion.inPlace;
             slot = battleAttackSlot(lm, u->modelId, slot);
         }
-        if (target >= 0) faceFighter(app, *u, target);
+        if (target >= 0 && t.kind == cr::kCmdAttack) faceFighter(app, *u, target);
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
         const bool pairedSecondary = cr::battleApproachPairedSecondary(
             t.kind == cr::kCmdAttack, t.actors[1] >= 0, k);
@@ -13229,8 +13261,18 @@ void startTurn(App& app) {
         const bool approach = cr::battleApproachEnabled(
             a ? a->motion : 0, opposingTarget, an, pairedSecondary, inPlace || u->modelId == 0x20);
         const bool playReturn = actionHasReturn && (approach || u->modelId == 0x20);
-        playSlot(app, *u, slot, playReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
-        if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
+        if ((t.kind == cr::kCmdGene || t.kind == cr::kCmdItem) && !approach) {
+            // _btlact_gene/item_init: run the cast motion to its loop point, then loop that
+            // segment until the hit phase replaces it. A second queued hit restarts this motion.
+            playSlot(app, *u, slot, -1);
+            const cr::BattleAnim cast = app.battleData.anim(u->modelId, u->slot);
+            if (cast.loopEnd > cast.loopStart) u->loopFrom = cast.loopStart, u->loopTo = cast.loopEnd;
+        } else
+            playSlot(app, *u, slot, playReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
+        if (k == 0)
+            b.hitFrame = (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem)
+                             ? an.loopStart + 30
+                             : an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
         if (approach) { // btlmove_setpos: the formation defines the exact approach point per target
             const App::Battle::Actor* tv = battleActor(app, target);
@@ -13912,9 +13954,16 @@ void stepBattle(App& app) {
                     if (App::Battle::Actor* u = k >= 0 ? battleActor(app, k) : nullptr) playSlot(app, *u, btlui::kSlotIdle, btlui::kSlotIdle);
                 b.bounceAt = b.turnFrame + 40;
                 b.hitFrame = b.bounceAt + 30;
-                castCamera(app, b.turn.kind, b.turn.barriers[0], b.turn.barriers.size() > 1 && b.turn.barriers[0] < 2); // (the barrier's side)
+                hitCamera(app, b.turn, b.turn.barriers[0], false); // the barrier itself is the first target
             } else {
-                if (!b.turn.barriers.empty()) castCamera(app, b.turn.kind, b.turn.actors[0], b.turn.actors[1] >= 0); // (back on the users)
+                const bool genelike = (b.turn.kind == cr::kCmdGene || b.turn.kind == cr::kCmdItem) &&
+                                      !b.stageAction && !b.turn.cancelled;
+                if (genelike) {
+                    const std::vector<int> targets = turnTargets(b.turn);
+                    hitCamera(app, b.turn,
+                              b.turn.barriers.empty() ? (targets.empty() ? -1 : targets[0]) : b.turn.actors[0],
+                              !b.turn.barriers.empty());
+                }
                 showHits(app);
                 if (b.stageAction) stagedHit(app);
             }

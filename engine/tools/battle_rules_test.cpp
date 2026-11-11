@@ -12,6 +12,12 @@ int main() {
         }
     };
 
+    check(cr::battleFixedRepeatCount(234) == 2, "action 234 repeats twice");
+    check(cr::battleFixedRepeatCount(239) == 2, "action 239 repeats twice");
+    check(cr::battleFixedRepeatCount(243) == 6, "action 243 repeats six times");
+    check(cr::battleFixedRepeatCount(207) == 1, "random multi-hit action keeps its separate rule");
+    check(cr::battleFixedRepeatCount(233) == 1, "ordinary action is not repeated");
+
     // Omega's pair actions 36 / 37 become the living member's own record + 27.
     for (int character = 0; character < cr::kCharacters; ++character) {
         for (int firstActor = 0; firstActor < 2; ++firstActor) {

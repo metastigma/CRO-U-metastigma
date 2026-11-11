@@ -184,6 +184,8 @@ struct BattlePairSurvivorResolution {
     bool reannounce = false;
 };
 BattlePairSurvivorResolution battlePairSurvivorAction(int kind, int action, int firstActor, int secondActor, int character);
+// Fixed multi-hit actions from Omega's btlque_make_que; 207 has its own random count.
+int battleFixedRepeatCount(int action);
 struct BattleCommand {
     int kind = kCmdNone;
     int action = 0;       // gene action (kCmdGene)
@@ -209,6 +211,7 @@ struct BattleTurn {
     bool reflected = false;      // a barrier sent the gene / item back on its users
     std::vector<int> barriers;   // ... whose barriers those were
     bool counter = false;        // skill 154's answer to a hit
+    bool repeat = false;         // another pass of the same action; do not announce it again
     int message = 0;             // a system message to show for it (57xxx), 0 none
     bool cancelled = false;      // btlque_make_que: it can't be any more - its message, no action
     int messageValue = 0;        // its number (Oz stolen) or the element / kind it names

@@ -82,6 +82,12 @@ BattlePairSurvivorResolution battlePairSurvivorAction(int kind, int action, int 
     return {action, false};
 }
 
+int battleFixedRepeatCount(int action) {
+    if (action == 234 || action == 239) return 2;
+    if (action == 243) return 6;
+    return 1;
+}
+
 int BattleRules::random(int n) { return (shared_ ? *shared_ : own_).get(n); }
 
 void BattleRules::setupParty(const GameState& gs, const ItemTable& items, int) {
@@ -677,8 +683,12 @@ void BattleRules::beginRound(const BattleCommand cmd[2], const BattleActionTable
         e.speed = (n ? sum / n : 0);
         if (const BattleActionDef* d = actions.get(e.action)) e.speed += d->speed;
     }
-    for (Entry& e : queue_) // Asura Lotus strikes 2..5 times (2..3 in pair mode)
-        if (e.action == 207) e.repeats = random(e.actors[0] < 2 ? (pair ? 2 : 4) : (enemyPair ? 2 : 4)) + 2;
+    for (Entry& e : queue_) {
+        if (e.action == 207) // Asura Lotus: 2..5 hits (2..3 in pair mode)
+            e.repeats = random(e.actors[0] < 2 ? (pair ? 2 : 4) : (enemyPair ? 2 : 4)) + 2;
+        else if (const int fixed = battleFixedRepeatCount(e.action); fixed > 1)
+            e.repeats = fixed; // Omega: 234 / 239 twice, 243 six times
+    }
     for (const Entry& e : queue_) // btlque_make_que +0xa4a: the party member queued last
         if (e.actors[0] >= 0 && e.actors[0] < 2) soloMember_ = e.actors[0];
     std::stable_sort(queue_.begin(), queue_.end(), [](const Entry& a, const Entry& b) { return a.speed > b.speed; });
@@ -713,7 +723,8 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             Entry again = e;
             --again.repeats;
             again.paid = true;
-            if (e.actors[0] >= 2 && e.action != 207) { // a twice-acting monster chooses afresh
+            if (e.actors[0] >= 2 && e.action != 207 && battleFixedRepeatCount(e.action) == 1) {
+                // A monster's ordinary extra turn may choose afresh; fixed multi-hit genes do not.
                 const int was = e.action;
                 enemyChoice(e.actors[0], e.actors[1] >= 0, again, actions, was);
                 again.repeats = e.repeats - 1;
@@ -735,6 +746,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
         out.actors[0] = e.actors[0];
         out.actors[1] = e.actors[1];
         out.counter = e.counter;
+        out.repeat = e.paid;
         breakFlags &= ~0x3200u; // btl_main 600: per action
         if (e.kind == kCmdEscape) {
             // btlact_escape_init: certain while the pair holds the Break, else by levels
