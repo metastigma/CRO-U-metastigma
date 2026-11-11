@@ -185,7 +185,11 @@ struct BattlePairSurvivorResolution {
 };
 BattlePairSurvivorResolution battlePairSurvivorAction(int kind, int action, int firstActor, int secondActor, int character);
 // Fixed multi-hit actions from Omega's btlque_make_que; 207 has its own random count.
-int battleFixedRepeatCount(int action);
+inline int battleFixedRepeatCount(int action) {
+    if (action == 234 || action == 239) return 2;
+    if (action == 243) return 6;
+    return 1;
+}
 // The original gene initializer sets the caster camera once. Its queued fixed hits keep
 // the first hit's target camera; they must not replay castCamera / hitCamera for each hit.
 inline bool battleKeepTargetCameraOnRepeat(int kind, int action, bool repeat) {
