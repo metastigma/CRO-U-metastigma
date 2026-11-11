@@ -50,6 +50,8 @@ public:
     void quad(float x, float y, float w, float h, const float* left, const float* right);
     // Battle HP / MP bars: a parallelogram whose top edge leans right.
     void slant(float x, float y, float w, float h, float lean, const float* left, const float* right);
+    // Original drawfont_l / drawfont_center edge; disabled only for plain system banners.
+    void setOutline(bool on) { outline_ = on; }
     // Text with its top-left at (x, y), 14 units high; dark = black (style 1), else white
     void text(const std::string& s, float x, float y, bool dark, float alpha = 1, float size = 14);
     float textWidth(const std::string& s, float size = 14);
@@ -86,6 +88,8 @@ private:
     float X(float x) const { return fx_ + (sx_ + (x - sx_) * k_ + dx_) * fk_; }
     float Y(float y) const { return fy_ + (sy_ + (y - sy_) * k_ + dy_) * fk_; }
     float K() const { return k_ * fk_; }
+    bool outline_ = true;
+    void edge(const Texture& tex, float x, float y, float w, float h, float k, float alpha);
     Renderer* r_ = nullptr;
     const Texture* sheet_ = nullptr;
     const Font* font_ = nullptr;

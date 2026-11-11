@@ -53,6 +53,9 @@ struct FieldNpc {
     int native = 0;              // NPC table +8: native initialiser (15 = fire-wall effect)
     int16_t link[4] = {0, 0, 0, 0}; // NPC table +22..+28: a candle switch's linked NPCs; a candle block's
                                     // start (+22, 0 = put away) and switch (+24)
+    // NPC table +30..+36: npc_shodow's radius x / z and opacity percent.
+    int16_t shadow[4] = {0, 0, 0, 0};
+    bool hasShadow() const { return (treasure & 0x8000) != 0; }
     float scale = 1;             // NPC table +38: percent, -1 = 100
     float axes[3] = {-1, -1, -1}; // SetScale / AdjScale's (npc ctl +0x2c..+0x34, x y, z), in place of scale once set
     float rectAngle = 0;          // RectWrapper's box angle, fixed at room setup
@@ -80,6 +83,7 @@ struct NpcRow {
     uint16_t kind = 0, box = 0;
     uint16_t puzzle = 0;    // +20: what a puzzle room makes of it (game/puzzle.hpp kPuzzle*)
     int16_t link[4] = {0, 0, 0, 0}; // +22..+28 (FieldNpc::link)
+    int16_t shadow[4] = {0, 0, 0, 0}; // +30..+36 (FieldNpc::shadow)
     float scale = 1;
 };
 

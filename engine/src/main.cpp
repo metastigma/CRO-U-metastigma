@@ -169,6 +169,9 @@ struct App {
     std::vector<std::string> maps;      // field collision meshes (*_10.cmp etc.)
     int mapIndex = 0;
     cr::GpuMesh collision;
+    cr::GpuMesh fieldShadows;              // npc_shodow: the field leader and flagged NPCs
+    std::vector<float> fieldShadowTris;
+    std::vector<uint8_t> fieldShadowAlpha;
     int collisionPolys = 0;
     std::string mapProps;               // prop model shown with the current map, if any
     bool showCollision = false;            // C: the collision and trigger meshes over the field (a debugging aid)
@@ -1447,6 +1450,9 @@ void unloadModel(App& app) {
     app.renderer.destroy(app.triggerMesh);
     app.renderer.destroy(app.puzzleBeams);
     app.renderer.destroy(app.battleShadows);
+    app.renderer.destroy(app.fieldShadows);
+    app.fieldShadowTris.clear();
+    app.fieldShadowAlpha.clear();
     app.collisionPolys = 0;
     unloadLoaded(app, app.model);
 }
@@ -5349,6 +5355,19 @@ void drawShopBar(cr::MenuPainter& m, float x, float y, float value, float most, 
 }
 
 // ComUty_StateBoardDraw at (bx, by) for character c; `item` (if > 0) shows what wearing it changes
+// ComUty_HelpWindowDraw: the striped HELP label and up to three lines of item / gene text.
+void drawHelpWindow(App& app, cr::MenuPainter& m, int item, float alpha) {
+    if (item <= 0) return;
+    m.picture(17, 144, 8, alpha);
+    m.picture(18, 144, -4, alpha);
+    std::vector<std::vector<std::string>> help;
+    if (!app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) || help.empty()) return;
+    const int count = std::min(3, int(help[0].size()));
+    static const int kTop[4] = {0, 24, 18, 10};
+    for (int i = 0; i < count; ++i)
+        m.text(help[0][size_t(i)], 156, float(kTop[count] + 8 + 16 * i), true, alpha, 13);
+}
+
 void drawShopBoard(App& app, float bx, float by, int c, int item, float a) {
     using namespace shopui;
     cr::MenuPainter& m = app.menu;
@@ -5455,19 +5474,7 @@ void drawShop(App& app) {
 
     // Right: Oz, the plates, the list, the count and Yes / No
     r.setOrigin(rightEdge);
-    if (list && !s.list.empty()) { // HELP: the cursor's item, from the list's left to the screen's edge
-        const float hx = 152, hw = 512 - hx + (rightEdge > 0 ? 0 : 0);
-        m.stretch(12, hx, 0, hw, 66, a);
-        m.picture(18, hx + 4, 2, a);
-        std::vector<std::vector<std::string>> help;
-        if (app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) && !help.empty()) {
-            float y = 20;
-            for (const std::string& line : help[0]) {
-                m.text(line, hx + 14, y, false, a, 13);
-                if ((y += 16) > 52) break;
-            }
-        }
-    }
+    if (list && !s.list.empty()) drawHelpWindow(app, m, item, a);
     m.picture(156, 316, 0, 1); // the Oz bar (ComUty_OzDraw: 0x9c)
     drawShopNumber(m, app.game.oz, 362, 0, 9, 12, 1);
     if (s.phase == App::Shop::Main)
@@ -6268,11 +6275,13 @@ void drawCampScrollBar(cr::MenuPainter& m, int top, int n, float a) {
 // its abilities and skills (unknown ones as ???)
 void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, float a) {
     if (!cr::isPlate(plate)) return;
-    const float dark[4] = {0, 0, 0, 0.6f * a}, white[4] = {1, 1, 1, 0.85f * a}, clear[4] = {1, 1, 1, 0};
-    m.quad(x, y, 163, 236, dark, dark);
+    const float white[4] = {1, 1, 1, a};
+    // Original gene board: the name and SKILL count sit on two white strips;
+    // the gene artwork itself is not backed by the port's added dark rectangle.
+    m.quad(x, y, 163, 16, white, white);
     const std::string name = itemName(app, plate);
-    m.textCentred(name, x + (163 - m.textWidth(name, 14)) / 2, y + 10, false, a, 14);
-    m.quad(x, y + 24, 163, 16, white, clear);
+    m.textCentred(name, x + (163 - m.textWidth(name, 14)) / 2, y + 8, true, a, 14);
+    m.quad(x, y + 24, 163, 16, white, white);
     m.picture(95, x + 24, y + 27, a);
     drawShopNumber(m, cr::plateLearned(app.game, plate), x + 90, y + 24, 1, 12, a, 2);
     m.picture(65, x + 102, y + 24, a);
@@ -7985,20 +7994,10 @@ void drawCamp(App& app) {
         }
         left();
     };
-    auto helpBoard = [&](int it) { // HELP: the item's text across the top (as the shop's)
+    auto helpBoard = [&](int it) {
         if (it <= 0) return;
         right();
-        const float hx = 152;
-        m.stretch(12, hx, 0, 512 - hx, 66, ease);
-        m.picture(18, hx + 4, 2, ease);
-        std::vector<std::vector<std::string>> help;
-        if (app.systemText.message(cr::itemHelpId(it), app.language, nullptr, help) && !help.empty()) {
-            float y = 20;
-            for (const std::string& line : help[0]) {
-                m.text(line, hx + 14, y, false, ease, 13);
-                if ((y += 16) > 52) break;
-            }
-        }
+        drawHelpWindow(app, m, it, ease);
         left();
     };
     switch (c.page) {
@@ -14235,6 +14234,67 @@ void drawShadowFans(App& app, cr::GpuMesh& gpu, const std::vector<float>& tris, 
     app.renderer.drawMesh(gpu, nullptr, vp, mat);
 }
 
+// findObject3D type 0x13: resolve a model node by its record user id (1102 is the shadow's head anchor).
+int nodeOfUser(const cr::Model& model, int user) {
+    for (const auto& record : model.records)
+        if (record.user == user)
+            for (const auto& entry : model.objectNodes)
+                if (entry.first == record.id) return entry.second;
+    return -1;
+}
+
+void addModelShadow(App& app, const LoadedModel& model, const std::vector<cr::Mat4>& pose,
+                    const cr::Mat4& world, float rx, float rz, int percent, float modelAlpha) {
+    const int a255 = int(std::lround(std::clamp(modelAlpha, 0.0f, 1.0f) * 255.0f));
+    if (a255 == 0 || rx <= 0 || rz <= 0 || percent == 0) return;
+    cr::Vec3 at{world.m[12], world.m[13], world.m[14]};
+    if (percent < 0) {
+        at.y -= 0.2f;
+    } else {
+        const int node = nodeOfUser(model.cpu, 1102);
+        if (node >= 0 && node < int(pose.size())) {
+            const cr::Mat4 nodeWorld = world * pose[size_t(node)];
+            at.x = nodeWorld.m[12];
+            at.z = nodeWorld.m[14];
+        }
+        at.y += 0.1f;
+    }
+    const float yaw = std::atan2(world.m[8], world.m[10]);
+    const int alpha = std::abs(percent) * a255 / 100;
+    if (alpha <= 0) return;
+    addShadowFan(app.fieldShadowTris, app.fieldShadowAlpha, at, yaw, rx, rz, float(std::min(alpha, 255)) / 255.0f);
+}
+
+void drawFieldShadows(App& app, const cr::Mat4& vp) {
+    app.fieldShadowTris.clear();
+    app.fieldShadowAlpha.clear();
+
+    if (app.havePlayer && playerShown(app) && !app.player.meshes.empty())
+        addModelShadow(app, app.player, app.player.world, playerWorld(shownWalker(app)), 3, 3, 80, shownPlayerAlpha(app));
+
+    for (const App::NpcDraw& draw : app.npcDraws) {
+        if (draw.index < 0 || draw.index >= int(app.npcs.size())) continue;
+        const cr::FieldNpc& npc = app.npcs[size_t(draw.index)];
+        if (!npc.hasShadow() || draw.alpha <= 0.001f) continue;
+        const auto it = app.npcModels.find(draw.model);
+        if (it == app.npcModels.end() || it->second.meshes.empty()) continue;
+        const LoadedModel& model = it->second;
+        cr::Mat4 world;
+        float alpha = 1;
+        shownNpc(app, draw, world, alpha);
+        if (alpha <= 0.001f) continue;
+
+        std::vector<cr::Mat4> pose;
+        if (npc.shadow[3] >= 0 && !model.cpu.skeleton.nodes.empty()) {
+            const cr::Action* action = draw.action >= 0 && draw.action < int(model.actions.size())
+                                           ? &model.actions[size_t(draw.action)] : nullptr;
+            cr::computeWorld(model.cpu.skeleton, action, draw.time, pose);
+        }
+        addModelShadow(app, model, pose, world, float(npc.shadow[1]), float(npc.shadow[2]), npc.shadow[3], alpha);
+    }
+    drawShadowFans(app, app.fieldShadows, app.fieldShadowTris, app.fieldShadowAlpha, vp);
+}
+
 void drawBattleShadows(App& app, const cr::Mat4& vp) {
     drawShadowFans(app, app.battleShadows, app.battle.shadowTris, app.battle.shadowAlpha, vp);
 }
@@ -14649,7 +14709,9 @@ void drawBattleHud(App& app, float W, float H) {
         m.quad(88, 4 + by, 24, 24, clear, dark);
         m.quad(112, 4 + by, 351, 24, dark, dark);
         m.quad(463, 4 + by, 24, 24, dark, clear);
+        m.setOutline(false);
         m.textCentred(b.banner, 287 - m.textWidth(b.banner, 14) / 2, 16 + by, false, 1, 14);
+        m.setOutline(true);
     }
 
     // Right: the menus
@@ -14664,7 +14726,7 @@ void drawBattleHud(App& app, float W, float H) {
             if (app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) && !help.empty()) {
                 float hy = 20;
                 for (const std::string& line : help[0]) {
-                    m.text(line, hx + 14, hy, false, a, 13);
+                    m.text(line, hx + 14, hy, true, a, 13); // black HELP text, white edge
                     if ((hy += 16) > 52) break;
                 }
             }
@@ -15134,6 +15196,7 @@ void drawFrame(App& app, bool present = true) {
             // the ship's blended c152 waves must not cover Vieg on the deck.
             if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, app.playerFaded);
             drawNpcs(app, mvp);
+            drawFieldShadows(app, mvp);
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
             drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // only effects flagged by battle-time setup face the camera
             if (app.showCollision && app.collision.vao) {

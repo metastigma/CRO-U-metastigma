@@ -116,11 +116,21 @@ MenuPainter::Cached& MenuPainter::rasterise(const std::string& s, float size) {
     return c;
 }
 
+// drawfont_l: eight one-pixel copies in the opposite colour before the glyph itself.
+void MenuPainter::edge(const Texture& tex, float x, float y, float w, float h, float k, float alpha) {
+    if (!outline_) return;
+    for (int dy = -1; dy <= 1; ++dy)
+        for (int dx = -1; dx <= 1; ++dx)
+            if (dx || dy)
+                r_->drawQuad(tex, X(x + float(dx)) * kScale, Y(y + float(dy)) * kScale, w, h, k, k, k, alpha);
+}
+
 void MenuPainter::text(const std::string& s, float x, float y, bool dark, float alpha, float size) {
     if (!r_ || s.empty() || alpha <= 0.001f) return;
     Cached& c = rasterise(s, size * K());
     if (!c.tex.id) return;
     const float k = dark ? 0.0f : 1.0f;
+    edge(c.tex, x, y, c.w, c.h, 1.0f - k, alpha);
     r_->drawQuad(c.tex, X(x) * kScale, Y(y) * kScale, c.w, c.h, k, k, k, alpha);
 }
 
