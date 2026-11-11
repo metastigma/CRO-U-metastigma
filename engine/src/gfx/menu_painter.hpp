@@ -29,6 +29,9 @@ public:
     // Outside all that: the whole menu scaled by k and moved to (x, y) (fitting the iPad's 512 x 384
     // menus into the iPhone layout's screen)
     void setFit(float x, float y, float k) { fx_ = x; fy_ = y; fk_ = k; }
+    // Draw a single clean outline around text. Disabled by default; callers enable it only
+    // for the original Help board, leaving ordinary menu labels unchanged.
+    void setOutline(bool on) { outline_ = on; }
 
     // A piece of window_hd at (x, y): its sheet rectangle in menu units (u, v, w, h)
     void piece(float x, float y, float u, float v, float w, float h, float alpha = 1, float r = 1, float g = 1, float b = 1);
@@ -91,11 +94,14 @@ private:
     const Font* font_ = nullptr;
     struct Cached {
         Texture tex;
-        float w = 0, h = 0, density = 0; // logical size, texture pixels per logical pixel
+        Texture edgeTex; // the dilated glyph alpha, drawn once behind the face
+        float w = 0, h = 0, density = 0; // glyph bounds in logical pixels
+        float pad = 0; // transparent border (logical pixels) surrounding both cached textures
         int generation = -1;
     };
     std::map<std::string, Cached> text_;
     Texture white_;
+    bool outline_ = false;
     Cached& rasterise(const std::string& s, float size);
 };
 

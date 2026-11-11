@@ -6,6 +6,7 @@
 #include "core/text.hpp"
 #include "game/stage_tables.hpp"
 #include "gfx/font.hpp"
+#include "gfx/font_outline.hpp"
 
 namespace cr {
 
@@ -14,7 +15,10 @@ constexpr float kScale = 2.0f; // menu units -> 1024x768 screen
 } // namespace
 
 void MenuPainter::release(Renderer& r) {
-    for (auto& [s, c] : text_) r.destroy(c.tex);
+    for (auto& [s, c] : text_) {
+        r.destroy(c.tex);
+        r.destroy(c.edgeTex);
+    }
     text_.clear();
     r.destroy(white_);
 }
@@ -97,22 +101,31 @@ void MenuPainter::slant(float x, float y, float w, float h, float lean, const fl
 }
 
 MenuPainter::Cached& MenuPainter::rasterise(const std::string& s, float size) {
-    const std::string key = s + '\x01' + std::to_string(int(size * 10));
-    Cached& c = text_[key];
     const float density = std::max(1.0f, std::round(r_->pixelScale() * 4.0f) / 4.0f);
+    // The original edge was a one-menu-unit offset. Rasterise it at the font's actual pixel
+    // density, then combine its pixels into one antialiased outline texture before drawing.
+    const int pad = outline_ ? std::max(1, int(std::ceil(kScale * K() * density))) : 0;
+    const std::string key = s + '\x01' + std::to_string(int(size * 10)) + '\x02' + std::to_string(pad);
+    Cached& c = text_[key];
     const int generation = font_ ? font_->generation() : -2;
-    if (c.tex.id && c.density == density && c.generation == generation) return c;
+    if (c.tex.id && c.density == density && c.generation == generation && (pad == 0 || c.edgeTex.id)) return c;
     r_->destroy(c.tex);
+    r_->destroy(c.edgeTex);
     c = Cached();
     if (!font_ || !font_->loaded() || s.empty()) return c;
     Image img;
     const float em = size * kScale * density;
-    if (!font_->rasterise({s}, em, em * 1.2f, 0, img)) return c;
+    if (!font_->rasterise({s}, em, em * 1.2f, pad, img)) return c;
     c.tex = r_->upload(img);
-    c.w = img.width / density;
-    c.h = img.height / density;
+    c.pad = float(pad) / density;
+    c.w = float(img.width - 2 * pad) / density;
+    c.h = float(img.height - 2 * pad) / density;
     c.density = density;
     c.generation = generation;
+    if (pad > 0) {
+        Image outline;
+        if (makeGlyphOutline(img, pad, outline)) c.edgeTex = r_->upload(outline);
+    }
     return c;
 }
 
@@ -120,15 +133,25 @@ void MenuPainter::text(const std::string& s, float x, float y, bool dark, float 
     if (!r_ || s.empty() || alpha <= 0.001f) return;
     Cached& c = rasterise(s, size * K());
     if (!c.tex.id) return;
+    const float x0 = X(x) * kScale - c.pad, y0 = Y(y) * kScale - c.pad;
+    const float w = c.w + 2 * c.pad, h = c.h + 2 * c.pad;
     const float k = dark ? 0.0f : 1.0f;
-    r_->drawQuad(c.tex, X(x) * kScale, Y(y) * kScale, c.w, c.h, k, k, k, alpha);
+    if (outline_ && c.edgeTex.id) {
+        const float edge = dark ? 1.0f : 0.0f;
+        r_->drawQuad(c.edgeTex, x0, y0, w, h, edge, edge, edge, alpha);
+    }
+    r_->drawQuad(c.tex, x0, y0, w, h, k, k, k, alpha);
 }
 
 void MenuPainter::textTint(const std::string& s, float x, float y, float r, float g, float b, float alpha, float size) {
     if (!r_ || s.empty() || alpha <= 0.001f) return;
     Cached& c = rasterise(s, size * K());
     if (!c.tex.id) return;
-    r_->drawQuad(c.tex, X(x) * kScale, Y(y) * kScale, c.w, c.h, r, g, b, alpha);
+    const float x0 = X(x) * kScale - c.pad, y0 = Y(y) * kScale - c.pad;
+    const float w = c.w + 2 * c.pad, h = c.h + 2 * c.pad;
+    const float edge = r + g + b > 0.01f ? 0.0f : 1.0f;
+    if (outline_ && c.edgeTex.id) r_->drawQuad(c.edgeTex, x0, y0, w, h, edge, edge, edge, alpha);
+    r_->drawQuad(c.tex, x0, y0, w, h, r, g, b, alpha);
 }
 
 void MenuPainter::textCentred(const std::string& s, float x, float y, bool dark, float alpha, float size) {
