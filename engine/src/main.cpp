@@ -195,6 +195,7 @@ struct App {
     std::vector<bool> npcWarps;            // per NPC: its touch script warps (from a trial run)
     cr::GpuMesh triggerMesh;               // trigger boxes, shown with the collision overlay
     cr::GpuMesh puzzleBeams;               // the candle switches' beams (CandleSwitch::draw3D)
+    cr::GpuMesh battleShadows;              // dynamic floor-shadow fans for battle fighters
     cr::GameState game;                    // flags / variables the scripts use (new game)
     int lastKick = 0;                      // trigger the player is standing in (fires once)
     std::string lastWarp;                  // shown in the status line
@@ -581,6 +582,8 @@ struct App {
         std::map<std::string, LoadedModel> models;
         int frames = 0;
         float clock = 0;
+        std::vector<float> shadowTris;       // battle shadow fans: xyz per vertex
+        std::vector<uint8_t> shadowAlpha;    // alpha per vertex (RGB is black)
         int fieldTrack = -1;               // music to resume afterwards
         bool fieldTrackPending = false;     // __EvtBattle saves G+0x8a97c before it resets it
         bool requested = false;            // a script's Battle, started once its step ends
@@ -1433,6 +1436,7 @@ void unloadModel(App& app) {
     app.renderer.destroy(app.collision);
     app.renderer.destroy(app.triggerMesh);
     app.renderer.destroy(app.puzzleBeams);
+    app.renderer.destroy(app.battleShadows);
     app.collisionPolys = 0;
     unloadLoaded(app, app.model);
 }
@@ -11624,6 +11628,65 @@ cr::Vec3 actorPoint(App& app, const App::Battle::Actor& a, int user) {
     return {a.pos.x + c * x + sn * z, a.pos.y + y, a.pos.z - sn * x + c * z};
 }
 
+// _btl_shadow: one 32-triangle fan, rotated with the fighter and carrying per-vertex alpha.
+// Each sector has a centre fan plus two annular bands. Vertex alpha falls away
+// towards the perimeter, so the ellipse has a soft edge instead of a filled disc.
+constexpr int kBattleShadowSegments = 32;
+constexpr int kBattleShadowRings = 6;
+constexpr int kBattleShadowTrianglesPerSegment = 1 + 2 * (kBattleShadowRings - 2);
+constexpr size_t kBattleShadowVerticesPerFan = size_t(kBattleShadowSegments * kBattleShadowTrianglesPerSegment * 3);
+
+void addShadowFan(std::vector<float>& tris, std::vector<uint8_t>& alpha, cr::Vec3 at, float yaw, float rx, float rz, float a) {
+    if (rx <= 0 || rz <= 0 || a <= 0) return;
+    // A gradual radial falloff, rather than a single constant-alpha polygon.
+    constexpr float kRadii[kBattleShadowRings] = {0.0f, 0.18f, 0.38f, 0.62f, 0.84f, 1.0f};
+    constexpr float kOpacity[kBattleShadowRings] = {1.0f, 0.88f, 0.64f, 0.36f, 0.10f, 0.0f};
+    const float cy = std::cos(yaw), sy = std::sin(yaw);
+    auto point = [&](float radius, int i) {
+        const float t = float(i == kBattleShadowSegments ? 0 : i) / float(kBattleShadowSegments) * 2.0f * 3.14159265f;
+        const float x = rx * radius * std::sin(t), z = rz * radius * std::cos(t);
+        return cr::Vec3{at.x + x * cy + z * sy, at.y, at.z + z * cy - sy * x};
+    };
+    auto vertexAlpha = [&](int ring) {
+        return uint8_t(std::lround(std::clamp(a * kOpacity[ring], 0.0f, 1.0f) * 255.0f));
+    };
+    auto triangle = [&](cr::Vec3 p0, cr::Vec3 p1, cr::Vec3 p2, uint8_t a0, uint8_t a1, uint8_t a2) {
+        tris.insert(tris.end(), {p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z});
+        alpha.insert(alpha.end(), {a0, a1, a2});
+    };
+    tris.reserve(tris.size() + kBattleShadowVerticesPerFan * 3);
+    alpha.reserve(alpha.size() + kBattleShadowVerticesPerFan);
+    const uint8_t centreAlpha = vertexAlpha(0);
+    for (int i = 0; i < kBattleShadowSegments; ++i) {
+        const cr::Vec3 centre = at;
+        const cr::Vec3 r1a = point(kRadii[1], i), r1b = point(kRadii[1], i + 1);
+        triangle(centre, r1a, r1b, centreAlpha, vertexAlpha(1), vertexAlpha(1));
+        for (int ring = 1; ring < kBattleShadowRings - 1; ++ring) {
+            const cr::Vec3 innerA = point(kRadii[ring], i), innerB = point(kRadii[ring], i + 1);
+            const cr::Vec3 outerA = point(kRadii[ring + 1], i), outerB = point(kRadii[ring + 1], i + 1);
+            triangle(innerA, outerA, outerB, vertexAlpha(ring), vertexAlpha(ring + 1), vertexAlpha(ring + 1));
+            triangle(innerA, outerB, innerB, vertexAlpha(ring), vertexAlpha(ring + 1), vertexAlpha(ring));
+        }
+    }
+}
+
+// _btl_shadow (after mdl_put): the pair uses 80% opacity; monsters use 80% of their
+// current model alpha. Radii and centre are read from the original sys.evt monster row.
+void addBattleShadow(App& app, const App::Battle::Actor& a) {
+    App::Battle& b = app.battle;
+    if (a.fighter < 0 || a.fighter > 4 || a.hidden || a.alpha <= 0.001f) return;
+    const cr::Fighter& f = b.rules.f[size_t(a.fighter)];
+    const cr::MonsterDef* row = a.fighter < 2 ? app.battleData.monster(f.character + 5) : f.def;
+    if (!row) return;
+    const int rx = int16_t(uint16_t(row->raw[0x42]) | uint16_t(row->raw[0x43]) << 8);
+    const int rz = int16_t(uint16_t(row->raw[0x44]) | uint16_t(row->raw[0x45]) << 8);
+    if (rx <= 0 || rz <= 0) return;
+    const cr::Vec3 node = actorPoint(app, a, 1102);
+    const cr::Vec3 at{node.x, a.pos.y + 0.1f, node.z};
+    const float opacity = (a.fighter < 2 ? 0.8f : 0.8f * std::clamp(a.alpha, 0.0f, 1.0f));
+    addShadowFan(b.shadowTris, b.shadowAlpha, at, a.yaw, float(rx), float(rz), opacity);
+}
+
 // eff3d_set_btl: effect `id` on fighter `fighter` (at its table node)
 void spawnEffect(App& app, int id, int fighter) {
     App::Battle& b = app.battle;
@@ -13915,6 +13978,42 @@ void stepBattle(App& app) {
     stepFlash(app);
 }
 
+// Upload and draw all battle shadow fans as one dynamic mesh. The vertex-colour bit is
+// required by this fork's renderer (Mesh::hasColors / Appearance bit 6) for per-vertex alpha.
+void drawShadowFans(App& app, cr::GpuMesh& gpu, const std::vector<float>& tris, const std::vector<uint8_t>& alpha,
+                   const cr::Mat4& vp) {
+    if (alpha.empty()) return;
+    const size_t verts = alpha.size();
+    const size_t room = std::max<size_t>(verts, 5 * kBattleShadowVerticesPerFan);
+    if (!gpu.vao || size_t(gpu.indexCount) < verts) {
+        app.renderer.destroy(gpu);
+        cr::Mesh mesh;
+        mesh.positions.assign(room * 3, 0.0f);
+        mesh.uvs.assign(room * 2, 0.0f);
+        mesh.colors.assign(room * 4, 0);
+        mesh.hasColors = true;
+        mesh.indices.reserve(room);
+        for (uint32_t i = 0; i < room; ++i) mesh.indices.push_back(i);
+        gpu = app.renderer.upload(mesh);
+    }
+    const size_t cap = size_t(gpu.indexCount);
+    std::vector<float> pos = tris, uv(cap * 2, 0.0f);
+    pos.resize(cap * 3, 0.0f);
+    std::vector<uint8_t> col(cap * 4, 0);
+    for (size_t v = 0; v < verts && v < cap; ++v) col[v * 4 + 3] = alpha[v];
+    app.renderer.updatePositions(gpu, pos, uv, col);
+    cr::Material mat;
+    mat.culling = 0;
+    mat.properties = 8 | 0x40; // depth test, no depth write, use vertex colours
+    mat.blendSrc = 4, mat.blendDst = 5;
+    mat.unlit = 1;
+    app.renderer.drawMesh(gpu, nullptr, vp, mat);
+}
+
+void drawBattleShadows(App& app, const cr::Mat4& vp) {
+    drawShadowFans(app, app.battleShadows, app.battle.shadowTris, app.battle.shadowAlpha, vp);
+}
+
 // btl_prc: the whole screen through the formation's camera (btl_main: camera formation - 2;
 // perspective 0.0792 turns = 28.5 degrees vertical, 4:3, near 9, far 2000)
 // Original _btl_prc projection planes (btl_prc 8040-8042).
@@ -13964,6 +14063,7 @@ void drawBattle(App& app, float dt) {
     if (r.vitaScreen()) r.begin3D(); // (CRView: the Vita's whole screen)
     else r.begin3DRect(0, 0, W, H);
     drawLoaded(app, b.stage, vp);
+    b.shadowTris.clear(), b.shadowAlpha.clear();
     for (size_t ai = 0; ai < b.actors.size(); ++ai) {
         // the actor as a frame between steps shows it: moved, turned, faded and its animation
         // played on by then (an animation that looped, changed or jumped is shown as it is)
@@ -13995,7 +14095,9 @@ void drawBattle(App& app, float dt) {
         world.m[8] = sn * a.scale; world.m[10] = c * a.scale;
         world.m[12] = a.pos.x; world.m[13] = a.pos.y; world.m[14] = a.pos.z;
         drawLoaded(app, lm, vp * world, nullptr, a.alpha);
+        addBattleShadow(app, a);
     }
+    drawBattleShadows(app, vp); // _btl_shadow: after the fighters, before battle effects
     drawEffects(app, vp, eye, target);
     r.end3D();
     drawSceneEffects(app, true); // the field's weather goes on over the battle
