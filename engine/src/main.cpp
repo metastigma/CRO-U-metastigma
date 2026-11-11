@@ -11577,13 +11577,18 @@ int enemyCameraSlot(const App& app, int fighter) {
     return kSlot[std::clamp(app.battle.formation, 0, 15)][std::clamp(fighter - 2, 0, 2)];
 }
 
-void cameraForTarget(App& app, int target, bool group) {
+// Target cursor camera (menub_mainPrc / btlord_make_select). Held means the original
+// half-step camera movement is left to the cursor code instead of normal camera easing.
+void cameraForTarget(App& app, int target, bool group, bool cursor = false) {
     App::Battle& b = app.battle;
-    if (target < 2) setBattleCamera(app, b.rules.pair || group ? 30 : 28 + target);
-    else if (group) setBattleCamera(app, b.formation + 0x26, 2);
+    if (cursor) b.camEase = 2;
+    if (target < 2)
+        setBattleCamera(app, group ? 0x26 + (b.rules.pair ? 1 : 0) : b.rules.pair ? 30 : 28 + target, 0, cursor);
+    else if (group)
+        setBattleCamera(app, b.formation + 0x26, 2, cursor);
     else {
         const int size = monsterSize(app, target);
-        setBattleCamera(app, size == 1 ? target + 0x1d : size + 0x20, target);
+        setBattleCamera(app, size == 1 ? target + 0x1d : size + 0x20, target, cursor);
     }
 }
 
@@ -14683,7 +14688,7 @@ void battleKey(App& app, SDL_Keycode key) {
             b.pickTop = std::clamp(b.pickTop, std::max(0, b.pick - btlui::kItemRows + 1), b.pick);
             if (targets) {
                 const cr::BattleActionDef* act = app.battleActions.get(b.targetAction);
-                cameraForTarget(app, b.picks[size_t(b.pick)], act && b.rules.isGroupScope(*act));
+                cameraForTarget(app, b.picks[size_t(b.pick)], act && b.rules.isGroupScope(*act), true);
             }
             menuSound(app, se::kCursor);
         } else if (enter && n > 0) {
