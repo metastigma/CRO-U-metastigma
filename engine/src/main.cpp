@@ -11629,20 +11629,43 @@ cr::Vec3 actorPoint(App& app, const App::Battle::Actor& a, int user) {
 }
 
 // _btl_shadow: one 32-triangle fan, rotated with the fighter and carrying per-vertex alpha.
+// Each sector has a centre fan plus two annular bands. Vertex alpha falls away
+// towards the perimeter, so the ellipse has a soft edge instead of a filled disc.
+constexpr int kBattleShadowSegments = 32;
+constexpr int kBattleShadowTrianglesPerSegment = 5;
+constexpr size_t kBattleShadowVerticesPerFan = size_t(kBattleShadowSegments * kBattleShadowTrianglesPerSegment * 3);
+
 void addShadowFan(std::vector<float>& tris, std::vector<uint8_t>& alpha, cr::Vec3 at, float yaw, float rx, float rz, float a) {
     if (rx <= 0 || rz <= 0 || a <= 0) return;
+    constexpr float kRadii[4] = {0.0f, 0.38f, 0.74f, 1.0f};
+    constexpr float kOpacity[4] = {1.0f, 0.58f, 0.18f, 0.0f};
     const float cy = std::cos(yaw), sy = std::sin(yaw);
-    auto point = [&](int i) {
-        const float t = float(i == 32 ? 0 : i) / 31.0f * 2.0f * 3.14159265f;
-        const float x = rx * std::sin(t), z = rz * std::cos(t);
+    auto point = [&](float radius, int i) {
+        const float t = float(i == kBattleShadowSegments ? 0 : i) / float(kBattleShadowSegments) * 2.0f * 3.14159265f;
+        const float x = rx * radius * std::sin(t), z = rz * radius * std::cos(t);
         return cr::Vec3{at.x + x * cy + z * sy, at.y, at.z + z * cy - sy * x};
     };
-    tris.reserve(tris.size() + 32 * 9);
-    for (int i = 0; i < 32; ++i) {
-        const cr::Vec3 p0 = point(i), p1 = point(i + 1);
-        tris.insert(tris.end(), {at.x, at.y, at.z, p0.x, p0.y, p0.z, p1.x, p1.y, p1.z});
+    auto vertexAlpha = [&](int ring) {
+        return uint8_t(std::lround(std::clamp(a * kOpacity[ring], 0.0f, 1.0f) * 255.0f));
+    };
+    auto triangle = [&](cr::Vec3 p0, cr::Vec3 p1, cr::Vec3 p2, uint8_t a0, uint8_t a1, uint8_t a2) {
+        tris.insert(tris.end(), {p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z});
+        alpha.insert(alpha.end(), {a0, a1, a2});
+    };
+    tris.reserve(tris.size() + kBattleShadowVerticesPerFan * 3);
+    alpha.reserve(alpha.size() + kBattleShadowVerticesPerFan);
+    const uint8_t centreAlpha = vertexAlpha(0);
+    for (int i = 0; i < kBattleShadowSegments; ++i) {
+        const cr::Vec3 centre = at;
+        const cr::Vec3 r1a = point(kRadii[1], i), r1b = point(kRadii[1], i + 1);
+        triangle(centre, r1a, r1b, centreAlpha, vertexAlpha(1), vertexAlpha(1));
+        for (int ring = 1; ring < 3; ++ring) {
+            const cr::Vec3 innerA = point(kRadii[ring], i), innerB = point(kRadii[ring], i + 1);
+            const cr::Vec3 outerA = point(kRadii[ring + 1], i), outerB = point(kRadii[ring + 1], i + 1);
+            triangle(innerA, outerA, outerB, vertexAlpha(ring), vertexAlpha(ring + 1), vertexAlpha(ring + 1));
+            triangle(innerA, outerB, innerB, vertexAlpha(ring), vertexAlpha(ring + 1), vertexAlpha(ring));
+        }
     }
-    alpha.insert(alpha.end(), 32 * 3, uint8_t(std::lround(std::clamp(a, 0.0f, 1.0f) * 255.0f)));
 }
 
 // _btl_shadow (after mdl_put): the pair uses 80% opacity; monsters use 80% of their
@@ -13959,7 +13982,7 @@ void drawShadowFans(App& app, cr::GpuMesh& gpu, const std::vector<float>& tris, 
                    const cr::Mat4& vp) {
     if (alpha.empty()) return;
     const size_t verts = alpha.size();
-    const size_t room = std::max<size_t>(verts, 5 * 32 * 3);
+    const size_t room = std::max<size_t>(verts, 5 * kBattleShadowVerticesPerFan);
     if (!gpu.vao || size_t(gpu.indexCount) < verts) {
         app.renderer.destroy(gpu);
         cr::Mesh mesh;
