@@ -81,6 +81,7 @@ public:
     // ComUty_CmdBack type 1 (the shop's): a plain 232-wide bar, white fading in over 24 at each end,
     // "Back" at x + 82
     void backBar(float x, float y, bool pressed, float alpha);
+    void backOkBar(float x, float y, int pressed, float alpha);
     // The 14 x 14 digits of sheet 0 (0 at (0, 0), then every 14 units) and "/" (picture 66)
     void digit(int d, float x, float y, float alpha = 1);
 
