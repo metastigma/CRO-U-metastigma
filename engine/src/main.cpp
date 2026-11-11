@@ -5356,16 +5356,16 @@ void drawShopBar(cr::MenuPainter& m, float x, float y, float value, float most, 
 
 // ComUty_StateBoardDraw at (bx, by) for character c; `item` (if > 0) shows what wearing it changes
 // ComUty_HelpWindowDraw: the striped HELP label and up to three lines of item / gene text.
-void drawHelpWindow(App& app, cr::MenuPainter& m, int item, float alpha) {
+void drawHelpWindow(App& app, cr::MenuPainter& m, int item, float alpha, float dx = 0, float dy = 0) {
     if (item <= 0) return;
-    m.picture(17, 144, 8, alpha);
-    m.picture(18, 144, -4, alpha);
+    m.picture(17, 144 + dx, 8 + dy, alpha);
+    m.picture(18, 144 + dx, -4 + dy, alpha);
     std::vector<std::vector<std::string>> help;
     if (!app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) || help.empty()) return;
     const int count = std::min(3, int(help[0].size()));
     static const int kTop[4] = {0, 24, 18, 10};
     for (int i = 0; i < count; ++i)
-        m.text(help[0][size_t(i)], 156, float(kTop[count] + 8 + 16 * i), true, alpha, 13);
+        m.text(help[0][size_t(i)], 156 + dx, float(kTop[count] + 8 + 16 * i) + dy, true, alpha, 13);
 }
 
 void drawShopBoard(App& app, float bx, float by, int c, int item, float a) {
@@ -14714,19 +14714,7 @@ void drawBattleHud(App& app, float W, float H) {
     r.setOrigin(phone ? r.uiX() : 2 * r.uiX());
     if (b.phase == App::Battle::Command && !app.optionsOpen) { // (Options covers them while it's up)
         // the HELP board across the top (ComUty_HelpWindowDraw): the item's or gene's target and effect
-        auto helpBoard = [&](int item) {
-            const float hx = 152;
-            m.stretch(12, hx, 0, 512 - hx, 66, a);
-            m.picture(18, hx + 4, 2, a);
-            std::vector<std::vector<std::string>> help;
-            if (app.systemText.message(cr::itemHelpId(item), app.language, nullptr, help) && !help.empty()) {
-                float hy = 20;
-                for (const std::string& line : help[0]) {
-                    m.text(line, hx + 14, hy, true, a, 13); // black HELP text, white edge
-                    if ((hy += 16) > 52) break;
-                }
-            }
-        };
+        auto helpBoard = [&](int item) { drawHelpWindow(app, m, item, a, 16, 32); };
         switch (b.menu) {
         case App::Battle::Top:
             for (int i = 0; i < 4; ++i) {
