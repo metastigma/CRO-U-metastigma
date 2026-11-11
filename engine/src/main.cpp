@@ -11632,13 +11632,15 @@ cr::Vec3 actorPoint(App& app, const App::Battle::Actor& a, int user) {
 // Each sector has a centre fan plus two annular bands. Vertex alpha falls away
 // towards the perimeter, so the ellipse has a soft edge instead of a filled disc.
 constexpr int kBattleShadowSegments = 32;
-constexpr int kBattleShadowTrianglesPerSegment = 5;
+constexpr int kBattleShadowRings = 6;
+constexpr int kBattleShadowTrianglesPerSegment = 1 + 2 * (kBattleShadowRings - 2);
 constexpr size_t kBattleShadowVerticesPerFan = size_t(kBattleShadowSegments * kBattleShadowTrianglesPerSegment * 3);
 
 void addShadowFan(std::vector<float>& tris, std::vector<uint8_t>& alpha, cr::Vec3 at, float yaw, float rx, float rz, float a) {
     if (rx <= 0 || rz <= 0 || a <= 0) return;
-    constexpr float kRadii[4] = {0.0f, 0.38f, 0.74f, 1.0f};
-    constexpr float kOpacity[4] = {1.0f, 0.58f, 0.18f, 0.0f};
+    // A gradual radial falloff, rather than a single constant-alpha polygon.
+    constexpr float kRadii[kBattleShadowRings] = {0.0f, 0.18f, 0.38f, 0.62f, 0.84f, 1.0f};
+    constexpr float kOpacity[kBattleShadowRings] = {1.0f, 0.88f, 0.64f, 0.36f, 0.10f, 0.0f};
     const float cy = std::cos(yaw), sy = std::sin(yaw);
     auto point = [&](float radius, int i) {
         const float t = float(i == kBattleShadowSegments ? 0 : i) / float(kBattleShadowSegments) * 2.0f * 3.14159265f;
@@ -11659,7 +11661,7 @@ void addShadowFan(std::vector<float>& tris, std::vector<uint8_t>& alpha, cr::Vec
         const cr::Vec3 centre = at;
         const cr::Vec3 r1a = point(kRadii[1], i), r1b = point(kRadii[1], i + 1);
         triangle(centre, r1a, r1b, centreAlpha, vertexAlpha(1), vertexAlpha(1));
-        for (int ring = 1; ring < 3; ++ring) {
+        for (int ring = 1; ring < kBattleShadowRings - 1; ++ring) {
             const cr::Vec3 innerA = point(kRadii[ring], i), innerB = point(kRadii[ring], i + 1);
             const cr::Vec3 outerA = point(kRadii[ring + 1], i), outerB = point(kRadii[ring + 1], i + 1);
             triangle(innerA, outerA, outerB, vertexAlpha(ring), vertexAlpha(ring + 1), vertexAlpha(ring + 1));
