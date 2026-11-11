@@ -13407,7 +13407,7 @@ void startTurn(App& app) {
             b.hitFrame = physicalGeneSwing
                              ? (an.hit > 0 ? an.hit : 18)
                              : (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem)
-                                   ? an.loopStart + 30
+                                   ? cr::battleCastHitFrame(an)
                                    : an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         }
         u->moveFrom = u->moveTo = 0;

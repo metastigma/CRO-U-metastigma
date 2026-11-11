@@ -13,6 +13,11 @@ int main() {
     problems += cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 233, true);
     problems += cr::battleKeepTargetCameraOnRepeat(cr::kCmdAttack, 234, true);
     const cr::BattleAnim noWindow{};
+    cr::BattleAnim chocolateCast;
+    chocolateCast.loopStart = 23;
+    chocolateCast.loopEnd = 40;
+    problems += cr::battleCastHitFrame(chocolateCast) != 53;
+    problems += cr::battleCastHitFrame(noWindow) != 30;
     cr::BattleAnim meleeWindow;
     meleeWindow.moveStart = 4;
     meleeWindow.moveEnd = 9;

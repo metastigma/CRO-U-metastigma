@@ -61,6 +61,9 @@ struct BattleAnim {
     int loopStart = 0, loopEnd = 0, moveStart = 0, moveEnd = 0, hit = 0, hit2 = 0;
     bool hasMoveWindow() const { return moveEnd > moveStart; }
 };
+// _btlact_gene_init / _btlact_item_init: impact is 30 frames after the cast loop begins.
+inline int battleCastHitFrame(const BattleAnim& animation) { return animation.loopStart + 30; }
+
 // Gene actions with motion=1 may have their own casting clip but no Section 13 move
 // window. The original melee window (slot 8) supplies only the approach timing; the
 // gene's own slot remains responsible for the casting and hit animation.
