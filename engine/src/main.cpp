@@ -565,6 +565,8 @@ struct App {
             float homeYaw = 0;
             int moveFrom = 0, moveTo = 0;  // the move's frames of the current slot
             int loopFrom = -1, loopTo = -1; // mdl_set_act_motion_loop's frames (-1: the slot's own)
+            bool moveByTurnFrame = false;  // borrowed move windows use the battle-action clock
+            bool returnAfterHit = false;   // an extended cast returns only at its impact
             bool fading = false;           // a fallen monster
             bool hidden = false;           // the model's +0xfb4 cleared (a boss's end, a defeat): not drawn
             float alpha = 1;
@@ -11454,6 +11456,8 @@ void playSlot(App& app, App::Battle::Actor& a, int slot, int then = -1) {
     a.time = 0;
     a.then = then;
     a.loopFrom = a.loopTo = -1;
+    a.moveByTurnFrame = false;
+    a.returnAfterHit = false;
 }
 
 float actorDuration(App& app, const App::Battle::Actor& a) {
@@ -13343,12 +13347,20 @@ void startTurn(App& app) {
         const bool approach = cr::battleApproachEnabled(
             a ? a->motion : 0, opposingTarget, approachAnim, pairedSecondary, inPlace || u->modelId == 0x20);
         const bool playReturn = actionHasReturn && (approach || u->modelId == 0x20);
-        if ((t.kind == cr::kCmdGene || t.kind == cr::kCmdItem) && !approach) {
-            // _btlact_gene/item_init: run the cast motion to its loop point, then loop that
-            // segment until the hit phase replaces it. A second queued hit restarts this motion.
+        // When a gene has no own move window, slot 8 supplies only the approach timing.
+        // Its cast animation may loop at unrelated frames and must not reset that movement.
+        const bool borrowedApproachWindow =
+            approach && t.kind == cr::kCmdGene && !an.hasMoveWindow() && approachAnim.hasMoveWindow();
+        const bool loopCast = (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem) &&
+                              (!approach || borrowedApproachWindow);
+        if (loopCast) {
+            // _btlact_gene/item_init: loop the cast until its impact replaces it. Fixed
+            // multi-hit actions restart this clip on each queued pass.
             playSlot(app, *u, slot, -1);
             const cr::BattleAnim cast = app.battleData.anim(u->modelId, u->slot);
             if (cast.loopEnd > cast.loopStart) u->loopFrom = cast.loopStart, u->loopTo = cast.loopEnd;
+            u->moveByTurnFrame = borrowedApproachWindow;
+            u->returnAfterHit = playReturn;
         } else
             playSlot(app, *u, slot, playReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
         if (k == 0)
@@ -13940,8 +13952,13 @@ void stepBattle(App& app) {
         else if (dur > 0 && a.time >= dur)
             a.time = std::fmod(a.time, dur);
         if (a.moveTo > a.moveFrom) {
-            const float t = std::clamp((a.time - float(a.moveFrom)) / float(a.moveTo - a.moveFrom), 0.0f, 1.0f);
+            const float moveFrame = cr::battleApproachMoveFrame(a.moveByTurnFrame, b.turnFrame + 1, a.time);
+            const float t = std::clamp((moveFrame - float(a.moveFrom)) / float(a.moveTo - a.moveFrom), 0.0f, 1.0f);
             a.pos = a.from + (a.to - a.from) * t;
+            if (a.moveByTurnFrame && moveFrame >= float(a.moveTo)) {
+                a.moveFrom = a.moveTo = 0;
+                a.moveByTurnFrame = false;
+            }
         }
         if (a.fading) a.alpha = std::max(0.0f, a.alpha - 1.0f / 20.0f);
     }
@@ -14047,6 +14064,32 @@ void stepBattle(App& app) {
                               !b.turn.barriers.empty());
                 }
                 showHits(app);
+                if (genelike) {
+                    // The cast loop is held only until impact. Then play the actual return
+                    // clip (when appropriate), or stop it and restore the idle pose.
+                    for (int k = 0; k < 2; ++k) {
+                        App::Battle::Actor* caster =
+                            b.turn.actors[k] >= 0 ? battleActor(app, b.turn.actors[k]) : nullptr;
+                        if (!caster || caster->then >= 0 || caster->slot == btlui::kSlotIdle ||
+                            caster->slot == btlui::kSlotHit)
+                            continue;
+                        const bool returnHome = caster->returnAfterHit;
+                        if (!returnHome) {
+                            playSlot(app, *caster, btlui::kSlotIdle);
+                            continue;
+                        }
+                        playSlot(app, *caster, btlui::kSlotReturn, btlui::kSlotIdle);
+                        const cr::BattleAnim ret = app.battleData.anim(caster->modelId, btlui::kSlotReturn);
+                        if (ret.hasMoveWindow()) {
+                            caster->from = caster->pos;
+                            caster->to = caster->home;
+                            caster->moveFrom = ret.moveStart;
+                            caster->moveTo = ret.moveEnd;
+                        } else {
+                            caster->moveFrom = caster->moveTo = 0;
+                        }
+                    }
+                }
                 if (b.stageAction) stagedHit(app);
             }
         }
@@ -14078,6 +14121,8 @@ void stepBattle(App& app) {
                     if (App::Battle::Actor* u = b.turn.actors[k] >= 0 ? battleActor(app, b.turn.actors[k]) : nullptr) {
                         u->pos = u->home;
                         u->moveFrom = u->moveTo = 0;
+                        u->moveByTurnFrame = false;
+                        u->returnAfterHit = false;
                         if (u->slot != btlui::kSlotGuard) u->yaw = u->homeYaw;
                     }
             }

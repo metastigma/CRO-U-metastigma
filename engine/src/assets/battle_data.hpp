@@ -96,6 +96,11 @@ inline int battleApproachMoveEnd(const BattleAnim& animation, bool pairedSeconda
     if (animation.hasMoveWindow()) return animation.moveEnd;
     return pairedSecondary ? std::max(1, hitFrame - 4) : 0;
 }
+// A borrowed move window belongs to the battle action, not the cast clip's
+// independent animation loop. Keep its progress on the action clock.
+inline float battleApproachMoveFrame(bool useTurnClock, int turnFrame, float animationFrame) {
+    return useTurnClock ? float(turnFrame) : animationFrame;
+}
 // read_btlcpl / btlact_attack_init: formation approach points are target-specific.
 // Slots 3..5 are the solo approach points for enemy fighters 2..4; in pair mode
 // slots 6..11 are two adjacent points per enemy (fighter 0/1). Do not synthesize a

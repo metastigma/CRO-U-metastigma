@@ -68,6 +68,8 @@ int main() {
     // Missing windows: paired secondary gets 0..max(1, hitFrame - 4), solo gets none.
     problems += cr::battleApproachMoveStart(noWindow) != 0;
     problems += cr::battleApproachMoveEnd(noWindow, false, 20) != 0;
+    problems += cr::battleApproachMoveFrame(true, 9, 2.0f) != 9.0f;
+    problems += cr::battleApproachMoveFrame(false, 9, 2.0f) != 2.0f;
     problems += cr::battleApproachMoveEnd(noWindow, true, 20) != 16;
     problems += cr::battleApproachMoveEnd(noWindow, true, 2) != 1;
     problems += cr::battleApproachMoveEnd(invalidWindow, false, 20) != 0;
