@@ -82,11 +82,6 @@ BattlePairSurvivorResolution battlePairSurvivorAction(int kind, int action, int 
     return {action, false};
 }
 
-int battleFixedRepeatCount(int action) {
-    if (action == 234 || action == 239) return 2;
-    if (action == 243) return 6;
-    return 1;
-}
 
 int BattleRules::random(int n) { return (shared_ ? *shared_ : own_).get(n); }
 
