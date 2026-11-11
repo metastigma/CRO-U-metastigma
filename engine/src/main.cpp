@@ -13347,7 +13347,10 @@ void startTurn(App& app) {
         // Resolve before reading Section 13 too, otherwise hit timing and camera cuts
         // are taken from the empty requested slot instead of the animation being played.
         slot = realSlot(lm, slot);
-        if (target >= 0 && t.kind == cr::kCmdAttack) faceFighter(app, *u, target);
+        if (target >= 0 &&
+            (t.kind == cr::kCmdAttack ||
+             (t.kind == cr::kCmdGene && cr::battleActionUsesPhysicalSwing(t.action))))
+            faceFighter(app, *u, target);
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
         const cr::BattleAnim approachAnim = cr::battleApproachAnimation(
             an, app.battleData.anim(u->modelId, 8), t.kind == cr::kCmdGene, opposingTarget);
