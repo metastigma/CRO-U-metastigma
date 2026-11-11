@@ -6,6 +6,19 @@
 int main() {
     int problems = 0;
     const cr::BattleAnim noWindow{};
+    cr::BattleAnim meleeWindow;
+    meleeWindow.moveStart = 4;
+    meleeWindow.moveEnd = 9;
+    const cr::BattleAnim geneApproach = cr::battleApproachAnimation(noWindow, meleeWindow, true, true);
+    const cr::BattleAnim noApproachSelf = cr::battleApproachAnimation(noWindow, meleeWindow, true, false);
+    const cr::BattleAnim noApproachNonGene = cr::battleApproachAnimation(noWindow, meleeWindow, false, true);
+    problems += geneApproach.moveStart != 4 || geneApproach.moveEnd != 9;
+    problems += noApproachSelf.hasMoveWindow();
+    problems += noApproachNonGene.hasMoveWindow();
+    problems += cr::battleCameraDuration(10001, 25) != 25;
+    problems += cr::battleCameraDuration(10002, 25) != 25;
+    problems += cr::battleCameraDuration(10003, 25) != 40;
+    problems += cr::battleCameraDuration(15, 25) != 15;
 
     cr::BattleAnim startsAtZero;
     startsAtZero.moveStart = 0;

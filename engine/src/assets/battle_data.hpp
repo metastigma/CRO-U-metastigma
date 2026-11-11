@@ -61,6 +61,18 @@ struct BattleAnim {
     int loopStart = 0, loopEnd = 0, moveStart = 0, moveEnd = 0, hit = 0, hit2 = 0;
     bool hasMoveWindow() const { return moveEnd > moveStart; }
 };
+// Gene actions with motion=1 may have their own casting clip but no Section 13 move
+// window. The original melee window (slot 8) supplies only the approach timing; the
+// gene's own slot remains responsible for the casting and hit animation.
+inline BattleAnim battleApproachAnimation(const BattleAnim& action, const BattleAnim& melee,
+                                           bool offensiveGene, bool opposingTarget) {
+    return !action.hasMoveWindow() && offensiveGene && opposingTarget ? melee : action;
+}
+// btlcamera_set: raw duration 10001/10002 holds the cast camera; 10003 holds 40 frames.
+inline int battleCameraDuration(int rawDuration, int hold) {
+    if (rawDuration >= 10000 && rawDuration <= 10002) return hold;
+    return rawDuration == 10003 ? 40 : rawDuration;
+}
 // The action's motion flag is stored separately from this model-specific animation row.
 // Both conditions are required: a timing window alone must not make an action approach.
 // Only the second participant in a two-actor attack gets the bounded legacy fallback.

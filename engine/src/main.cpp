@@ -577,7 +577,9 @@ struct App {
             float alpha = 1;
             std::vector<Actor> actors[2];
             cr::Vec3 eye[2], target[2];
-            int cam[2] = {-1, -1};
+            float roll[2] = {};
+            int cam[2] = {-1, -1}, camSets[2] = {};
+            bool camCut = false;
         } between;
         std::map<std::string, LoadedModel> models;
         int frames = 0;
@@ -642,6 +644,12 @@ struct App {
         } result;
         cr::Mat4 vp;                       // the last frame's camera (the damage numbers)
         int cam = -1, camActor = 0, camFrame = 0; // btlcamera_set: the camera, its actor, frames since
+        int camDur = 0, camHold = 25;
+        bool camLive = false, camHeld = false, camSnapped = true;
+        float camEase = 1, camRoll = 0;
+        int camSets = 0;
+        cr::Vec3 camWantEye{488, 12, 555}, camWantTarget{500, 4, 498};
+        cr::Vec3 camEye{488, 12, 555}, camTarget{500, 4, 498};
         std::vector<Effect> effects;       // eff3d: playing effects (32 at most)
         // The voiced releases' battle lines (2.2.0's _btlvoice_*): each fighter's next variant of
         // three (+0xd3), who of a pair speaks this round (+0xd2), the command lines said (+0xafc)
@@ -11367,6 +11375,23 @@ int battleAction(const LoadedModel& lm, int slot) {
     return -1;
 }
 
+// _mdl_set_act_motion_nextanm: an empty or <=3-frame slot advances to the next
+// package-backed built-in action. This resolver is used by skills/items too; it must
+// not substitute a skill's class-9 clip with the normal class-8 attack.
+int realSlot(const LoadedModel& lm, int slot) {
+    int count = 0;
+    for (int i = 0; i < lm.builtin && i < int(lm.actions.size()); ++i) {
+        const std::string& name = lm.actions[size_t(i)].name;
+        if (name.rfind("built-in ", 0) == 0) count = std::max(count, SDL_atoi(name.c_str() + 9));
+    }
+    for (int k = 0; k < count; ++k) {
+        const int candidate = (slot + k) % count;
+        const int action = battleAction(lm, candidate);
+        if (action >= 0 && lm.actions[size_t(action)].duration > 3.0f) return candidate;
+    }
+    return slot;
+}
+
 // _btlanmtbl [8..10] marks which attack clip belongs to this model's package.
 // Resolve a requested shared/missing class to the model's unique package-backed attack clip;
 // if the table is ambiguous or no clip was loaded, keep the original request (no guessing).
@@ -11419,7 +11444,7 @@ App::Battle::Actor* battleActor(App& app, int fighter) {
 // Plays action slot `slot` from its start; `then` >= 0 follows it once it ends (else it loops)
 void playSlot(App& app, App::Battle::Actor& a, int slot, int then = -1) {
     const LoadedModel& lm = app.battle.models[a.model];
-    slot = battleAttackSlot(lm, a.modelId, slot);
+    slot = realSlot(lm, slot);
     a.slot = slot;
     a.action = battleAction(lm, slot);
     if (a.action < 0) { // the model hasn't that one: stand
@@ -11446,45 +11471,95 @@ cr::Vec3 actorHead(App& app, const App::Battle::Actor& a) {
     return a.pos + cr::Vec3{0, (lm.center.y + lm.radius * 0.6f) * a.scaleY, 0};
 }
 
-// btlcamera_set: camera `id` (sys.evt section 15), its values over 9000 relative to fighter `actor`
-void setBattleCamera(App& app, int id, int actor = 0) {
+// btlcamera_set: camera `id` (sys.evt section 15), its timing and target actor.
+void setBattleCamera(App& app, int id, int actor = 0, bool held = false) {
     App::Battle& b = app.battle;
-    if (!app.battleData.camera(id)) return;
+    const cr::BattleCamera* camera = app.battleData.camera(id);
+    if (!camera) return;
+    const int16_t* r = camera->raw;
     b.cam = id;
     b.camActor = actor;
-    b.camFrame = 0;
+    b.camHeld = held;
+    b.camLive = true;
+    ++b.camSets;
+    if ((r[7] != 0 || r[14] != 0) && (actor >= 0 || actor < -98)) {
+        b.camFrame = 0;
+        b.camDur = r[15];
+        if (r[7] == 0) {
+            if (actor < 0) b.camDur = -r[15], b.camActor = 0;
+            b.camDur = cr::battleCameraDuration(b.camDur, b.camHold);
+        }
+    }
 }
 
 cr::Vec3 actorPoint(App& app, const App::Battle::Actor& a, int user);
 
-// btlcamera_prc: the camera's eye and target this frame - still, moving from its first pair of
-// points to its second over raw[15] frames, or turning raw[14] degrees about its target
-void battleCameraView(App& app, cr::Vec3& eye, cr::Vec3& target) {
-    const App::Battle& b = app.battle;
-    const cr::BattleCamera* c = app.battleData.camera(b.cam);
-    if (!c) c = app.battleData.camera(std::max(0, b.formation - 2));
-    if (!c) return;
-    if (const char* o = SDL_getenv("CR_BATTLE_EYE")) { // debugging: "ex ey ez tx ty tz"
-        if (std::sscanf(o, "%f %f %f %f %f %f", &eye.x, &eye.y, &eye.z, &target.x, &target.y, &target.z) == 6) return;
+// btlcamera_prc (the end of btl_main): compute the wanted camera, then ease the shown view.
+void stepBattleCamera(App& app) {
+    App::Battle& b = app.battle;
+    b.camSnapped = false;
+    if (b.camLive) {
+        const cr::BattleCamera* camera = app.battleData.camera(b.cam);
+        if (!camera) { b.camLive = false; return; }
+        const int16_t* r = camera->raw;
+        cr::Vec3 base{0, 0, 0};
+        if (b.camActor >= 0)
+            for (const App::Battle::Actor& a : b.actors)
+                if (a.fighter == b.camActor) base = actorPoint(app, a, 1003);
+        auto rel = [](int v, float at) { return v > 9000 ? float(v - 10000) + at : float(v); };
+        b.camRoll = float(r[6]);
+        if ((r[7] == 0 && r[14] == 0) || b.camActor < 0) {
+            b.camWantEye = {rel(r[0], base.x), rel(r[1], base.y), rel(r[2], base.z)};
+            b.camWantTarget = {rel(r[3], base.x), rel(r[4], base.y), rel(r[5], base.z)};
+            b.camLive = false;
+        } else if (r[7] == 0) {
+            const cr::Vec3 e{rel(r[0], base.x), rel(r[1], base.y), rel(r[2], base.z)};
+            const cr::Vec3 t{rel(r[3], base.x), rel(r[4], base.y), rel(r[5], base.z)};
+            const cr::Vec3 d = t - e;
+            const float dist = std::sqrt(cr::dot(d, d)), flat = std::sqrt(d.x * d.x + d.z * d.z);
+            ++b.camFrame;
+            const float fullTurn = 2.0f * 3.14159265f;
+            float yaw = std::atan2(d.z, d.x) - fullTurn * 0.25f;
+            yaw += float(r[14]) * float(b.camFrame) / float(std::max(1, std::abs(b.camDur))) / 360.0f * fullTurn;
+            const float pitch = std::atan2(d.y, flat);
+            b.camWantTarget = t;
+            b.camWantEye = {t.x + std::sin(yaw) * dist, t.y - std::sin(pitch) * dist, t.z - std::cos(yaw) * dist};
+            if (b.camFrame >= b.camDur) {
+                if (r[15] == 10001 || r[15] == 10002) --b.camFrame;
+                else if (b.cam == 0x48) b.camFrame = 0;
+                else b.camLive = false;
+            }
+        } else {
+            ++b.camFrame;
+            const float k = b.camDur != 0 ? float(b.camFrame) / float(b.camDur) : 1.0f;
+            auto at = [&](int index) { return float(r[index]) + float(r[index + 7] - r[index]) * k; };
+            b.camWantEye = {at(0), at(1), at(2)};
+            b.camWantTarget = {at(3), at(4), at(5)};
+            if (b.cam >= 0x1fe && b.cam <= 0x202) b.camWantEye.y += 6, b.camWantEye.z += 3;
+            b.camRoll = float(r[6]) + float(r[13] - r[6]) * k;
+            if (b.camFrame >= b.camDur) b.camLive = false;
+        }
+        if (!b.camHeld) {
+            const int id = b.cam;
+            if (b.camFrame > 1 && (id < 0x0e || (id >= 0x49 && id <= 0x5c) ||
+                                   (id >= 0x45 && id <= 0x47) || id == 0x21b))
+                b.camEase = 5;
+            else
+                b.camSnapped = true;
+        }
     }
-    const int16_t* r = c->raw;
-    cr::Vec3 base{0, 0, 0};
-    for (const App::Battle::Actor& a : b.actors) // btlcamera_getpos: its node 1003 as it moves (else the actor)
-        if (a.fighter == b.camActor) base = actorPoint(app, a, 1003);
-    auto rel = [](int v, float at) { return v > 9000 ? float(v - 10000) + at : float(v); };
-    eye = {rel(r[0], base.x), rel(r[1], base.y), rel(r[2], base.z)};
-    target = {rel(r[3], base.x), rel(r[4], base.y), rel(r[5], base.z)};
-    const float t = std::min(1.0f, float(b.camFrame) / float(std::max<int>(1, r[15])));
-    if (r[7] != 0) {
-        const cr::Vec3 e2{rel(r[7], base.x), rel(r[8], base.y), rel(r[9], base.z)};
-        const cr::Vec3 t2{rel(r[10], base.x), rel(r[11], base.y), rel(r[12], base.z)};
-        eye = eye + (e2 - eye) * t;
-        target = target + (t2 - target) * t;
-    } else if (r[14] != 0) {
-        const float ang = float(r[14]) * t * 3.14159265f / 180.0f, c0 = std::cos(ang), s0 = std::sin(ang);
-        const float dx = eye.x - target.x, dz = eye.z - target.z;
-        eye.x = target.x + dx * c0 - dz * s0;
-        eye.z = target.z + dx * s0 + dz * c0;
+    if (b.camSnapped) b.camEye = b.camWantEye, b.camTarget = b.camWantTarget;
+    b.camEye = b.camEye + (b.camWantEye - b.camEye) * (1.0f / b.camEase);
+    b.camTarget = b.camTarget + (b.camWantTarget - b.camTarget) * (1.0f / b.camEase);
+}
+
+// The shown eye, target and roll (the roll is applied to the view matrix).
+void battleCameraView(App& app, cr::Vec3& eye, cr::Vec3& target, float* roll = nullptr) {
+    const App::Battle& b = app.battle;
+    eye = b.camEye, target = b.camTarget;
+    if (roll) *roll = b.camRoll;
+    if (const char* o = SDL_getenv("CR_BATTLE_EYE")) {
+        if (std::sscanf(o, "%f %f %f %f %f %f", &eye.x, &eye.y, &eye.z, &target.x, &target.y, &target.z) == 6) return;
     }
 }
 
@@ -13255,11 +13330,13 @@ void startTurn(App& app) {
         }
         if (target >= 0 && t.kind == cr::kCmdAttack) faceFighter(app, *u, target);
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
+        const cr::BattleAnim approachAnim = cr::battleApproachAnimation(
+            an, app.battleData.anim(u->modelId, 8), t.kind == cr::kCmdGene, opposingTarget);
         const bool pairedSecondary = cr::battleApproachPairedSecondary(
             t.kind == cr::kCmdAttack, t.actors[1] >= 0, k);
         const bool actionHasReturn = cr::battleShouldPlayReturn(a ? a->motion : 0, opposingTarget);
         const bool approach = cr::battleApproachEnabled(
-            a ? a->motion : 0, opposingTarget, an, pairedSecondary, inPlace || u->modelId == 0x20);
+            a ? a->motion : 0, opposingTarget, approachAnim, pairedSecondary, inPlace || u->modelId == 0x20);
         const bool playReturn = actionHasReturn && (approach || u->modelId == 0x20);
         if ((t.kind == cr::kCmdGene || t.kind == cr::kCmdItem) && !approach) {
             // _btlact_gene/item_init: run the cast motion to its loop point, then loop that
@@ -13302,8 +13379,8 @@ void startTurn(App& app) {
                     u->to = tv->home + cr::Vec3{d.x / len * reach, 0, d.z / len * reach};
                     if (k == 1) u->to = u->to + cr::Vec3{d.z / len * 18, 0, -d.x / len * 18};
                 }
-                u->moveFrom = cr::battleApproachMoveStart(an);
-                u->moveTo = cr::battleApproachMoveEnd(an, pairedSecondary, b.hitFrame);
+                u->moveFrom = cr::battleApproachMoveStart(approachAnim);
+                u->moveTo = cr::battleApproachMoveEnd(approachAnim, pairedSecondary, b.hitFrame);
             }
         }
     }
@@ -13819,7 +13896,6 @@ void stepBattle(App& app) {
     App::Battle& b = app.battle;
     ++b.frames;
     ++b.phaseFrames;
-    ++b.camFrame;
     stepEffects(app);
     stepSceneEffects(app);
     for (App::Battle::Actor& a : b.actors) {
@@ -13883,6 +13959,7 @@ void stepBattle(App& app) {
     battletalk::rules(app);
     if (app.game.flag(battletalk::kFlag)) { // a talk: the script runs (its fades with it), the battle waits
         battletalk::step(app);
+        stepBattleCamera(app);
         stepQuake(app);
         stepFlash(app);
         return;
@@ -14023,6 +14100,7 @@ void stepBattle(App& app) {
         break;
     default: break;
     }
+    stepBattleCamera(app); // btlcamera_prc: camera animation and easing, after the battle frame
     stepQuake(app); // gameapp_prc: UpdateQuake and PutMask after the battle's frame
     stepFlash(app);
 }
@@ -14074,9 +14152,10 @@ void drawBattle(App& app, float dt) {
     const float W = r.screenW(), H = cr::Renderer::kLogicalH; // 3D across the whole screen
     auto record = [&](int side) { // (the step's start or end: Battle::Between)
         b.between.actors[side] = b.actors;
-        b.between.eye[side] = {488, 12, 555}, b.between.target[side] = {500, 4, 498};
-        battleCameraView(app, b.between.eye[side], b.between.target[side]);
+        battleCameraView(app, b.between.eye[side], b.between.target[side], &b.between.roll[side]);
         b.between.cam[side] = b.cam;
+        b.between.camSets[side] = b.camSets;
+        if (side == 1) b.between.camCut = b.camSnapped && b.between.camSets[0] != b.camSets;
         b.between.valid = side == 1;
     };
     for (b.clock += dt; b.clock >= 1.0f / kFramesPerSecond && b.active; b.clock -= 1.0f / kFramesPerSecond) {
@@ -14092,12 +14171,15 @@ void drawBattle(App& app, float dt) {
     drawSpaceBackdrop(app, true); // ScnEffectProc runs in battles too: the Space backdrop at the back
     r.setOrigin(0);
     cr::Vec3 eye{488, 12, 555}, target{500, 4, 498};
-    battleCameraView(app, eye, target);
-    // (between steps: where the camera is by then, unless the step cut to another)
-    const bool camBetween = bt.valid && bt.cam[0] == bt.cam[1] && bt.cam[1] == b.cam && same(eye, bt.eye[1]) && same(target, bt.target[1]);
+    float roll = 0;
+    battleCameraView(app, eye, target, &roll);
+    // Interpolate only when this simulation frame did not cut to a new camera.
+    const bool camBetween = bt.valid && !bt.camCut && bt.camSets[1] == b.camSets &&
+                            same(eye, bt.eye[1]) && same(target, bt.target[1]);
     if (camBetween) {
         eye = lerp(bt.eye[0], bt.eye[1], bk);
         target = lerp(bt.target[0], bt.target[1], bk);
+        roll = bt.roll[0] + (bt.roll[1] - bt.roll[0]) * bk;
     }
     if (SDL_getenv("CR_BETWEEN_DEBUG"))
         std::printf("battle frame: valid %d alpha %.2f camera %s (cam %d %d now %d)\n", int(bt.valid), bt.alpha, camBetween ? "between" : "as is",
@@ -14106,7 +14188,15 @@ void drawBattle(App& app, float dt) {
     // btl_prc: the quake shifts the frustum by its offset in the 1024 x 768 screen's pixels
     proj.m[8] -= 2.0f * b.quake.off[0] / W;
     proj.m[9] -= 2.0f * b.quake.off[1] / H;
-    const cr::Mat4 vp = proj * cr::Mat4::lookAt(eye, target, {0, 1, 0});
+    cr::Mat4 view = cr::Mat4::lookAt(eye, target, {0, 1, 0});
+    if (roll != 0) {
+        const float angle = -roll * 3.14159265f / 180.0f;
+        cr::Mat4 rz;
+        rz.m[0] = std::cos(angle), rz.m[1] = std::sin(angle);
+        rz.m[4] = -std::sin(angle), rz.m[5] = std::cos(angle);
+        view = rz * view;
+    }
+    const cr::Mat4 vp = proj * view;
     b.vp = vp;
     r.setCamera(kBattleNear, kBattleFar, app.battle.fov * 3.14159265f / 180.0f);
     if (r.vitaScreen()) r.begin3D(); // (CRView: the Vita's whole screen)
