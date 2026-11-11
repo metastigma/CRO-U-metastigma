@@ -11613,6 +11613,7 @@ void cameraForTurn(App& app, const cr::BattleTurn& t) {
 
 // The camera on a gene's or item's user (or the pair) as it casts
 void castCamera(App& app, int kind, int user, bool userPair) {
+    app.battle.camHold = 25; // original _btlact_gene_init / _btlact_item_init (+0xae8)
     const int first = kind == cr::kCmdItem ? 0x53 : 0x49;
     if (user < 2) setBattleCamera(app, userPair ? first + 2 : first + user, userPair ? 0 : user);
     else if (monsterSize(app, user) == 1) setBattleCamera(app, userPair ? first + 5 : user + first + 1, user);
@@ -13322,12 +13323,12 @@ void startTurn(App& app) {
     for (int k = 0; k < 2; ++k) {
         App::Battle::Actor* u = t.actors[k] >= 0 ? battleActor(app, t.actors[k]) : nullptr;
         if (!u) continue;
+        const LoadedModel& lm = b.models[u->model];
         int slot = a && a->cls >= 8 && a->cls < cr::kBattleAnimSlots ? a->cls : 8;
         bool inPlace = false;
         if (t.kind == cr::kCmdAttack) {
             const int fighter = t.actors[k];
             const int character = fighter >= 0 && fighter < 5 ? b.rules.f[size_t(fighter)].character : -1;
-            const LoadedModel& lm = b.models[u->model];
             const int nine = battleAction(lm, 9);
             const bool hasLongSlot9 = nine >= 0 && lm.actions[size_t(nine)].duration - 1 > 3;
             const cr::BattleAttackMotion motion = cr::battleAttackMotion(
@@ -13337,6 +13338,10 @@ void startTurn(App& app) {
             inPlace = motion.inPlace;
             slot = battleAttackSlot(lm, u->modelId, slot);
         }
+        // playSlot resolves missing/short package motions to the real built-in clip.
+        // Resolve before reading Section 13 too, otherwise hit timing and camera cuts
+        // are taken from the empty requested slot instead of the animation being played.
+        slot = realSlot(lm, slot);
         if (target >= 0 && t.kind == cr::kCmdAttack) faceFighter(app, *u, target);
         const cr::BattleAnim an = app.battleData.anim(u->modelId, slot);
         const cr::BattleAnim approachAnim = cr::battleApproachAnimation(
