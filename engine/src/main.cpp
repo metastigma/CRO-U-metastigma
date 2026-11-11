@@ -14084,7 +14084,7 @@ void stepBattle(App& app) {
                             continue;
                         }
                         playSlot(app, *caster, btlui::kSlotReturn, btlui::kSlotIdle);
-                        const cr::BattleAnim ret = app.battleData.anim(caster->modelId, btlui::kSlotReturn);
+                        const cr::BattleAnim ret = app.battleData.anim(caster->modelId, caster->slot);
                         if (ret.hasMoveWindow()) {
                             caster->from = caster->pos;
                             caster->to = caster->home;
