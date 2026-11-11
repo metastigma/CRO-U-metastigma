@@ -7,6 +7,12 @@ int main() {
     int problems = 0;
     const cr::BattleAnim noWindow{};
 
+    cr::BattleAnim chocolateCast;
+    chocolateCast.loopStart = 23;
+    chocolateCast.loopEnd = 40;
+    problems += cr::battleCastHitFrame(chocolateCast) != 53;
+    problems += cr::battleCastHitFrame(noWindow) != 30;
+
     cr::BattleAnim startsAtZero;
     startsAtZero.moveStart = 0;
     startsAtZero.moveEnd = 12;

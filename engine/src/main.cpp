@@ -13229,8 +13229,17 @@ void startTurn(App& app) {
         const bool approach = cr::battleApproachEnabled(
             a ? a->motion : 0, opposingTarget, an, pairedSecondary, inPlace || u->modelId == 0x20);
         const bool playReturn = actionHasReturn && (approach || u->modelId == 0x20);
-        playSlot(app, *u, slot, playReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
-        if (k == 0) b.hitFrame = an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
+        // _btlact_gene_init / _btlact_item_init: keep the cast motion alive until the impact.
+        const bool loopCast = (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem) && !approach;
+        if (loopCast) {
+            playSlot(app, *u, slot, -1);
+            const cr::BattleAnim cast = app.battleData.anim(u->modelId, u->slot);
+            if (cast.loopEnd > cast.loopStart) u->loopFrom = cast.loopStart, u->loopTo = cast.loopEnd;
+        } else
+            playSlot(app, *u, slot, playReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
+        if (k == 0) b.hitFrame = (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem)
+                                      ? cr::battleCastHitFrame(an)
+                                      : an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
         u->moveFrom = u->moveTo = 0;
         if (approach) { // btlmove_setpos: the formation defines the exact approach point per target
             const App::Battle::Actor* tv = battleActor(app, target);

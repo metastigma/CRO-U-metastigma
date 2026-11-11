@@ -61,6 +61,9 @@ struct BattleAnim {
     int loopStart = 0, loopEnd = 0, moveStart = 0, moveEnd = 0, hit = 0, hit2 = 0;
     bool hasMoveWindow() const { return moveEnd > moveStart; }
 };
+// _btlact_gene_init / _btlact_item_init: the impact lands 30 frames after the cast loop begins.
+inline int battleCastHitFrame(const BattleAnim& animation) { return animation.loopStart + 30; }
+
 // The action's motion flag is stored separately from this model-specific animation row.
 // Both conditions are required: a timing window alone must not make an action approach.
 // Only the second participant in a two-actor attack gets the bounded legacy fallback.
