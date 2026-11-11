@@ -11598,17 +11598,40 @@ void cameraForTarget(App& app, int target, bool group, bool cursor = false) {
 
 void castCamera(App& app, int kind, int user, bool userPair);
 
+// A hostile single-target gene uses the same rear-side battle shot as a physical
+// attack. Do not split it into a caster close-up and a target close-up at impact.
+bool geneUsesAttackCamera(const App& app, const cr::BattleTurn& t, int target) {
+    if (t.kind != cr::kCmdGene || target < 0 || t.actors[0] < 0) return false;
+    const cr::BattleActionDef* a = app.battleActions.get(t.action);
+    return a && a->hostile && !app.battle.rules.isGroupScope(*a) &&
+           ((t.actors[0] < 2) != (target < 2));
+}
+
 void cameraForTurn(App& app, const cr::BattleTurn& t) {
     App::Battle& b = app.battle;
     const int user = t.actors[0], target = t.hits.empty() ? -1 : t.hits[0].target;
     const bool userPair = t.actors[1] >= 0;
-    if (t.kind == cr::kCmdAttack && target >= 0 && (user < 2) != (target < 2)) {
-        if (user < 2) setBattleCamera(app, enemyCameraSlot(app, target) * 3 + 0x1b0 + (userPair ? 2 : user));
-        else if (!userPair) setBattleCamera(app, b.rules.random(3) + enemyCameraSlot(app, user) * 4 + (target == 0 ? 0x78 : 0xe0));
-        else setBattleCamera(app, b.rules.random(3) + enemyCameraSlot(app, user) * 4 + 0x148);
+    const bool rearAttackView = t.kind == cr::kCmdAttack || geneUsesAttackCamera(app, t, target);
+    if (rearAttackView && target >= 0 && (user < 2) != (target < 2)) {
+        // _btlact_attack_init: use the original enemy-slot camera table and variant.
+        // Drawn even when the party is the target, as in the Vita action setup.
+        int variant = b.rules.random(3);
+        if (b.rules.group == 0x22d || b.rules.group == 0x292) {
+            variant = b.rules.random(2);
+            variant += variant == 1;
+        }
+        if (target < 2) {
+            const int slot = b.rules.enemyPair ? 0x19 : enemyCameraSlot(app, user);
+            setBattleCamera(app, slot * 3 +
+                                  (b.rules.pair ? 0x1b2 : target == 0 ? 0x1b0 : 0x1b1));
+        } else {
+            setBattleCamera(app, enemyCameraSlot(app, target) * 4 + variant +
+                                  (b.rules.pair ? 0x148 : user == 0 ? 0x78 : 0xe0));
+        }
         return;
     }
-    if (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem || t.kind == cr::kCmdAttack) castCamera(app, t.kind, user, userPair);
+    if (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem || t.kind == cr::kCmdAttack)
+        castCamera(app, t.kind, user, userPair);
 }
 
 // The camera on a gene's or item's user (or the pair) as it casts
@@ -14078,9 +14101,13 @@ void stepBattle(App& app) {
                                       !b.stageAction && !b.turn.cancelled;
                 if (genelike && !cr::battleKeepTargetCameraOnRepeat(b.turn.kind, b.turn.action, b.turn.repeat)) {
                     const std::vector<int> targets = turnTargets(b.turn);
-                    hitCamera(app, b.turn,
-                              b.turn.barriers.empty() ? (targets.empty() ? -1 : targets[0]) : b.turn.actors[0],
-                              !b.turn.barriers.empty());
+                    const int impactTarget =
+                        b.turn.barriers.empty() ? (targets.empty() ? -1 : targets[0]) : b.turn.actors[0];
+                    // Keep the initial rear-side shot for a hostile single-target gene.
+                    // A barrier reflection is a new direction of attack and retains its own view.
+                    if (!b.turn.barriers.empty() ||
+                        !geneUsesAttackCamera(app, b.turn, impactTarget))
+                        hitCamera(app, b.turn, impactTarget, !b.turn.barriers.empty());
                 }
                 showHits(app);
                 if (genelike) {
