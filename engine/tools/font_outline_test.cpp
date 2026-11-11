@@ -34,6 +34,9 @@ int main() {
     if (alphaAt(edge, 4, 3) != 127) return fail("antialiased edge coverage was not preserved") ? 0 : 1;
     if (alphaAt(edge, 5, 3) != 255) return fail("outline did not reach the requested radius") ? 0 : 1;
     if (alphaAt(edge, 5, 5) != 0) return fail("outline exceeded its circular radius") ? 0 : 1;
-    if (alphaAt(edge, 6, 3) != 0) return fail("outline extended beyond its radius") ? 0 : 1;
+    // The antialiased source pixel at (4, 3) is exactly two pixels from (6, 3),
+    // so its 128 coverage must extend to that radius; the diagonal is outside it.
+    if (alphaAt(edge, 6, 3) != 128) return fail("antialiased coverage did not reach the outline radius") ? 0 : 1;
+    if (alphaAt(edge, 6, 5) != 0) return fail("outline extended beyond its circular radius") ? 0 : 1;
     return 0;
 }
