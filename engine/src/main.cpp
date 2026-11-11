@@ -6115,8 +6115,6 @@ void campChoose(App& app) {
         }
         return;
     }
-}
-}
 
 void campKey(App& app, SDL_Keycode key) {
     App::Camp& c = app.camp;
@@ -6346,45 +6344,60 @@ void drawCampScrollBar(cr::MenuPainter& m, int top, int n, float a) {
 
 // ComUty_GeneBoardDraw at (x, y): the plate's name, its picture (gene_m*c.mct), "n / 6" known, then
 // its abilities and skills (unknown ones as ???)
-void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, float a) {
+void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, float a, int mode = 1) {
     if (!cr::isPlate(plate)) return;
-    const float dark[4] = {0, 0, 0, 0.6f * a}, white[4] = {1, 1, 1, 0.85f * a}, clear[4] = {1, 1, 1, 0};
-    m.quad(x, y, 163, 236, dark, dark);
+    const float white[4] = {1, 1, 1, a};
+    m.quad(x, y, 163, 16, white, white);
     const std::string name = itemName(app, plate);
-    m.textCentred(name, x + (163 - m.textWidth(name, 14)) / 2, y + 10, false, a, 14);
-    m.quad(x, y + 24, 163, 16, white, clear);
+    m.textCentred(name, x + (163 - m.textWidth(name, 14)) / 2, y + 8, true, a, 14);
+    m.quad(x, y + 24, 163, 16, white, white);
     m.picture(95, x + 24, y + 27, a);
     drawShopNumber(m, cr::plateLearned(app.game, plate), x + 90, y + 24, 1, 12, a, 2);
-    m.picture(65, x + 102, y + 24, a);
+    m.picture(65, x + 102, y + 27, a);
     drawShopNumber(m, 6, x + 114, y + 24, 1, 12, a, 2);
-    // __MuCamp_GeneTexRead (_gkpachGenePlateImage): gene_m001c..m007c, then m201c..m224c
     static const std::array<std::string, cr::kPlates> kArt = [] {
-        std::array<std::string, cr::kPlates> a;
-        char name[32];
+        std::array<std::string, cr::kPlates> names;
+        char file[32];
         for (int i = 0; i < cr::kPlates; ++i) {
-            std::snprintf(name, sizeof name, "gene_m%03dc.mct", i < 7 ? i + 1 : 201 + i - 7);
-            a[size_t(i)] = name;
+            std::snprintf(file, sizeof file, "gene_m%03dc.mct", i < 7 ? i + 1 : 201 + i - 7);
+            names[size_t(i)] = file;
         }
-        return a;
+        return names;
     }();
     cr::Texture& art = app.camp.plateArt[size_t(plate - cr::kFirstPlate)];
     if (!art.id) {
         cr::Image img;
         if (loadImage(app, kArt[size_t(plate - cr::kFirstPlate)].c_str(), img)) art = app.renderer.upload(img);
     }
-    if (art.id) { // the picture fitted into 76 x 76 under the bar
-        const float w = float(art.width), h = float(art.height), k = std::min(76 / std::max(w, 1.0f), 76 / std::max(h, 1.0f));
-        m.image(art, x + (163 - w * k) / 2, y + 44, w * k, h * k, a);
+    if (mode == 2) {
+        if (art.id) {
+            const float w = float(art.width), h = float(art.height);
+            const float k = std::min(1.0f, std::min(128 / std::max(w, 1.0f), 128 / std::max(h, 1.0f)));
+            m.image(art, x + 12, y + 68, w * k, h * k, a);
+        }
+        return;
     }
-    float ly = y + 126;
-    for (int e : cr::plateContents(plate)) {
-        if (e <= 0) continue;
-        const bool known = ownedCount(app, e) > 0;
-        m.text(known ? itemName(app, e) : std::string("???"), x + 12, ly, false, known ? a : a * 0.5f, 12);
-        m.text(cr::isSkill(e) ? "Skill" : "Gene", x + 124, ly + 1, false, a * 0.55f, 10);
+    float ly = y + 75;
+    int shown = 0;
+    for (int entry : cr::plateContents(plate)) {
+        if (entry <= 0 || ownedCount(app, entry) <= 0 || shown >= 6) continue;
+        const std::string entryName = itemName(app, entry);
+        m.text(entryName, x + 12 + (128 - m.textWidth(entryName, 12)) / 2, ly, false, a, 12);
         ly += 18;
+        ++shown;
     }
 }
+
+void drawGeneAbilityRow(App& app, cr::MenuPainter& m, float x, float y, int it, int ch, bool lit, float a) {
+    drawCampRow(app, m, x, y, it, 0, lit, a);
+    if (cr::isSkill(it)) return;
+    const cr::BattleActionDef* act = app.battleActions.get(cr::geneAction(it));
+    if (!act) return;
+    const int cost = ch >= 0 && ch < cr::kCharacters && cr::hasSkill(app.game, ch, 132) ? act->mp / 2 : act->mp;
+    m.picture(27, x + 188, y + 34, a);
+    drawShopNumber(m, cost, x + 218, y + 30, 3, 10, a, 0);
+}
+
 
 // Convert the virtual finger's frame pixels to MenuPainter units. MenuPainter doubles these
 // units when drawing; keeping the pointer in screen pixels here would double its displacement.
