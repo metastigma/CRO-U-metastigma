@@ -138,6 +138,7 @@ void MenuPainter::textTint(const std::string& s, float x, float y, float r, floa
     if (!r_ || s.empty() || alpha <= 0.001f) return;
     Cached& c = rasterise(s, size * K());
     if (!c.tex.id) return;
+    edge(c.tex, x, y, c.w, c.h, r + g + b > 0.01f ? 0.0f : 1.0f, alpha); // colour text is edged black
     r_->drawQuad(c.tex, X(x) * kScale, Y(y) * kScale, c.w, c.h, r, g, b, alpha);
 }
 
