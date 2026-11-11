@@ -14284,13 +14284,9 @@ void drawFieldShadows(App& app, const cr::Mat4& vp) {
         shownNpc(app, draw, world, alpha);
         if (alpha <= 0.001f) continue;
 
-        std::vector<cr::Mat4> pose;
-        if (npc.shadow[3] >= 0 && !model.cpu.skeleton.nodes.empty()) {
-            const cr::Action* action = draw.action >= 0 && draw.action < int(model.actions.size())
-                                           ? &model.actions[size_t(draw.action)] : nullptr;
-            cr::computeWorld(model.cpu.skeleton, action, draw.time, pose);
-        }
-        addModelShadow(app, model, pose, world, float(npc.shadow[1]), float(npc.shadow[2]), npc.shadow[3], alpha);
+        // drawNpcs has already evaluated this model's current action into model.world.
+        // Reuse the exact pose so the head-anchored shadow tracks the visible animation.
+        addModelShadow(app, model, model.world, world, float(npc.shadow[1]), float(npc.shadow[2]), npc.shadow[3], alpha);
     }
     drawShadowFans(app, app.fieldShadows, app.fieldShadowTris, app.fieldShadowAlpha, vp);
 }
