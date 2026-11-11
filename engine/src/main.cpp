@@ -13303,7 +13303,8 @@ void startTurn(App& app) {
         startStaged(app, a);
         return;
     }
-    cameraForTurn(app, t);
+    const bool keepMultiHitCamera = cr::battleKeepTargetCameraOnRepeat(t.kind, t.action, t.repeat);
+    if (!keepMultiHitCamera) cameraForTurn(app, t); // btlact_gene_init: camera is set once for the full multi-hit action
     if (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem) // btlact_gene_init / item_init: the casting glow
         for (int k : t.actors)
             if (k >= 0) spawnEffect(app, effects::kCast, k);
@@ -14070,11 +14071,12 @@ void stepBattle(App& app) {
                     if (App::Battle::Actor* u = k >= 0 ? battleActor(app, k) : nullptr) playSlot(app, *u, btlui::kSlotIdle, btlui::kSlotIdle);
                 b.bounceAt = b.turnFrame + 40;
                 b.hitFrame = b.bounceAt + 30;
-                hitCamera(app, b.turn, b.turn.barriers[0], false); // the barrier itself is the first target
+                if (!cr::battleKeepTargetCameraOnRepeat(b.turn.kind, b.turn.action, b.turn.repeat))
+                    hitCamera(app, b.turn, b.turn.barriers[0], false); // the barrier itself is the first target
             } else {
                 const bool genelike = (b.turn.kind == cr::kCmdGene || b.turn.kind == cr::kCmdItem) &&
                                       !b.stageAction && !b.turn.cancelled;
-                if (genelike) {
+                if (genelike && !cr::battleKeepTargetCameraOnRepeat(b.turn.kind, b.turn.action, b.turn.repeat)) {
                     const std::vector<int> targets = turnTargets(b.turn);
                     hitCamera(app, b.turn,
                               b.turn.barriers.empty() ? (targets.empty() ? -1 : targets[0]) : b.turn.actors[0],

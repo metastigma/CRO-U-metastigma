@@ -1,10 +1,17 @@
 #include "assets/battle_data.hpp"
+#include "game/battle_rules.hpp"
 #include "game/stage_tables.hpp"
 
 #include <cstdio>
 
 int main() {
     int problems = 0;
+    problems += !cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 234, true);
+    problems += !cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 239, true);
+    problems += !cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 243, true);
+    problems += cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 234, false);
+    problems += cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 233, true);
+    problems += cr::battleKeepTargetCameraOnRepeat(cr::kCmdAttack, 234, true);
     const cr::BattleAnim noWindow{};
     cr::BattleAnim meleeWindow;
     meleeWindow.moveStart = 4;
