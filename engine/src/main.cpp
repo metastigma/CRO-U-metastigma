@@ -13337,6 +13337,11 @@ void startTurn(App& app) {
             slot = motion.slot;
             inPlace = motion.inPlace;
             slot = battleAttackSlot(lm, u->modelId, slot);
+        } else if (t.kind == cr::kCmdGene && cr::battleActionUsesPhysicalSwing(t.action)) {
+            // Twin Lunar Lion's class 9 is absent from j001/j002. Resolve it through
+            // the original _btlanmtbl [8..10] package table, which selects their slot-8
+            // physical swing instead of letting realSlot wrap into an unrelated pose.
+            slot = battleAttackSlot(lm, u->modelId, slot);
         }
         // playSlot resolves missing/short package motions to the real built-in clip.
         // Resolve before reading Section 13 too, otherwise hit timing and camera cuts
@@ -13368,10 +13373,14 @@ void startTurn(App& app) {
             u->returnAfterHit = playReturn;
         } else
             playSlot(app, *u, slot, playReturn ? btlui::kSlotReturn : btlui::kSlotIdle);
-        if (k == 0)
-            b.hitFrame = (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem)
-                             ? an.loopStart + 30
-                             : an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
+        if (k == 0) {
+            const bool physicalGeneSwing = t.kind == cr::kCmdGene && cr::battleActionUsesPhysicalSwing(t.action);
+            b.hitFrame = physicalGeneSwing
+                             ? (an.hit > 0 ? an.hit : 18)
+                             : (t.kind == cr::kCmdGene || t.kind == cr::kCmdItem)
+                                   ? an.loopStart + 30
+                                   : an.hit > 0 ? an.hit : t.kind == cr::kCmdAttack ? 18 : 30;
+        }
         u->moveFrom = u->moveTo = 0;
         if (approach) { // btlmove_setpos: the formation defines the exact approach point per target
             const App::Battle::Actor* tv = battleActor(app, target);

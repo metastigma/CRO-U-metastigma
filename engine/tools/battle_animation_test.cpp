@@ -69,6 +69,10 @@ int main() {
     problems += cr::battleApproachMoveStart(noWindow) != 0;
     problems += cr::battleApproachMoveEnd(noWindow, false, 20) != 0;
     problems += cr::battleApproachMoveFrame(true, 9, 2.0f) != 9.0f;
+    problems += !cr::battleActionUsesPhysicalSwing(234);
+    problems += !cr::battleActionUsesPhysicalSwing(239);
+    problems += cr::battleActionUsesPhysicalSwing(233);
+    problems += cr::battleActionUsesPhysicalSwing(243);
     problems += cr::battleApproachMoveFrame(false, 9, 2.0f) != 2.0f;
     problems += cr::battleApproachMoveEnd(noWindow, true, 20) != 16;
     problems += cr::battleApproachMoveEnd(noWindow, true, 2) != 1;

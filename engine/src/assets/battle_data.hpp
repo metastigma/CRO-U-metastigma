@@ -68,6 +68,12 @@ inline BattleAnim battleApproachAnimation(const BattleAnim& action, const Battle
                                            bool offensiveGene, bool opposingTarget) {
     return !action.hasMoveWindow() && offensiveGene && opposingTarget ? melee : action;
 }
+// The Berserker Gene's Twin Lunar Lion (sys.evt actions 234 / 239) is a physical
+// two-hit move. Its class-9 request is not a magic cast: j001/j002 have no slot 9,
+// but their Section 13 package tables provide the normal physical swing in slot 8.
+inline bool battleActionUsesPhysicalSwing(int action) {
+    return action == 234 || action == 239;
+}
 // btlcamera_set: raw duration 10001/10002 holds the cast camera; 10003 holds 40 frames.
 inline int battleCameraDuration(int rawDuration, int hold) {
     if (rawDuration >= 10000 && rawDuration <= 10002) return hold;
