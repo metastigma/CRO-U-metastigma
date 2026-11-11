@@ -11611,7 +11611,9 @@ void cameraForTurn(App& app, const cr::BattleTurn& t) {
     App::Battle& b = app.battle;
     const int user = t.actors[0], target = t.hits.empty() ? -1 : t.hits[0].target;
     const bool userPair = t.actors[1] >= 0;
-    const bool rearAttackView = t.kind == cr::kCmdAttack || geneUsesAttackCamera(app, t, target);
+    const bool offensiveGeneView = geneUsesAttackCamera(app, t, target);
+    const bool rearAttackView = t.kind == cr::kCmdAttack || offensiveGeneView;
+    if (offensiveGeneView) b.camHold = 25; // match _btlact_gene_init's camera hold
     if (rearAttackView && target >= 0 && (user < 2) != (target < 2)) {
         // _btlact_attack_init: use the original enemy-slot camera table and variant.
         // Drawn even when the party is the target, as in the Vita action setup.
