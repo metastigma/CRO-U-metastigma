@@ -6115,6 +6115,7 @@ void campChoose(App& app) {
         }
         return;
     }
+}
 
 void campKey(App& app, SDL_Keycode key) {
     App::Camp& c = app.camp;
