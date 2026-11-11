@@ -7997,7 +7997,7 @@ void drawCamp(App& app) {
     auto helpBoard = [&](int it) {
         if (it <= 0) return;
         right();
-        drawHelpWindow(app, m, it, ease);
+        drawHelpWindow(app, m, it, ease, 480 * (1 - ease)); // MuScrList HELP panel slides in from the right
         left();
     };
     switch (c.page) {
