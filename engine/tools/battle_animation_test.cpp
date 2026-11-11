@@ -1,11 +1,31 @@
 #include "assets/battle_data.hpp"
+#include "game/battle_rules.hpp"
 #include "game/stage_tables.hpp"
 
 #include <cstdio>
 
 int main() {
     int problems = 0;
+    problems += !cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 234, true);
+    problems += !cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 239, true);
+    problems += !cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 243, true);
+    problems += cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 234, false);
+    problems += cr::battleKeepTargetCameraOnRepeat(cr::kCmdGene, 233, true);
+    problems += cr::battleKeepTargetCameraOnRepeat(cr::kCmdAttack, 234, true);
     const cr::BattleAnim noWindow{};
+    cr::BattleAnim meleeWindow;
+    meleeWindow.moveStart = 4;
+    meleeWindow.moveEnd = 9;
+    const cr::BattleAnim geneApproach = cr::battleApproachAnimation(noWindow, meleeWindow, true, true);
+    const cr::BattleAnim noApproachSelf = cr::battleApproachAnimation(noWindow, meleeWindow, true, false);
+    const cr::BattleAnim noApproachNonGene = cr::battleApproachAnimation(noWindow, meleeWindow, false, true);
+    problems += geneApproach.moveStart != 4 || geneApproach.moveEnd != 9;
+    problems += noApproachSelf.hasMoveWindow();
+    problems += noApproachNonGene.hasMoveWindow();
+    problems += cr::battleCameraDuration(10001, 25) != 25;
+    problems += cr::battleCameraDuration(10002, 25) != 25;
+    problems += cr::battleCameraDuration(10003, 25) != 40;
+    problems += cr::battleCameraDuration(15, 25) != 15;
 
     cr::BattleAnim startsAtZero;
     startsAtZero.moveStart = 0;
@@ -55,6 +75,12 @@ int main() {
     // Missing windows: paired secondary gets 0..max(1, hitFrame - 4), solo gets none.
     problems += cr::battleApproachMoveStart(noWindow) != 0;
     problems += cr::battleApproachMoveEnd(noWindow, false, 20) != 0;
+    problems += cr::battleApproachMoveFrame(true, 9, 2.0f) != 9.0f;
+    problems += !cr::battleActionUsesPhysicalSwing(234);
+    problems += !cr::battleActionUsesPhysicalSwing(239);
+    problems += cr::battleActionUsesPhysicalSwing(233);
+    problems += cr::battleActionUsesPhysicalSwing(243);
+    problems += cr::battleApproachMoveFrame(false, 9, 2.0f) != 2.0f;
     problems += cr::battleApproachMoveEnd(noWindow, true, 20) != 16;
     problems += cr::battleApproachMoveEnd(noWindow, true, 2) != 1;
     problems += cr::battleApproachMoveEnd(invalidWindow, false, 20) != 0;

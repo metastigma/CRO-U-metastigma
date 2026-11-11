@@ -61,6 +61,24 @@ struct BattleAnim {
     int loopStart = 0, loopEnd = 0, moveStart = 0, moveEnd = 0, hit = 0, hit2 = 0;
     bool hasMoveWindow() const { return moveEnd > moveStart; }
 };
+// Gene actions with motion=1 may have their own casting clip but no Section 13 move
+// window. The original melee window (slot 8) supplies only the approach timing; the
+// gene's own slot remains responsible for the casting and hit animation.
+inline BattleAnim battleApproachAnimation(const BattleAnim& action, const BattleAnim& melee,
+                                           bool offensiveGene, bool opposingTarget) {
+    return !action.hasMoveWindow() && offensiveGene && opposingTarget ? melee : action;
+}
+// The Berserker Gene's Twin Lunar Lion (sys.evt actions 234 / 239) is a physical
+// two-hit move. Its class-9 request is not a magic cast: j001/j002 have no slot 9,
+// but their Section 13 package tables provide the normal physical swing in slot 8.
+inline bool battleActionUsesPhysicalSwing(int action) {
+    return action == 234 || action == 239;
+}
+// btlcamera_set: raw duration 10001/10002 holds the cast camera; 10003 holds 40 frames.
+inline int battleCameraDuration(int rawDuration, int hold) {
+    if (rawDuration >= 10000 && rawDuration <= 10002) return hold;
+    return rawDuration == 10003 ? 40 : rawDuration;
+}
 // The action's motion flag is stored separately from this model-specific animation row.
 // Both conditions are required: a timing window alone must not make an action approach.
 // Only the second participant in a two-actor attack gets the bounded legacy fallback.
@@ -83,6 +101,11 @@ inline int battleApproachMoveStart(const BattleAnim& animation) {
 inline int battleApproachMoveEnd(const BattleAnim& animation, bool pairedSecondary, int hitFrame) {
     if (animation.hasMoveWindow()) return animation.moveEnd;
     return pairedSecondary ? std::max(1, hitFrame - 4) : 0;
+}
+// A borrowed move window belongs to the battle action, not the cast clip's
+// independent animation loop. Keep its progress on the action clock.
+inline float battleApproachMoveFrame(bool useTurnClock, int turnFrame, float animationFrame) {
+    return useTurnClock ? float(turnFrame) : animationFrame;
 }
 // read_btlcpl / btlact_attack_init: formation approach points are target-specific.
 // Slots 3..5 are the solo approach points for enemy fighters 2..4; in pair mode
