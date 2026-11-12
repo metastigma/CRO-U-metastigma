@@ -19,6 +19,7 @@ public:
         r_ = &r;
         sheet_ = &sheet;
         font_ = font;
+        clipY_ = false;
     }
     void release(Renderer& r); // the cached text
     // Everything drawn after this is scaled by k about (x, y) (our denser Options pages draw
@@ -32,6 +33,8 @@ public:
     // Draw a single clean outline around text. Disabled by default; callers enable it only
     // for the original Help board, leaving ordinary menu labels unchanged.
     void setOutline(bool on) { outline_ = on; }
+    void setClip(float y0, float y1) { clipY_ = true; clipTop_ = Y(y0) * 2.0f; clipBottom_ = Y(y1) * 2.0f; }
+    void clearClip() { clipY_ = false; }
 
     // A piece of window_hd at (x, y): its sheet rectangle in menu units (u, v, w, h)
     void piece(float x, float y, float u, float v, float w, float h, float alpha = 1, float r = 1, float g = 1, float b = 1);
@@ -103,6 +106,23 @@ private:
     std::map<std::string, Cached> text_;
     Texture white_;
     bool outline_ = false;
+    bool clipY_ = false;
+    float clipTop_ = 0, clipBottom_ = 768;
+    bool clipVertical(float& y, float& h, float& v, float& vh) const {
+        if (!clipY_) return true;
+        if (h <= 0) return false;
+        const float originalY = y, originalH = h;
+        const float top = originalY < clipTop_ ? clipTop_ : originalY;
+        const float bottom = originalY + originalH > clipBottom_ ? clipBottom_ : originalY + originalH;
+        if (bottom <= top) return false;
+        const float first = (top - originalY) / originalH;
+        const float last = (bottom - originalY) / originalH;
+        v += vh * first;
+        vh *= last - first;
+        y = top;
+        h = bottom - top;
+        return true;
+    }
     Cached& rasterise(const std::string& s, float size);
 };
 
