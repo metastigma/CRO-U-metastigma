@@ -8104,7 +8104,7 @@ void drawCamp(App& app) {
             m.setOutline(true);
             for (int i = 0; i < n; ++i)
                 m.text(help[0][size_t(i)], 156, float(kTop[n] + 8 + 16 * i), true, ease, 13);
-            m.setOutline(false);
+            m.setOutline(true); // Restore the original outlined menu font for every list drawn after HELP.
         }
         left();
     };
