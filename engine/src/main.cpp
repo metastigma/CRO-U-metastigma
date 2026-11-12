@@ -8141,11 +8141,15 @@ void drawCamp(App& app) {
             // __MuCampScrListEquipInit: a scrolling list of the seven - weapon, armor, jewel (else item
             // 0x1c6, "Jewel"), the Human Genes and three plates (else 0x1c7.., their names) - four rows
             // of ComUty_ComPlate (one line each) with the list's scroll bar
+            // Original MuScrList slot rows start at kRowX (192); keep their full 256-unit width.
+            // This leaves the separate vertical scroll gauge visible at the right edge.
+            m.setOutline(true);
             for (int k = 0; k < kRows && c.slotTop + k < kEquipSlots; ++k) {
                 const int slot = c.slotTop + k, worn = slot < 3 ? pm.equip[slot] : pm.genes[slot - 3];
                 const int shown = worn > 0 ? worn : slot == 2 ? 0x1c6 : slot >= 3 ? 0x1c7 + (slot - 3) : 0;
-                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), shown, 0, c.slot == slot, ease);
+                drawCampRow(app, m, kRowX, kRowY + kRowH * float(k), shown, 0, c.slot == slot, ease);
             }
+            m.setOutline(false);
             drawCampScrollBar(m, c.slotTop, kEquipSlots, ease);
             left();
         } else if (c.phase == App::Camp::Entries && c.slot >= 3) {
