@@ -6332,15 +6332,23 @@ void drawGeneRow(App& app, cr::MenuPainter& m, float x, float y, int plate, bool
         for (int k = 0; k < total; ++k) m.picture(k < total - known ? 10 : 11, x + 251 - 14 * float(total) + 14 * float(k), y + 30, a);
 }
 
+// ComUty_GuageBarDraw: original Camp track, arrow caps and vertically stretched thumb.
 void drawCampScrollBar(cr::MenuPainter& m, int top, int n, float a) {
     using namespace campui;
     if (n <= kRows) return;
-    const float sx = 462, h = kRowH * kRows;
-    const float dark[4] = {0.05f, 0.05f, 0.08f, 0.8f * a};
-    m.quad(sx, kRowY, 8, h, dark, dark);
-    m.picture(76, sx - 4, kRowY - 14, a);
-    m.picture(77, sx - 4, kRowY + h - 2, a);
-    m.picture(106, sx, kRowY + (h - 40) * float(top) / float(n - kRows), a);
+    constexpr float x = 456, y = 72, h = 208;
+    m.piece(x, y, 144, 184, 16, 16, a);
+    for (int i = 0; i < int(h - 24) / 8; ++i)
+        m.piece(x, y + 16 + 8 * float(i), 144, 200, 16, 8, a);
+    m.piece(x, y + h - 8, 144, 208, 16, 16, a);
+    m.picture(0x4c, x, y, a);
+    m.picture(0x4d, x, y + h - 8, a);
+    const float len = std::max(24.0f, std::floor((h - 24) * 2 / float(n)));
+    const float at = std::clamp(std::floor((196 - len) * float(top) / float(n - 2)), 0.0f, h - 24 - len + 10);
+    const float thumbY = y + 12 + at;
+    m.piece(x, thumbY, 160, 196, 16, 12, a);
+    if (len > 20) m.pieceTo(x, thumbY + 12, 16, len - 20, 160, 208, 16, 4, a);
+    m.piece(x, thumbY + len - 8, 160, 212, 16, 8, a);
 }
 
 // ComUty_GeneBoardDraw at (x, y): the plate's name, its picture (gene_m*c.mct), "n / 6" known, then
@@ -8143,50 +8151,42 @@ void drawCamp(App& app) {
             // of ComUty_ComPlate (one line each) with the list's scroll bar
             // Original MuScrList slot rows start at kRowX (192); keep their full 256-unit width.
             // This leaves the separate vertical scroll gauge visible at the right edge.
-            m.setOutline(true);
             for (int k = 0; k < kRows && c.slotTop + k < kEquipSlots; ++k) {
                 const int slot = c.slotTop + k, worn = slot < 3 ? pm.equip[slot] : pm.genes[slot - 3];
                 const int shown = worn > 0 ? worn : slot == 2 ? 0x1c6 : slot >= 3 ? 0x1c7 + (slot - 3) : 0;
                 drawCampRow(app, m, kRowX, kRowY + kRowH * float(k), shown, 0, c.slot == slot, ease);
             }
-            m.setOutline(false);
             drawCampScrollBar(m, c.slotTop, kEquipSlots, ease);
             left();
         } else if (c.phase == App::Camp::Entries && c.slot >= 3) {
             drawGeneBoard(app, m, 12, 92, c.plate, ease, 2);
             right();
-            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k;
                 drawGeneAbilityRow(app, m, kRowX, kRowY + kRowH * float(k),
                                    c.list[size_t(index)], ch, index == c.listCursor, ease);
             }
-            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         } else if (c.slot >= 3) { // a gene plate for the slot: its board beside the list
             drawGeneBoard(app, m, 12, 92, item > 0 ? item : pm.genes[c.slot - 3], ease, 1);
             right();
-            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
                 const bool worn = std::find(std::begin(pm.genes), std::end(pm.genes), it) != std::end(pm.genes);
                 if (cr::isPlate(it)) drawGeneRow(app, m, kRowX, kRowY + kRowH * float(k), it, index == c.listCursor, worn, ease);
                 else drawCampRow(app, m, kRowX, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease);
             }
-            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         } else {
             drawShopBoard(app, 12, 92, ch, item > 0 ? item : 0, ease);
             right();
-            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
                 drawCampRow(app, m, kRowX, kRowY + kRowH * float(k), it, it > 0 ? ownedCount(app, it) : 0,
                             index == c.listCursor, ease);
             }
-            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         }
@@ -8196,20 +8196,17 @@ void drawCamp(App& app) {
         if (c.phase == App::Camp::Entries) {
             drawGeneBoard(app, m, 14, 92, c.plate, ease, 2);
             right();
-            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k;
                 drawGeneAbilityRow(app, m, kRowX, kRowY + kRowH * float(k),
                                    c.list[size_t(index)], ch, index == c.listCursor, ease);
             }
-            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         } else {
             drawGeneBoard(app, m, 14, 92, item, ease, 1);
             right();
             if (c.list.empty()) m.text("No gene plates.", kRowX + 56, kRowY + 16, false, ease, 15);
-            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
                 const cr::PartyMember& gm = app.game.party[size_t(ch)];
@@ -8217,7 +8214,6 @@ void drawCamp(App& app) {
                 if (cr::isPlate(it)) drawGeneRow(app, m, kRowX, kRowY + kRowH * float(k), it, index == c.listCursor, worn, ease);
                 else drawCampRow(app, m, kRowX, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease);
             }
-            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         }
