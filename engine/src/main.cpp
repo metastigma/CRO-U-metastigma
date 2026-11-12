@@ -14783,7 +14783,9 @@ void drawBattleHud(App& app, float W, float H) {
         m.quad(88, 4 + by, 24, 24, clear, dark);
         m.quad(112, 4 + by, 351, 24, dark, dark);
         m.quad(463, 4 + by, 24, 24, dark, clear);
+        m.setOutline(false); // Match original drawfont_btl: the battle banner itself is plain.
         m.textCentred(b.banner, 287 - m.textWidth(b.banner, 14) / 2, 16 + by, false, 1, 14);
+        m.setOutline(true); // Restore outlined text for the battle menus.
     }
 
     // Right: the menus
@@ -14801,7 +14803,7 @@ void drawBattleHud(App& app, float W, float H) {
                 m.setOutline(true);
                 for (int i = 0; i < n; ++i)
                     m.text(help[0][size_t(i)], 172, float(kTop[n] + 8 + 16 * i + 32), true, a, 13);
-                m.setOutline(false);
+                m.setOutline(true); // Keep the battle command and skill lists outlined after HELP.
             }
         };
         switch (b.menu) {
