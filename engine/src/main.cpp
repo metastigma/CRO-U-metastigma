@@ -283,6 +283,7 @@ struct App {
     cr::Texture speedLinesTex;             // syuutyuusen(_ipad).mct (slot 0x2e): scene effect 1
     cr::Texture titleArt[2];               // __menuu_TitleSet: title1.mct (MuCom slot 0x11), chaos.mct (0x12)
     std::string titleArtSource[2];          // resolved _ipad / _hd / base sheet selected by chk_hd_name
+    float titleArtUvScale[2] = {1, 1};       // original picture-table units to loaded texture pixels
     float footPrev = 0;                    // player's animation time last frame (footsteps)
     std::vector<uint32_t> soundLog;        // every sound started (self-test)
     std::vector<uint32_t> menuSoundLog;    // the menus' sounds, latest last (self-test)
@@ -1122,9 +1123,16 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* f
 
 // A full-image texture by its .mct name (loadOriginalImage), its HD replacement when that's on
 bool loadImage(App& app, const std::string& mct, cr::Image& img, bool* fromAndroid = nullptr,
-               std::string* selectedName = nullptr) {
+               std::string* selectedName = nullptr, float* pictureUvScale = nullptr) {
     if (!loadOriginalImage(app, mct, img, fromAndroid, selectedName)) return false;
+    // kOutReadPicture is in the SD sheet's 512-pixel coordinate system: the original
+    // _hd / _ipad MCTs therefore start at 2x. Preserve that base factor, then account
+    // for any further PNG/CRHD enlargement made by applyHd (TitleHD is 3840x3840).
+    const int sourceWidth = img.width;
+    const float sourceFactor = sourceWidth >= 1024 ? 2.0f : 1.0f;
     applyHd(app, img);
+    if (pictureUvScale)
+        *pictureUvScale = sourceWidth > 0 ? sourceFactor * float(img.width) / float(sourceWidth) : sourceFactor;
     return true;
 }
 
@@ -1701,7 +1709,8 @@ int plateIcon(int word);
 // Control Hints (Options, Game; F3): the port's own menu help. The iPhone layout has no room below.
 bool keyHints(const App& app);
 void openManual(App& app, int intro);
-void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a, int frame = 0);
+void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a, int frame = 0,
+                float uvScale = 0);
 void openScenarios(App& app);
 void openScenarios(App& app, int mode);
 void openCollection(App& app);
@@ -9389,10 +9398,12 @@ bool titleChoiceReady(int) { return true; }
 // A group-1 picture (MuTex_GetTexInfo(1, pict), half-scale units) of one of a menu's own sheets
 // at (x, y): the _hd / _ipad sheets (1024 wide and up) hold them at twice those units
 // (`frame`: ComUty_PictAnimDraw's, the next piece to the right)
-void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a, int frame) {
+void outPicture(cr::MenuPainter& m, const cr::Texture& tex, int pict, float x, float y, float a, int frame, float uvScale) {
     if (!tex.id || pict < 0 || pict >= cr::kNumOutReadPictures) return;
     const short* p = cr::kOutReadPicture[pict];
-    const float k = tex.width >= 1024 ? 2.0f : 1.0f;
+    // TitleHD can be much larger than the original 2x Retina sheet: use its exact
+    // scale instead of sampling the old 2x UV rectangle in an otherwise transparent area.
+    const float k = uvScale > 0 ? uvScale : tex.width >= 1024 ? 2.0f : 1.0f;
     m.imagePieceTo(tex, x, y, p[2], p[3], float(p[0] + p[2] * frame) * k, p[1] * k, p[2] * k, p[3] * k, a);
 }
 
@@ -9403,7 +9414,8 @@ void drawTitleMenu(App& app) {
         if (!app.titleArt[k].id) {
             cr::Image img;
             app.titleArtSource[k].clear();
-            if (loadImage(app, kTitleSheet[k], img, nullptr, &app.titleArtSource[k]))
+            app.titleArtUvScale[k] = 1.0f;
+            if (loadImage(app, kTitleSheet[k], img, nullptr, &app.titleArtSource[k], &app.titleArtUvScale[k]))
                 app.titleArt[k] = app.renderer.upload(img);
         }
     m.begin(app.renderer, app.windowTex, &app.font);
@@ -9425,8 +9437,8 @@ void drawTitleMenu(App& app) {
     const float titleTextY = phoneScreen ? 220.0f : 252.0f;
     const float titleStripY = phoneScreen ? 280.0f : 312.0f;
     outPicture(m, app.titleArt[1], 6, 0, phoneScreen ? 0.0f : -32.0f, t);
-    outPicture(m, app.titleArt[0], title1HdSheet ? 7 : 9, 184, titleTextY, t);
-    outPicture(m, app.titleArt[0], title1HdSheet ? 8 : 10, 0, titleStripY, t);
+    outPicture(m, app.titleArt[0], title1HdSheet ? 7 : 9, 184, titleTextY, t, 0, app.titleArtUvScale[0]);
+    outPicture(m, app.titleArt[0], title1HdSheet ? 8 : 10, 0, titleStripY, t, 0, app.titleArtUvScale[0]);
     app.renderer.setOrigin(wideRight(app)); // (widescreen: the plates to the screen's right)
     for (int i = 0; i < 3; ++i)
         m.plate(328 + 240 * (1 - ease), 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i], app.titleCursor == i, t,
