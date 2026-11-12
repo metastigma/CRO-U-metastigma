@@ -5856,7 +5856,7 @@ float campEase(const App& app) {
     return 1 - (1 - t) * (1 - t);
 }
 float campListX(const App& app) {
-    return campui::kRowX + (app.camp.page == App::Camp::Items ? 160 * (1 - campEase(app)) : 64);
+    return campui::kRowX + (app.camp.page == App::Camp::Items ? 160 * (1 - campEase(app)) : 0);
 }
 bool campSlotList(const App& app) { return app.camp.page == App::Camp::Equip && app.camp.phase == App::Camp::Slot; }
 bool campScrollable(const App& app) {
@@ -8155,32 +8155,38 @@ void drawCamp(App& app) {
         } else if (c.phase == App::Camp::Entries && c.slot >= 3) {
             drawGeneBoard(app, m, 12, 92, c.plate, ease, 2);
             right();
+            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k;
-                drawGeneAbilityRow(app, m, kRowX + 64, kRowY + kRowH * float(k),
+                drawGeneAbilityRow(app, m, kRowX, kRowY + kRowH * float(k),
                                    c.list[size_t(index)], ch, index == c.listCursor, ease);
             }
+            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         } else if (c.slot >= 3) { // a gene plate for the slot: its board beside the list
             drawGeneBoard(app, m, 12, 92, item > 0 ? item : pm.genes[c.slot - 3], ease, 1);
             right();
+            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
                 const bool worn = std::find(std::begin(pm.genes), std::end(pm.genes), it) != std::end(pm.genes);
-                if (cr::isPlate(it)) drawGeneRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, index == c.listCursor, worn, ease);
-                else drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease);
+                if (cr::isPlate(it)) drawGeneRow(app, m, kRowX, kRowY + kRowH * float(k), it, index == c.listCursor, worn, ease);
+                else drawCampRow(app, m, kRowX, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease);
             }
+            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         } else {
             drawShopBoard(app, 12, 92, ch, item > 0 ? item : 0, ease);
             right();
+            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
-                drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, it > 0 ? ownedCount(app, it) : 0,
+                drawCampRow(app, m, kRowX, kRowY + kRowH * float(k), it, it > 0 ? ownedCount(app, it) : 0,
                             index == c.listCursor, ease);
             }
+            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         }
@@ -8190,24 +8196,28 @@ void drawCamp(App& app) {
         if (c.phase == App::Camp::Entries) {
             drawGeneBoard(app, m, 14, 92, c.plate, ease, 2);
             right();
+            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k;
-                drawGeneAbilityRow(app, m, kRowX + 64, kRowY + kRowH * float(k),
+                drawGeneAbilityRow(app, m, kRowX, kRowY + kRowH * float(k),
                                    c.list[size_t(index)], ch, index == c.listCursor, ease);
             }
+            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         } else {
             drawGeneBoard(app, m, 14, 92, item, ease, 1);
             right();
             if (c.list.empty()) m.text("No gene plates.", kRowX + 56, kRowY + 16, false, ease, 15);
+            m.setOutline(true);
             for (int k = 0; k < kRows && c.listTop + k < int(c.list.size()); ++k) {
                 const int index = c.listTop + k, it = c.list[size_t(index)];
                 const cr::PartyMember& gm = app.game.party[size_t(ch)];
                 const bool worn = std::find(std::begin(gm.genes), std::end(gm.genes), it) != std::end(gm.genes);
-                if (cr::isPlate(it)) drawGeneRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, index == c.listCursor, worn, ease);
-                else drawCampRow(app, m, kRowX + 64, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease);
+                if (cr::isPlate(it)) drawGeneRow(app, m, kRowX, kRowY + kRowH * float(k), it, index == c.listCursor, worn, ease);
+                else drawCampRow(app, m, kRowX, kRowY + kRowH * float(k), it, 0, index == c.listCursor, ease);
             }
+            m.setOutline(false);
             drawCampScrollBar(m, c.listTop, int(c.list.size()), ease);
             helpBoard(item);
         }
