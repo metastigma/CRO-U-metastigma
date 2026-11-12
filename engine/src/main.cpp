@@ -6344,7 +6344,7 @@ void drawCampScrollBar(cr::MenuPainter& m, int top, int n, float a) {
     m.picture(0x4c, x, y, a);
     m.picture(0x4d, x, y + h - 8, a);
     const float len = std::max(24.0f, std::floor((h - 24) * 2 / float(n)));
-    const float at = std::clamp(std::floor((196 - len) * float(top) / float(n - 2)), 0.0f, h - 24 - len + 10);
+    const float at = std::clamp(std::floor((196 - len) * (float(top) * kRowH) / (float(n - 2) * kRowH)), 0.0f, h - 24 - len + 10);
     const float thumbY = y + 12 + at;
     m.piece(x, thumbY, 160, 196, 16, 12, a);
     if (len > 20) m.pieceTo(x, thumbY + 12, 16, len - 20, 160, 208, 16, 4, a);
