@@ -9394,13 +9394,16 @@ void drawTitleMenu(App& app) {
     m.begin(app.renderer, app.windowTex, &app.font);
     const PhoneMenu phoneMenu(app, m); // the iPhone layout: its screen's menu coordinates
     const float t = std::min(1.0f, app.titleAnim / 10.0f), ease = 1 - (1 - t) * (1 - t);
+    // The chaos sheet is the opaque base. The small title1 fragment (7 / 9) is a
+    // transparent caption laid over its lower edge, so it must be drawn after chaos;
+    // the final title1 strip (8 / 10) sits below the base picture.
     if (app.renderer.phoneLayout()) {
-        outPicture(m, app.titleArt[0], 7, 184, 220, t);
         outPicture(m, app.titleArt[1], 6, 0, 0, t);
+        outPicture(m, app.titleArt[0], 7, 184, 220, t);
         outPicture(m, app.titleArt[0], 8, 0, 280, t);
     } else {
-        outPicture(m, app.titleArt[0], 9, 184, 252, t);
         outPicture(m, app.titleArt[1], 6, 0, -32, t);
+        outPicture(m, app.titleArt[0], 9, 184, 252, t);
         outPicture(m, app.titleArt[0], 10, 0, 312, t);
     }
     app.renderer.setOrigin(wideRight(app)); // (widescreen: the plates to the screen's right)
