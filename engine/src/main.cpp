@@ -282,6 +282,7 @@ struct App {
     std::string cutinWideName;
     cr::Texture speedLinesTex;             // syuutyuusen(_ipad).mct (slot 0x2e): scene effect 1
     cr::Texture titleArt[2];               // __menuu_TitleSet: title1.mct (MuCom slot 0x11), chaos.mct (0x12)
+    std::string titleArtSource[2];          // resolved _ipad / _hd / base sheet selected by chk_hd_name
     float footPrev = 0;                    // player's animation time last frame (footsteps)
     std::vector<uint32_t> soundLog;        // every sound started (self-test)
     std::vector<uint32_t> menuSoundLog;    // the menus' sounds, latest last (self-test)
@@ -1116,11 +1117,13 @@ void applyHd(App& app, cr::Image& img) {
     ++app.hdLoaded;
 }
 
-bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* fromAndroid = nullptr);
+bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* fromAndroid = nullptr,
+                       std::string* selectedName = nullptr);
 
 // A full-image texture by its .mct name (loadOriginalImage), its HD replacement when that's on
-bool loadImage(App& app, const std::string& mct, cr::Image& img, bool* fromAndroid = nullptr) {
-    if (!loadOriginalImage(app, mct, img, fromAndroid)) return false;
+bool loadImage(App& app, const std::string& mct, cr::Image& img, bool* fromAndroid = nullptr,
+               std::string* selectedName = nullptr) {
+    if (!loadOriginalImage(app, mct, img, fromAndroid, selectedName)) return false;
     applyHd(app, img);
     return true;
 }
@@ -1135,8 +1138,9 @@ bool mctHeader(const std::vector<uint8_t>& f, cr::MctInfo& mi) {
 // A full-image texture by its .mct name: the Vita's lossless .gxt of the same name when --vita is
 // given (same sizes; 8 bits per channel where the iPad files use palettes, PVRTC or RGBA4444),
 // else the data folder's .mct.
-bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* fromAndroid) {
+bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* fromAndroid, std::string* selectedName) {
     if (fromAndroid) *fromAndroid = false;
+    if (selectedName) selectedName->clear();
     // Art the Vita redrew (crtool vita: > 12/255 from the iPad's - Omega's: the ending's two
     // backgrounds and the icon sheets) keeps the iPad's version but for the Vita alone
     static const char* const kVitaRedrawn[] = {"EndBack01.mct", "EndBack02.mct", "icon.mct", "icon_hd.mct"};
@@ -1159,6 +1163,7 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* f
         const bool redrawn = std::any_of(std::begin(kVitaRedrawn), std::end(kVitaRedrawn), [&](const char* n) { return name == n; });
         if (app.vita.isOpen() && (!redrawn || app.vitaOnly) && app.vita.read(names[k] + ".gxt", data) && cr::decodeGxt(data, img)) {
             ++app.vitaTextures;
+            if (selectedName) *selectedName = name + ".mct";
             if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
             return true;
         }
@@ -1175,6 +1180,7 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* f
             if (fits) {
                 img = std::move(a);
                 if (fromAndroid) *fromAndroid = true;
+                if (selectedName) *selectedName = name;
                 ++app.androidTextures;
                 if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
                 return true;
@@ -1182,12 +1188,19 @@ bool loadOriginalImage(App& app, const std::string& mct, cr::Image& img, bool* f
         }
         if (!app.vitaOnly && cr::readFile(app.dataDir + name, data) && cr::decodeMct(data, img)) {
             if (fromAndroid) *fromAndroid = app.androidOnly;
+            if (selectedName) *selectedName = name;
             if (k + 1 < names.size()) ++(k == 0 ? app.ipadImages : app.hdImages);
             return true;
         }
     }
-    if (base.empty()) return cr::readFile(app.dataDir + mct, data) && cr::decodeMct(data, img);
-    return app.vitaOnly && cr::readFile(app.dataDir + mct, data) && cr::decodeMct(data, img); // (the overlay's other names)
+    if (base.empty()) {
+        const bool ok = cr::readFile(app.dataDir + mct, data) && cr::decodeMct(data, img);
+        if (ok && selectedName) *selectedName = mct;
+        return ok;
+    }
+    const bool ok = app.vitaOnly && cr::readFile(app.dataDir + mct, data) && cr::decodeMct(data, img);
+    if (ok && selectedName) *selectedName = mct;
+    return ok; // (the overlay's other names)
 }
 
 // An iOS data file's names in the Vita's cro.psarc: x.mct -> x.gxt (and x.gxt for x_hd.mct, which
@@ -9389,23 +9402,31 @@ void drawTitleMenu(App& app) {
     for (int k = 0; k < 2; ++k)
         if (!app.titleArt[k].id) {
             cr::Image img;
-            if (loadImage(app, kTitleSheet[k], img)) app.titleArt[k] = app.renderer.upload(img);
+            app.titleArtSource[k].clear();
+            if (loadImage(app, kTitleSheet[k], img, nullptr, &app.titleArtSource[k]))
+                app.titleArt[k] = app.renderer.upload(img);
         }
     m.begin(app.renderer, app.windowTex, &app.font);
-    const PhoneMenu phoneMenu(app, m); // the iPhone layout: its screen's menu coordinates
+    const PhoneMenu phoneMenu(app, m); // screen layout coordinates
     const float t = std::min(1.0f, app.titleAnim / 10.0f), ease = 1 - (1 - t) * (1 - t);
-    // The chaos sheet is the opaque base. The small title1 fragment (7 / 9) is a
-    // transparent caption laid over its lower edge, so it must be drawn after chaos;
-    // the final title1 strip (8 / 10) sits below the base picture.
-    if (app.renderer.phoneLayout()) {
-        outPicture(m, app.titleArt[1], 6, 0, 0, t);
-        outPicture(m, app.titleArt[0], 7, 184, 220, t);
-        outPicture(m, app.titleArt[0], 8, 0, 280, t);
-    } else {
-        outPicture(m, app.titleArt[1], 6, 0, -32, t);
-        outPicture(m, app.titleArt[0], 9, 184, 252, t);
-        outPicture(m, app.titleArt[0], 10, 0, 312, t);
-    }
+    // title1_HD's copyright strip / Start label are pictures 8 / 7. The iPad
+    // title1_ipad sheet stores those same pieces as 10 / 9. Resolve UVs from the
+    // actual source variant: the iPad layout can fall back to the Vita/Retina _hd sheet.
+    const std::string& title1Source = app.titleArtSource[0];
+    const auto endsWith = [](const std::string& s, const char* suffix) {
+        const size_t n = SDL_strlen(suffix);
+        return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
+    };
+    bool title1HdSheet = app.renderer.phoneLayout();
+    if (endsWith(title1Source, "_hd.mct")) title1HdSheet = true;
+    else if (endsWith(title1Source, "_ipad.mct")) title1HdSheet = false;
+    const bool phoneScreen = app.renderer.phoneLayout();
+    // Position on screen follows the selected layout; UV rectangle follows the loaded texture.
+    const float titleTextY = phoneScreen ? 220.0f : 252.0f;
+    const float titleStripY = phoneScreen ? 280.0f : 312.0f;
+    outPicture(m, app.titleArt[1], 6, 0, phoneScreen ? 0.0f : -32.0f, t);
+    outPicture(m, app.titleArt[0], title1HdSheet ? 7 : 9, 184, titleTextY, t);
+    outPicture(m, app.titleArt[0], title1HdSheet ? 8 : 10, 0, titleStripY, t);
     app.renderer.setOrigin(wideRight(app)); // (widescreen: the plates to the screen's right)
     for (int i = 0; i < 3; ++i)
         m.plate(328 + 240 * (1 - ease), 114 + 56.0f * float(i), kTitleIcons[i], kTitleWords[i], app.titleCursor == i, t,
