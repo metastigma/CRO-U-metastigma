@@ -16963,7 +16963,7 @@ int controlHintsSelfTest(App& app) {
                              app.video.display == savedDisplay && app.video.displayExplicit == savedDisplayExplicit &&
                              (((SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0) == wasFullscreen);
     problems += !f11Preserved || !f11Restored;
-    std::printf("F11: INI unchanged %s, fullscreen toggled and restored %s\\n",
+    std::printf("F11: INI unchanged %s, fullscreen toggled and restored %s\n",
                 f11Preserved ? "yes" : "NO", f11Restored ? "yes" : "NO");
     SDL_RemovePath(settingsPath().c_str());
     std::filesystem::remove(testDir);
