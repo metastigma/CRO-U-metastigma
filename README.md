@@ -102,7 +102,7 @@ scripts in eight languages and textures, the Android release's sharper textures 
 alone is the game (its 960 x 544 layout), else the Android release alone (3.1.0's voiced data).
 
 If nothing is found the program says where it looked. The older places still work: `dataHD/`, `data/`, `ChaosRingsOmegaHDeng.app/` or `Payload/` straight in the game folder.
-To use a copy elsewhere: `--data <iOS data>` (or `CR_DATA`), `--vita <PCSG00499 folder>` (`CR_VITA`), `--android <folder>` (`CR_ANDROID`) - each also a folder picked in Options, Game, kept in `settings.ini`; `--vita none` / `--android none` without. On desktop, settings are in `settings.ini` beside the executable and player slots, `resume.dat` and imported Vita saves are in `saves/\`. Existing profile saves are not moved automatically: copy your `save*.dat` and `resume.dat` into that folder. Android and iOS continue to use writable app-specific storage. All four ports (CR1:U, CRO-U, CR2-U, CR3-U) look for their game copies the same way.
+To use a copy elsewhere: `--data <iOS data>` (or `CR_DATA`), `--vita <PCSG00499 folder>` (`CR_VITA`), `--android <folder>` (`CR_ANDROID`) - each also a folder picked in Options, Game, kept in `settings.ini`; `--vita none` / `--android none` without. On desktop, settings are in `settings.ini` beside the executable and player slots, `resume.dat` and imported Vita saves are in `saves/`. Existing profile saves are not moved automatically: copy your `save*.dat` and `resume.dat` into that folder. Android and iOS continue to use writable app-specific storage. All four ports (CR1:U, CRO-U, CR2-U, CR3-U) look for their game copies the same way.
 
 ## Vita save importing
 
@@ -182,7 +182,7 @@ MetalFX, in particular, is compiled but untested.
 
 `-DCR_GLES=ON` builds the desktop game on OpenGL ES 3.0, as Android runs it (Mesa has it): a way
 to test that path without a device. Desktop settings and saves stay portable beside the executable:
-`settings.ini` in the executable folder and save data in its `saves/\` subfolder.
+`settings.ini` in the executable folder and save data in its `saves/` subfolder.
 
 DLSS: the NGX headers and library from NVIDIA's [DLSS SDK](https://github.com/NVIDIA/DLSS)
 (`-DCR_DLSS_SDK=<its checkout>`, or `engine/third_party/dlss/`), its runtime copied next to the

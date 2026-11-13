@@ -511,4 +511,4 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [x] Store desktop player slots, `resume.dat`, and imported Vita saves in `<exe>/saves/`; create the folder at startup and log its resolved path.
 - [x] Keep Android/iOS settings and saves in their writable app-specific folder rather than attempting to write beside a bundled executable.
 - [x] Route every existing slot/resume operation through the same save directory, including reset, autosave/resume, and Vita-save import.
-- [ ] CI and runtime verification: confirm `settings.ini` is read/written beside `chaosringsomega.exe`; confirm slot saves and `resume.dat` are read/written in `saves/\`; move an existing save set into that folder and verify it appears in the title-screen Load flow.
+- [ ] CI and runtime verification: confirm `settings.ini` is read/written beside `chaosringsomega.exe`; confirm slot saves and `resume.dat` are read/written in `saves/`; move an existing save set into that folder and verify it appears in the title-screen Load flow.
