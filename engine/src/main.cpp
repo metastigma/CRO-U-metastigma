@@ -19281,8 +19281,8 @@ int runSelfTest(App& app) {
             app.game.party[1].genes[2] = 0;
             app.game.party[1].genes[3] = 0;
             app.game.items[481] = app.game.items[482] = app.game.items[483] = 1;
-            app.game.items[89] = 1; // Mouse Genes: a known entry makes its plate selectable
-            app.game.items[93] = 1; // Crocodile Genes: a known entry makes its plate selectable
+            app.game.items[108] = 1; // known entry on plate 481
+            app.game.items[93] = 1;  // known entry on plate 483
             c.page = App::Camp::Equip;
             c.phase = App::Camp::Slot;
             c.member = 0;
@@ -19296,27 +19296,15 @@ int runSelfTest(App& app) {
             const bool currentFirst = !c.list.empty() && c.list.front() == 481;
             const bool removeLast = c.list.size() > 1 && c.list.back() == 0;
 
-            // Move Crocodile Genes from the other member into this slot.
-            bool movedFromPartner = false;
-            const auto croc = std::find(c.list.begin(), c.list.end(), 483);
-            if (croc != c.list.end()) {
-                c.listCursor = int(croc - c.list.begin());
-                campChoose(app); // open the Crocodile plate's known entries
-                if (c.phase == App::Camp::Entries && !c.list.empty()) {
-                    c.listCursor = 0;
-                    campChoose(app); // equip the plate
-                    movedFromPartner = app.game.party[0].genes[1] == 483 &&
-                                       app.game.party[1].genes[1] != 483;
-                }
-            }
-
-            // Move Mouse Genes from this member's first animal slot into the next one.
+            // Mouse Genes remains visible in the next slot even while worn in the previous one.
+            bool mouseVisibleForTransfer = false;
             bool movedBetweenSlots = false;
             c.slot = 5;
             c.phase = App::Camp::Slot;
             campChoose(app); // refresh the second animal-slot list
             const auto mouse = std::find(c.list.begin(), c.list.end(), 481);
-            if (mouse != c.list.end()) {
+            mouseVisibleForTransfer = mouse != c.list.end();
+            if (mouseVisibleForTransfer) {
                 c.listCursor = int(mouse - c.list.begin());
                 campChoose(app);
                 if (c.phase == App::Camp::Entries && !c.list.empty()) {
@@ -19326,9 +19314,25 @@ int runSelfTest(App& app) {
                                         app.game.party[0].genes[2] == 481;
                 }
             }
+
+            // Crocodile Genes can likewise move from the other member into this slot.
+            bool movedFromPartner = false;
+            c.phase = App::Camp::Slot;
+            campChoose(app); // refresh the destination list
+            const auto croc = std::find(c.list.begin(), c.list.end(), 483);
+            if (croc != c.list.end()) {
+                c.listCursor = int(croc - c.list.begin());
+                campChoose(app);
+                if (c.phase == App::Camp::Entries && !c.list.empty()) {
+                    c.listCursor = 0;
+                    campChoose(app);
+                    movedFromPartner = app.game.party[0].genes[2] == 483 &&
+                                       app.game.party[1].genes[1] != 483;
+                }
+            }
             problems += c.phase != App::Camp::Slot || !currentVisible || !otherSlotVisible || !otherMemberVisible ||
                         !currentSelected || !currentFirst || !removeLast || !campGeneWornByPair(app, 481) ||
-                        !movedFromPartner || !movedBetweenSlots;
+                        !mouseVisibleForTransfer || !movedFromPartner || !movedBetweenSlots;
             app.game = keepGame;
             std::copy(std::begin(keepGenes0), std::end(keepGenes0), std::begin(app.game.party[0].genes));
             std::copy(std::begin(keepGenes1), std::end(keepGenes1), std::begin(app.game.party[1].genes));
