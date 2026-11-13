@@ -16965,6 +16965,7 @@ int controlHintsSelfTest(App& app) {
     problems += !f11Preserved || !f11Restored;
     std::printf("F11: INI unchanged %s, fullscreen toggled and restored %s\n",
                 f11Preserved ? "yes" : "NO", f11Restored ? "yes" : "NO");
+    applyVideo(app); // restore the exact original mode (including Borderless) after the two-toggle test
     SDL_RemovePath(settingsPath().c_str());
     std::filesystem::remove(testDir);
     if (hadEnv) SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "CR_SAVE_DIR", keepEnv.c_str(), true);
