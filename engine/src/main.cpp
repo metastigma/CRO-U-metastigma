@@ -8192,15 +8192,16 @@ void drawCamp(App& app) {
     auto helpBoard = [&](int it) { // ComUty_HelpWindowDraw: original 336 x 68 panel and HELP tag
         if (it <= 0) return;
         right();
-        m.picture(17, 144, 8, ease);
-        m.picture(18, 144, -4, ease);
+        const float slide = 480 * (1 - ease); // MuScrList HELP panel enters from the right
+        m.picture(17, 144 + slide, 8, ease);
+        m.picture(18, 144 + slide, -4, ease);
         std::vector<std::vector<std::string>> help;
         if (app.systemText.message(cr::itemHelpId(it), app.language, nullptr, help) && !help.empty()) {
             const int n = std::min(3, int(help[0].size()));
             static const int kTop[4] = {0, 24, 18, 10};
             m.setOutline(true);
             for (int i = 0; i < n; ++i)
-                m.text(help[0][size_t(i)], 156, float(kTop[n] + 8 + 16 * i), true, ease, 13);
+                m.text(help[0][size_t(i)], 156 + slide, float(kTop[n] + 8 + 16 * i), true, ease, 13);
             m.setOutline(true); // Restore the original outlined menu font for every list drawn after HELP.
         }
         left();
