@@ -512,3 +512,11 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [x] Keep Android/iOS settings and saves in their writable app-specific folder rather than attempting to write beside a bundled executable.
 - [x] Route every existing slot/resume operation through the same save directory, including reset, autosave/resume, and Vita-save import.
 - [ ] CI and runtime verification: confirm `settings.ini` is read/written beside `chaosringsomega.exe`; confirm slot saves and `resume.dat` are read/written in `saves/`; move an existing save set into that folder and verify it appears in the title-screen Load flow.
+
+
+## Fullscreen startup ordering — 2026-11-13
+
+- [x] Keep the desktop window hidden while game data and `settings.ini` load; remove the earlier default-mode apply/show pass so the final saved mode is selected only once.
+- [x] Account for SDL3's deferred fullscreen flags on hidden windows: synchronize and inspect the mode only after showing the window.
+- [x] Retry a denied fullscreen request on the visible window; if exclusive mode is refused, retry desktop fullscreen rather than silently remaining windowed.
+- [ ] Windows runtime verification: repeated cold launches with `display=1`, `display_user_set=1`, `resolution_user_set=0` must always start full-screen; confirm `CR_VIDEO_DEBUG=1` reports the actual state.

@@ -3890,14 +3890,19 @@ void applyVideo(App& app) {
             }
         }
     }
-    if (!SDL_SyncWindow(app.window))
-        SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "waiting for fullscreen transition: %s", SDL_GetError());
-    const bool fullscreen = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0;
-    const SDL_DisplayMode* activeMode = SDL_GetWindowFullscreenMode(app.window);
-    if (v.display != 0 && !fullscreen)
-        SDL_LogError(SDL_LOG_CATEGORY_VIDEO, "window manager did not enter fullscreen");
-    else if (v.display == 1 && fullscreen && !activeMode)
-        SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "fullscreen is desktop-borderless, not exclusive");
+    // SDL queues fullscreen state changes while a window is hidden. Do not inspect or
+    // synchronize that queued state here; startup verifies it after SDL_ShowWindow().
+    const bool windowHidden = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_HIDDEN) != 0;
+    if (!windowHidden) {
+        if (!SDL_SyncWindow(app.window))
+            SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "waiting for fullscreen transition: %s", SDL_GetError());
+        const bool fullscreen = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0;
+        const SDL_DisplayMode* activeMode = SDL_GetWindowFullscreenMode(app.window);
+        if (v.display != 0 && !fullscreen)
+            SDL_LogError(SDL_LOG_CATEGORY_VIDEO, "window manager did not enter fullscreen");
+        else if (v.display == 1 && fullscreen && !activeMode)
+            SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "fullscreen is desktop-borderless, not exclusive");
+    }
     applyOrientation(app);
     // The window manager applies the size when it gets to it: wait for it (up to a second) so the
     // next frame, and captures, have it
@@ -3909,7 +3914,7 @@ void applyVideo(App& app) {
         SDL_Delay(20);
     }
     SDL_PumpEvents();
-    if (SDL_getenv("CR_VIDEO_DEBUG")) {
+    if (SDL_getenv("CR_VIDEO_DEBUG") && !windowHidden) {
         int w = 0, h = 0, pw = 0, ph = 0;
         SDL_GetWindowSize(app.window, &w, &h);
         SDL_GetWindowSizeInPixels(app.window, &pw, &ph);
@@ -22394,13 +22399,8 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     app->gameThread = SDL_GetCurrentThreadID();
     app->inputCancel.start(SDL_GetWindowID(app->window));
     SDL_Log("renderer: %s", app->renderer.description().c_str());
-    // Captures and tests start from the original presentation; the command line can change it
-    videoArgs(*app, argc, argv);
-    applyVideo(*app);
-#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
-    if (!SDL_ShowWindow(app->window))
-        SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "showing game window: %s", SDL_GetError());
-#endif
+    // Keep the desktop window hidden while data and settings load. Startup applies the final
+    // INI/command-line display mode once, immediately before showing the window.
     SDL_Log("data: %s", app->dataDir.c_str());
 
     if (app->vitaOnly) // the archive's files, by their iOS names (.gxt as .mct)
@@ -22664,6 +22664,48 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         if (SDL_strcmp(argv[i], "--battle-speed") == 0) app->battleSpeed = std::clamp(SDL_atoi(argv[i + 1]), 1, 5);
     }
     applyVideo(*app);
+#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+    if (!SDL_ShowWindow(app->window))
+        SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "showing game window: %s", SDL_GetError());
+    if (!SDL_SyncWindow(app->window))
+        SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "waiting for initial window state: %s", SDL_GetError());
+
+    // SDL_SetWindowFullscreen() only records a pending fullscreen flag while the window is hidden.
+    // Now that it is visible, verify the actual state and retry once if the window manager did not
+    // apply the queued request. If exclusive mode is refused, keep the requested full-screen
+    // presentation by falling back to desktop fullscreen rather than leaving a window on screen.
+    bool isFullscreen = (SDL_GetWindowFlags(app->window) & SDL_WINDOW_FULLSCREEN) != 0;
+    if (app->video.display != 0 && !isFullscreen) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "initial fullscreen request was not applied; retrying on visible window");
+        if (!SDL_SetWindowFullscreen(app->window, true))
+            SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "retrying fullscreen: %s", SDL_GetError());
+        if (!SDL_SyncWindow(app->window))
+            SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "waiting for fullscreen retry: %s", SDL_GetError());
+        isFullscreen = (SDL_GetWindowFlags(app->window) & SDL_WINDOW_FULLSCREEN) != 0;
+    }
+    if (app->video.display != 0 && !isFullscreen) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "exclusive fullscreen was refused; trying desktop fullscreen");
+        if (!SDL_SetWindowFullscreenMode(app->window, nullptr))
+            SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "setting desktop fullscreen fallback: %s", SDL_GetError());
+        if (!SDL_SetWindowFullscreen(app->window, true))
+            SDL_LogError(SDL_LOG_CATEGORY_VIDEO, "entering desktop fullscreen fallback: %s", SDL_GetError());
+        if (!SDL_SyncWindow(app->window))
+            SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "waiting for desktop fullscreen fallback: %s", SDL_GetError());
+        isFullscreen = (SDL_GetWindowFlags(app->window) & SDL_WINDOW_FULLSCREEN) != 0;
+    }
+    if (app->video.display != 0 && !isFullscreen)
+        SDL_LogError(SDL_LOG_CATEGORY_VIDEO, "window manager left the game windowed after fullscreen retries");
+
+    if (SDL_getenv("CR_VIDEO_DEBUG")) {
+        int w = 0, h = 0, pw = 0, ph = 0;
+        SDL_GetWindowSize(app->window, &w, &h);
+        SDL_GetWindowSizeInPixels(app->window, &pw, &ph);
+        const char* mode = !isFullscreen ? "windowed" :
+                           SDL_GetWindowFullscreenMode(app->window) ? "exclusive fullscreen" : "borderless fullscreen";
+        std::fprintf(stderr, "video: startup %s, window %dx%d points, %dx%d pixels, density %g, driver %s\\n",
+                     mode, w, h, pw, ph, SDL_GetWindowPixelDensity(app->window), SDL_GetCurrentVideoDriver());
+    }
+#endif
     if (app->video.hdTextures != hdTexturesAtInitialLoad) {
         cr::Image wi;
         if (loadImage(*app, "window.mct", wi, &app->androidWindow)) {
