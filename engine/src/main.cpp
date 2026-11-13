@@ -16936,6 +16936,35 @@ int controlHintsSelfTest(App& app) {
         shortcut = toggled && !app.showHud;
         problems += !shortcut;
     }
+
+    // F11 changes the live window only; it must never rewrite settings.ini or the saved display mode.
+    auto readSettings = [&] {
+        size_t n = 0;
+        char* bytes = static_cast<char*>(SDL_LoadFile(settingsPath().c_str(), &n));
+        std::string contents = bytes ? std::string(bytes, n) : std::string();
+        SDL_free(bytes);
+        return contents;
+    };
+    const std::string marker = readSettings() + "f11_test_marker=must-survive\n";
+    const bool markerWritten = SDL_SaveFile(settingsPath().c_str(), marker.data(), marker.size());
+    const int savedDisplay = app.video.display;
+    const bool savedDisplayExplicit = app.video.displayExplicit;
+    const bool wasFullscreen = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0;
+    SDL_Event f11{};
+    f11.type = SDL_EVENT_KEY_DOWN;
+    f11.key.key = SDLK_F11;
+    f11.key.down = true;
+    SDL_AppEvent(&app, &f11);
+    const bool f11Preserved = markerWritten && readSettings() == marker &&
+                              app.video.display == savedDisplay && app.video.displayExplicit == savedDisplayExplicit &&
+                              ((SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0) != wasFullscreen;
+    SDL_AppEvent(&app, &f11);
+    const bool f11Restored = markerWritten && readSettings() == marker &&
+                             app.video.display == savedDisplay && app.video.displayExplicit == savedDisplayExplicit &&
+                             (((SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0) == wasFullscreen);
+    problems += !f11Preserved || !f11Restored;
+    std::printf("F11: INI unchanged %s, fullscreen toggled and restored %s\\n",
+                f11Preserved ? "yes" : "NO", f11Restored ? "yes" : "NO");
     SDL_RemovePath(settingsPath().c_str());
     std::filesystem::remove(testDir);
     if (hadEnv) SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "CR_SAVE_DIR", keepEnv.c_str(), true);
@@ -23066,11 +23095,12 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         if (event->key.key == SDLK_X && !event->key.repeat && app.mode == Mode::Maps && app.runner.running())
             setSceneSkip(app, crinput::HeldSource::Keyboard, true);
         if (event->key.key == SDLK_F11 && !event->key.repeat) {
+            // F11 is a temporary window toggle, not a persistent Display setting.
+            const int savedDisplay = app.video.display;
             const bool wasFullscreen = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0;
             app.video.display = wasFullscreen ? 0 : 1;
-            app.video.displayExplicit = true; // persist the F11-selected mode; fullscreen still uses native mode unless resolution was chosen
             applyVideo(app);
-            saveMix(app);
+            app.video.display = savedDisplay;
             break;
         }
         if (app.vitaLogo.phase) { // the Vita's logos: confirm cuts the hold short
