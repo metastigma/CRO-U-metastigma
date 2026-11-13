@@ -16852,7 +16852,7 @@ int controlHintsSelfTest(App& app) {
         return contents;
     };
     const std::string marker = readSettings() + "f11_test_marker=must-survive\n";
-    const bool markerWritten = SDL_SaveFile(settingsPath().c_str(), marker.data(), marker.size()) == marker.size();
+    const bool markerWritten = SDL_SaveFile(settingsPath().c_str(), marker.data(), marker.size());
     const int savedDisplay = app.video.display;
     const bool savedDisplayExplicit = app.video.displayExplicit;
     const bool wasFullscreen = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0;
