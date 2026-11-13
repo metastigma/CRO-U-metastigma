@@ -32,9 +32,10 @@ with its Ogg Vorbis music.
 Either iPad release works as the game: 1.0.0, or the voiced 3.1.0 (Japanese voices, eight
 languages) with the same layout and art.
 
-The build is CR1:U's (C++17, SDL3, Vulkan or OpenGL; `docs/ENGINE.md`, "Building"). Settings and
-saves go to the `ChaosRingsOmegaHD` profile folder (`~/.local/share/preservation/ChaosRingsOmegaHD/`
-on Linux), apart from CR1:U's.
+The build is CR1:U's (C++17, SDL3, Vulkan or OpenGL; `docs/ENGINE.md`, "Building"). On desktop,
+`settings.ini` lives beside `chaosringsomega.exe`, and game saves live in the adjacent `saves/`
+folder. Keep both with the game folder for a portable installation. Android and iOS keep using
+their writable app-specific storage.
 
 The Vita copy alone runs as the Vita does: the iPhone's Retina layout on its 960 × 544 screen
 (Options, Display, Layout: Vita - also `--layout vita` over the iPad's data).
@@ -101,9 +102,7 @@ scripts in eight languages and textures, the Android release's sharper textures 
 alone is the game (its 960 x 544 layout), else the Android release alone (3.1.0's voiced data).
 
 If nothing is found the program says where it looked. The older places still work: `dataHD/`, `data/`, `ChaosRingsOmegaHDeng.app/` or `Payload/` straight in the game folder.
-To use a copy elsewhere: `--data <iOS data>` (or `CR_DATA`), `--vita <PCSG00499 folder>` (`CR_VITA`), `--android <folder>` (`CR_ANDROID`) - each also a folder picked in Options, Game, kept in `settings.ini`; `--vita none` / `--android none` without. Settings and saves go to the profile folder
-(`~/.local/share/preservation/ChaosRingsOmegaHD/` on Linux; the same folders under `%APPDATA%\` on Windows and
-`~/Library/Application Support/` on macOS), not the game folder. All four ports (CR1:U, CRO-U, CR2-U, CR3-U) look for their copies the same way.
+To use a copy elsewhere: `--data <iOS data>` (or `CR_DATA`), `--vita <PCSG00499 folder>` (`CR_VITA`), `--android <folder>` (`CR_ANDROID`) - each also a folder picked in Options, Game, kept in `settings.ini`; `--vita none` / `--android none` without. On desktop, settings are in `settings.ini` beside the executable and player slots, `resume.dat` and imported Vita saves are in `saves/\`. Existing profile saves are not moved automatically: copy your `save*.dat` and `resume.dat` into that folder. Android and iOS continue to use writable app-specific storage. All four ports (CR1:U, CRO-U, CR2-U, CR3-U) look for their game copies the same way.
 
 ## Vita save importing
 
@@ -182,8 +181,8 @@ MetalFX, in particular, is compiled but untested.
 | Android 7+ (arm64, x86-64) | the Android SDK and NDK: `git clone -b release-3.2.0 https://github.com/libsdl-org/SDL android/SDL`, then `gradle assembleRelease` in `android/` | OpenGL ES 3.0 | `Android/data/local.preservation.chaosringsomega/files/` on the shared storage (copy your files there over USB) |
 
 `-DCR_GLES=ON` builds the desktop game on OpenGL ES 3.0, as Android runs it (Mesa has it): a way
-to test that path without a device. Settings and saves go to SDL's profile folder:
-`%APPDATA%\preservation\ChaosRingsOmegaHD\` on Windows, `~/Library/Application Support/preservation/ChaosRingsOmegaHD/` on macOS.
+to test that path without a device. Desktop settings and saves stay portable beside the executable:
+`settings.ini` in the executable folder and save data in its `saves/\` subfolder.
 
 DLSS: the NGX headers and library from NVIDIA's [DLSS SDK](https://github.com/NVIDIA/DLSS)
 (`-DCR_DLSS_SDK=<its checkout>`, or `engine/third_party/dlss/`), its runtime copied next to the

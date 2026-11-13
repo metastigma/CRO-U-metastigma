@@ -503,3 +503,12 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [x] Rename the desktop CMake target and output to `chaosringsomega` (`chaosringsomega.exe` on Windows); update Linux launcher, macOS bundle paths, CI packaging, README and release notes.
 - [ ] CI build and runtime check on Windows: first launch must be exclusive fullscreen at the desktop resolution; inspect `CR_VIDEO_DEBUG=1` log to distinguish exclusive from borderless. Check F11, Alt+Tab, and Options > Display (Window / Fullscreen / Borderless). Confirm the executable is `chaosringsomega.exe`.
 
+
+
+## Portable settings and game saves — 2026-11-13
+
+- [x] Store desktop `settings.ini` beside the executable, using SDL's executable base path; retain `CR_SAVE_DIR` as an exact override for tests.
+- [x] Store desktop player slots, `resume.dat`, and imported Vita saves in `<exe>/saves/`; create the folder at startup and log its resolved path.
+- [x] Keep Android/iOS settings and saves in their writable app-specific folder rather than attempting to write beside a bundled executable.
+- [x] Route every existing slot/resume operation through the same save directory, including reset, autosave/resume, and Vita-save import.
+- [ ] CI and runtime verification: confirm `settings.ini` is read/written beside `chaosringsomega.exe`; confirm slot saves and `resume.dat` are read/written in `saves/\`; move an existing save set into that folder and verify it appears in the title-screen Load flow.
