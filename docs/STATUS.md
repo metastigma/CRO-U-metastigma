@@ -486,3 +486,10 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [x] Give HELP its own 16-step quadratic ease-out (0.8 s at 20 Hz): because the panel travels 480 units versus Options' 240, this matches the per-step movement of the Options windows; fade the panel, label and text with that same progress.
 - [x] Restart the Camp transition clock when Equip enters an equipment candidate list or opens/closes a gene-plate entries list, so HELP animates on every newly opened Equip subpage instead of inheriting the completed page timer.
 - [ ] CI build and in-game check: open Camp item lists at 60 FPS and verify the HELP panel enters as smoothly as the Options windows, with its final position and text outline unchanged.
+
+## NPC Joint attachments — 2026-11-13
+
+- [x] Replace the fixed two-pass attachment update with recursive parent-first evaluation, so multi-level Joint chains no longer depend on NPC ID order.
+- [x] Reapply attachments after NPC draw-list rebuilds, script actor repositioning, animation updates and the end of each field step before interpolation is recorded.
+- [x] Preserve the old duplicate-ID behavior: last matching parent instance and all matching child instances; preserve last matching user/node record selection.
+- [ ] In-game verification: nested Joint chains, parent animation, parent repositioning, and repeated child IDs.
