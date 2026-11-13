@@ -476,6 +476,7 @@ struct App {
         std::string message;
         int messageFrames = 0;
         int anim = 0;
+        float animClock = 0;          // same fixed 20 Hz clock as Options' slide-in
         float scroll = 0;
         int scrollKey = -1;
         std::array<cr::Texture, 31> plateArt; // gene_m*c.mct, loaded when a board first shows them
@@ -6008,6 +6009,8 @@ void campOpenEntries(App& app, int plate) {
     c.plate = plate;
     c.plateCursor = c.listCursor, c.plateTop = c.listTop;
     c.phase = App::Camp::Entries;
+    c.anim = 0;
+    c.animClock = 0;
     c.listCursor = c.listTop = 0;
     campRefreshList(app);
 }
@@ -6015,6 +6018,8 @@ void campCloseEntries(App& app) {
     App::Camp& c = app.camp;
     c.plate = 0;
     c.phase = App::Camp::List;
+    c.anim = 0;
+    c.animClock = 0;
     c.listCursor = c.plateCursor, c.listTop = c.plateTop;
     campRefreshList(app);
 }
@@ -6043,6 +6048,7 @@ void campOpenPage(App& app, int i) {
     }
     menuSound(app, se::kChoose);
     c.anim = 0;
+    c.animClock = 0;
     c.member = 0;
     c.message.clear();
     switch (i) {
@@ -6075,7 +6081,7 @@ void campBack(App& app) {
     case App::Camp::Items:
         if (c.phase == App::Camp::Ask) c.phase = App::Camp::Member;
         else if (c.phase == App::Camp::Member) c.phase = App::Camp::List;
-        else { c.page = App::Camp::Main; c.anim = 0; }
+        else { c.page = App::Camp::Main; c.anim = 0; c.animClock = 0; }
         return;
     case App::Camp::Equip:
         if (c.phase == App::Camp::Entries) { campCloseEntries(app); return; }
@@ -6083,15 +6089,17 @@ void campBack(App& app) {
         if (c.phase == App::Camp::Slot) { c.phase = App::Camp::Member; return; }
         c.page = App::Camp::Main;
         c.anim = 0;
+        c.animClock = 0;
         return;
     case App::Camp::Status:
         if (c.phase == App::Camp::Slot) { c.phase = App::Camp::Member; return; } // Slot = the detail
         c.page = App::Camp::Main;
         c.anim = 0;
+        c.animClock = 0;
         return;
     case App::Camp::Genes:
         if (c.phase == App::Camp::Entries) { campCloseEntries(app); return; }
-        c.page = App::Camp::Main; c.anim = 0; return;
+        c.page = App::Camp::Main; c.anim = 0; c.animClock = 0; return;
     }
 }
 
@@ -6165,6 +6173,8 @@ void campChoose(App& app) {
             }
             menuSound(app, se::kChoose);
             c.phase = App::Camp::List;
+            c.anim = 0;
+            c.animClock = 0;
         } else if (c.phase == App::Camp::List && !c.list.empty() && c.slot >= 3) {
             if (item == 0) {
                 pm.genes[c.slot - 3] = 0;
@@ -8192,15 +8202,20 @@ void drawCamp(App& app) {
     auto helpBoard = [&](int it) { // ComUty_HelpWindowDraw: original 336 x 68 panel and HELP tag
         if (it <= 0) return;
         right();
-        m.picture(17, 144, 8, ease);
-        m.picture(18, 144, -4, ease);
+        // HELP travels 480 units, twice the Options windows' 240-unit travel. Use 16
+        // fixed 20 Hz steps so its per-step movement matches their eight-step slide.
+        const float helpT = std::min(1.0f, float(c.anim) / 16.0f);
+        const float helpEase = 1 - (1 - helpT) * (1 - helpT);
+        const float slide = 480 * (1 - helpEase);
+        m.picture(17, 144 + slide, 8, helpEase);
+        m.picture(18, 144 + slide, -4, helpEase);
         std::vector<std::vector<std::string>> help;
         if (app.systemText.message(cr::itemHelpId(it), app.language, nullptr, help) && !help.empty()) {
             const int n = std::min(3, int(help[0].size()));
             static const int kTop[4] = {0, 24, 18, 10};
             m.setOutline(true);
             for (int i = 0; i < n; ++i)
-                m.text(help[0][size_t(i)], 156, float(kTop[n] + 8 + 16 * i), true, ease, 13);
+                m.text(help[0][size_t(i)], 156 + slide, float(kTop[n] + 8 + 16 * i), true, helpEase, 13);
             m.setOutline(true); // Restore the original outlined menu font for every list drawn after HELP.
         }
         left();
@@ -15685,7 +15700,11 @@ void drawFrame(App& app, bool present = true) {
         if (app.collection.open) drawCollection(app);
     }
     if (app.campOpen && !app.optionsOpen && !app.scc.open && !app.collection.open) {
-        ++app.camp.anim;
+        // Match Options: advance the eight-step Camp transition on the fixed 20 Hz clock,
+        // not once per rendered frame (which made it three times faster at 60 FPS).
+        for (app.camp.animClock += dt; app.camp.animClock >= 1.0f / kFramesPerSecond;
+             app.camp.animClock -= 1.0f / kFramesPerSecond)
+            ++app.camp.anim;
         drawCamp(app);
     }
     if (app.mapScreen.open) {
