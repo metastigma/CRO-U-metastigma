@@ -14,6 +14,16 @@ positions, formula constants) where it needs them.
 
 Licence: GPL-2.0-or-later (`LICENSE`); the bundled libraries keep their own (`THIRD_PARTY.md`).
 
+## Russian localization and community
+
+The Russian localization of the first *Chaos Rings* has been released for iPad and PlayStation Vita.
+Project news, release information and discussion:
+
+- [Telegram — Chaos Rings Rus](https://t.me/ChaosRingsRus) · [iPad release announcement](https://t.me/ChaosRingsRus/13)
+- [VK — Chaos Rings translation community](https://vk.com/club224211635)
+- [4PDA — PS Vita Russian localization listing](https://4pda.to/forum/index.php?showtopic=771459&st=3280)
+- [4PDA — fan translation discussion and iPad release announcement](https://4pda.to/forum/index.php?showtopic=948934&st=1360)
+
 ## Quick start
 
 ```sh
