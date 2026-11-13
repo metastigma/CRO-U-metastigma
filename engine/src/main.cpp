@@ -5889,7 +5889,7 @@ int campScrollKey(const App& app) {
     const App::Camp& c = app.camp;
     const int slotKey = c.phase == App::Camp::Slot ? 0 : c.slot;
     const int plateKey = c.phase == App::Camp::Entries ? c.plate : 0;
-    return int(c.page) * 10000000 + int(c.phase) * 1000000 + c.statusView * 100000 +
+    return int(c.page) * 10000000 + int(c.phase) * 1000000 +
            c.category * 10000 + c.member * 1000 + slotKey * 500 + plateKey;
 }
 float campScrollPx(const App& app) {
