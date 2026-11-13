@@ -8454,7 +8454,6 @@ void drawCamp(App& app) {
             if (c.list.empty()) m.text("No gene plates.", kRowX + 56, kRowY + 16, false, ease, 15);
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 const int it = c.list[size_t(k)];
-                const cr::PartyMember& gm = app.game.party[size_t(ch)];
                 const bool worn = campGeneWornByPair(app, it);
                 if (cr::isPlate(it)) drawGeneRow(app, m, x, y, it, lit, worn, ease);
                 else drawCampRow(app, m, x, y, it, 0, lit, ease);
@@ -19241,12 +19240,20 @@ int runSelfTest(App& app) {
         problems += app.game.party[0].equip[0] != 202 || ownedCount(app, 201) != 0 || ownedCount(app, 202) != 1;
         { // A gene submenu keeps its current plate visible and selects it, but not a plate worn elsewhere.
             const cr::GameState keepGame = app.game;
-            const std::array<int, cr::kGeneSlots> keepGenes0 = app.game.party[0].genes;
-            const std::array<int, cr::kGeneSlots> keepGenes1 = app.game.party[1].genes;
+            int keepGenes0[cr::kGeneSlots]{};
+            int keepGenes1[cr::kGeneSlots]{};
+            std::copy(std::begin(app.game.party[0].genes), std::end(app.game.party[0].genes), std::begin(keepGenes0));
+            std::copy(std::begin(app.game.party[1].genes), std::end(app.game.party[1].genes), std::begin(keepGenes1));
             app.game.pairs[0] = {0, 1};
             app.game.setFlag(0xfed, false);
-            app.game.party[0].genes = {474, 481, 482, 0};
-            app.game.party[1].genes = {475, 483, 0, 0};
+            app.game.party[0].genes[0] = 474;
+            app.game.party[0].genes[1] = 481;
+            app.game.party[0].genes[2] = 482;
+            app.game.party[0].genes[3] = 0;
+            app.game.party[1].genes[0] = 475;
+            app.game.party[1].genes[1] = 483;
+            app.game.party[1].genes[2] = 0;
+            app.game.party[1].genes[3] = 0;
             app.game.items[481] = app.game.items[482] = app.game.items[483] = 1;
             c.page = App::Camp::Equip;
             c.phase = App::Camp::Slot;
@@ -19261,8 +19268,8 @@ int runSelfTest(App& app) {
             problems += c.phase != App::Camp::List || !currentVisible || !otherSlotHidden || !otherMemberHidden ||
                         !currentSelected || !campGeneWornByPair(app, 481);
             app.game = keepGame;
-            app.game.party[0].genes = keepGenes0;
-            app.game.party[1].genes = keepGenes1;
+            std::copy(std::begin(keepGenes0), std::end(keepGenes0), std::begin(app.game.party[0].genes));
+            std::copy(std::begin(keepGenes1), std::end(keepGenes1), std::begin(app.game.party[1].genes));
             c.page = App::Camp::Equip;
             c.phase = App::Camp::Slot;
             c.member = 0;
