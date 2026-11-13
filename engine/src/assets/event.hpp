@@ -48,11 +48,12 @@ struct FieldNpc {
     int flagShow = -1, flagHide = -1; // NPC table +0 / +2 (flag numbers, -1 = none)
     int model = -1;              // NPC table +4, < 0 = no model (an invisible trigger)
     uint16_t kind = 0;           // NPC table +14: bit 0 + bit 15 = runs its script on touch
-    uint16_t treasure = 0;       // NPC table +18: bit 0/1 = treasure box (TreasureBoxManager)
+    uint16_t treasure = 0;       // NPC table +18: bits 0/1 = treasure box; bit 15 = NpcShadow_onoff
     uint16_t puzzle = 0;         // NPC table +20: the puzzle object it is (game/puzzle.hpp)
     int native = 0;              // NPC table +8: native initialiser (15 = fire-wall effect)
     int16_t link[4] = {0, 0, 0, 0}; // NPC table +22..+28: a candle switch's linked NPCs; a candle block's
                                     // start (+22, 0 = put away) and switch (+24)
+    int16_t shadow[4] = {0, 0, 0, 0}; // NPC table +30..+36, consumed by npc_shodow
     float scale = 1;             // NPC table +38: percent, -1 = 100
     float axes[3] = {-1, -1, -1}; // SetScale / AdjScale's (npc ctl +0x2c..+0x34, x y, z), in place of scale once set
     float rectAngle = 0;          // RectWrapper's box angle, fixed at room setup
@@ -60,6 +61,7 @@ struct FieldNpc {
 
     float base(int i) const { return pos[i] + ((model == 0 || model == 1) ? offset[i] : 0.0f); }
     bool touchTrigger() const { return (kind & 1) && (kind & 0x8000); }
+    bool hasShadow() const { return (treasure & 0x8000) != 0; }
     // RectWrapper::checkEventKick: setup base plus the box offset, rotated by the record angle.
     float boxCenterX() const { return base(0) + offset[0] * std::cos(rectAngle) + offset[2] * std::sin(rectAngle); }
     float boxCenterZ() const { return base(2) - offset[0] * std::sin(rectAngle) + offset[2] * std::cos(rectAngle); }
@@ -80,6 +82,7 @@ struct NpcRow {
     uint16_t kind = 0, box = 0;
     uint16_t puzzle = 0;    // +20: what a puzzle room makes of it (game/puzzle.hpp kPuzzle*)
     int16_t link[4] = {0, 0, 0, 0}; // +22..+28 (FieldNpc::link)
+    int16_t shadow[4] = {0, 0, 0, 0}; // +30..+36 (FieldNpc::shadow)
     float scale = 1;
 };
 

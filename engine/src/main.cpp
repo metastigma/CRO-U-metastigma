@@ -196,6 +196,9 @@ struct App {
     cr::GpuMesh triggerMesh;               // trigger boxes, shown with the collision overlay
     cr::GpuMesh puzzleBeams;               // the candle switches' beams (CandleSwitch::draw3D)
     cr::GpuMesh battleShadows;              // dynamic floor-shadow fans for battle fighters
+    cr::GpuMesh fieldShadows;               // dynamic soft shadows for the field leader and NPCs
+    std::vector<float> fieldShadowTris;
+    std::vector<uint8_t> fieldShadowAlpha;
     cr::GameState game;                    // flags / variables the scripts use (new game)
     int lastKick = 0;                      // trigger the player is standing in (fires once)
     std::string lastWarp;                  // shown in the status line
@@ -1465,6 +1468,9 @@ void unloadModel(App& app) {
     app.renderer.destroy(app.triggerMesh);
     app.renderer.destroy(app.puzzleBeams);
     app.renderer.destroy(app.battleShadows);
+    app.renderer.destroy(app.fieldShadows);
+    app.fieldShadowTris.clear();
+    app.fieldShadowAlpha.clear();
     app.collisionPolys = 0;
     unloadLoaded(app, app.model);
 }
@@ -3205,7 +3211,8 @@ struct ViewerHost : cr::EventHost {
         return v;
     }
     void npcShadow(int npc, bool on) override {
-        if (cr::FieldNpc* n = findNpc(app, npc)) n->treasure = uint16_t(on ? n->treasure | 0x8000 : n->treasure & 0x7fff); // (+0x12 bit 15; the port draws no NPC shadows)
+        if (cr::FieldNpc* n = findNpc(app, npc))
+            n->treasure = uint16_t(on ? n->treasure | 0x8000 : n->treasure & 0x7fff); // NpcShadow_onoff (+0x12 bit 15)
     }
     void puzzleTeleportCount(int n) override { app.puzzleTeleports = n; }
     void fireWall(int npc) override { // Uty_FireWall_Init: walls 454 / 453 burn (effect 0x98 / 0x99, looping)
@@ -3356,6 +3363,7 @@ struct ViewerHost : cr::EventHost {
         n.model = row.model;
         n.kind = row.kind;
         n.treasure = row.box;
+        std::memcpy(n.shadow, row.shadow, sizeof n.shadow);
         n.puzzle = row.puzzle;
         n.native = row.native;
         n.mdlRead = n.model >= 0;
@@ -14468,6 +14476,77 @@ void drawShadowFans(App& app, cr::GpuMesh& gpu, const std::vector<float>& tris, 
     app.renderer.drawMesh(gpu, nullptr, vp, mat);
 }
 
+// findObject3D type 0x13: resolve a model node by its record user id (1102 is the shadow anchor).
+int nodeOfUser(const cr::Model& model, int user) {
+    for (const auto& record : model.records)
+        if (record.user == user)
+            for (const auto& entry : model.objectNodes)
+                if (entry.first == record.id) return entry.second;
+    return -1;
+}
+
+void addModelShadow(App& app, const LoadedModel& model, const std::vector<cr::Mat4>& pose,
+                    const cr::Mat4& world, float rx, float rz, int percent, float modelAlpha) {
+    const int modelOpacity = int(std::lround(std::clamp(modelAlpha, 0.0f, 1.0f) * 255.0f));
+    if (modelOpacity == 0 || rx <= 0 || rz <= 0 || percent == 0) return;
+
+    cr::Vec3 at{world.m[12], world.m[13], world.m[14]};
+    if (percent < 0) {
+        at.y -= 0.2f; // a negative fourth value uses the model origin instead of the node anchor
+    } else {
+        const int node = nodeOfUser(model.cpu, 1102);
+        if (node >= 0 && node < int(pose.size())) {
+            const cr::Mat4 nodeWorld = world * pose[size_t(node)];
+            at.x = nodeWorld.m[12];
+            at.z = nodeWorld.m[14];
+        }
+        at.y += 0.1f;
+    }
+
+    const float yaw = std::atan2(world.m[8], world.m[10]);
+    const int alpha = std::abs(percent) * modelOpacity / 100;
+    if (alpha <= 0) return;
+    addShadowFan(app.fieldShadowTris, app.fieldShadowAlpha, at, yaw, rx, rz,
+                 float(std::min(alpha, 255)) / 255.0f);
+}
+
+void drawFieldShadows(App& app, const cr::Mat4& vp) {
+    app.fieldShadowTris.clear();
+    app.fieldShadowAlpha.clear();
+
+    if (app.havePlayer && playerShown(app) && !app.player.meshes.empty())
+        addModelShadow(app, app.player, app.player.world, playerWorld(shownWalker(app)),
+                       3.0f, 3.0f, 80, shownPlayerAlpha(app));
+
+    for (const App::NpcDraw& draw : app.npcDraws) {
+        if (draw.index < 0 || draw.index >= int(app.npcs.size())) continue;
+        const cr::FieldNpc& npc = app.npcs[size_t(draw.index)];
+        if (!npc.hasShadow()) continue;
+
+        const auto it = app.npcModels.find(draw.model);
+        if (it == app.npcModels.end() || it->second.meshes.empty()) continue;
+        const LoadedModel& model = it->second;
+
+        cr::Mat4 world;
+        float alpha = 1.0f;
+        shownNpc(app, draw, world, alpha);
+        if (alpha <= 0.001f) continue;
+
+        // The model cache is shared, but each NPC instance can have a different action and frame.
+        // Recalculate its pose here instead of reusing the last instance drawn by drawNpcs().
+        std::vector<cr::Mat4> pose;
+        if (npc.shadow[3] > 0 && !model.cpu.skeleton.nodes.empty()) {
+            const cr::Action* action = draw.action >= 0 && draw.action < int(model.actions.size())
+                                           ? &model.actions[size_t(draw.action)] : nullptr;
+            cr::computeWorld(model.cpu.skeleton, action, draw.time, pose);
+        }
+        addModelShadow(app, model, pose, world, float(npc.shadow[1]), float(npc.shadow[2]),
+                       npc.shadow[3], alpha);
+    }
+
+    drawShadowFans(app, app.fieldShadows, app.fieldShadowTris, app.fieldShadowAlpha, vp);
+}
+
 void drawBattleShadows(App& app, const cr::Mat4& vp) {
     drawShadowFans(app, app.battleShadows, app.battle.shadowTris, app.battle.shadowAlpha, vp);
 }
@@ -15370,6 +15449,7 @@ void drawFrame(App& app, bool present = true) {
             // the ship's blended c152 waves must not cover Vieg on the deck.
             if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, app.playerFaded);
             drawNpcs(app, mvp);
+            drawFieldShadows(app, mvp);
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
             drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // only effects flagged by battle-time setup face the camera
             if (app.showCollision && app.collision.vao) {
