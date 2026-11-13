@@ -5942,7 +5942,7 @@ std::vector<int> campEquipList(const App& app, int c, int slot) {
         const int geneSlot = slot - 3;
         const cr::PartyMember& pm = app.game.party[size_t(c)];
         const int current = pm.genes[size_t(geneSlot)];
-        if (slot > 3 && current > 0) out.push_back(0); // the separate "remove" row
+        bool currentAvailable = false;
 
         const int from = slot == 3 ? cr::kFirstPlate : cr::kFirstPlate + 7;
         const int to = slot == 3 ? cr::kFirstPlate + 7 : cr::kFirstPlate + cr::kPlates;
@@ -5957,8 +5957,14 @@ std::vector<int> campEquipList(const App& app, int c, int slot) {
                     if (genes[size_t(otherSlot)] == p && !(wearer == c && otherSlot == geneSlot))
                         wornElsewhere = true;
             }
-            if (!wornElsewhere) out.push_back(p);
+            if (!wornElsewhere) {
+                if (p == current) currentAvailable = true;
+                else out.push_back(p);
+            }
         }
+        // Show the equipped plate first; keep the explicit removal choice after the available plates.
+        if (currentAvailable) out.insert(out.begin(), current);
+        if (slot > 3 && current > 0) out.push_back(0);
         return out;
     }
     const int kind = slot == cr::kWeapon ? cr::kKindWeapon : slot == cr::kArmor ? cr::kKindArmor : cr::kKindJewel;
@@ -6285,7 +6291,7 @@ void campChoose(App& app) {
             const int worn = c.slot < 3 ? pm.equip[size_t(c.slot)] : pm.genes[size_t(c.slot - 3)];
             const auto equipped = std::find(c.list.begin(), c.list.end(), worn);
             if (worn > 0 && equipped != c.list.end()) {
-                // Open the submenu on the currently equipped item, not the leading "-" removal row.
+                // Prefer the currently equipped item when opening its submenu.
                 c.listCursor = int(equipped - c.list.begin());
                 c.listTop = c.listCursor;
             }
@@ -19238,7 +19244,7 @@ int runSelfTest(App& app) {
         for (int f = 0; f < 3; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
         key(SDLK_RETURN);                                     // wear the Bastard Sword (the bag as it was)
         problems += app.game.party[0].equip[0] != 202 || ownedCount(app, 201) != 0 || ownedCount(app, 202) != 1;
-        { // A gene submenu keeps its current plate visible and selects it, but not a plate worn elsewhere.
+        { // Put the current plate first, retain removal last, and exclude plates worn elsewhere.
             const cr::GameState keepGame = app.game;
             int keepGenes0[cr::kGeneSlots]{};
             int keepGenes1[cr::kGeneSlots]{};
@@ -19265,8 +19271,10 @@ int runSelfTest(App& app) {
             const bool otherSlotHidden = std::find(c.list.begin(), c.list.end(), 482) == c.list.end();
             const bool otherMemberHidden = std::find(c.list.begin(), c.list.end(), 483) == c.list.end();
             const bool currentSelected = !c.list.empty() && c.list[size_t(c.listCursor)] == 481;
+            const bool currentFirst = !c.list.empty() && c.list.front() == 481;
+            const bool removeLast = c.list.size() > 1 && c.list.back() == 0;
             problems += c.phase != App::Camp::List || !currentVisible || !otherSlotHidden || !otherMemberHidden ||
-                        !currentSelected || !campGeneWornByPair(app, 481);
+                        !currentSelected || !currentFirst || !removeLast || !campGeneWornByPair(app, 481);
             app.game = keepGame;
             std::copy(std::begin(keepGenes0), std::end(keepGenes0), std::begin(app.game.party[0].genes));
             std::copy(std::begin(keepGenes1), std::end(keepGenes1), std::begin(app.game.party[1].genes));
