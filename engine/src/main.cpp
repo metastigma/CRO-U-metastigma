@@ -8446,7 +8446,7 @@ void drawCamp(App& app) {
         } else if (c.slot >= 3) { // a gene plate for the slot: its board beside the list
             // The "-" row means remove this plate; do not preview the currently worn plate
             // there, otherwise the removal choice misleadingly looks like a second Mouse Genes row.
-            drawGeneBoard(app, m, item, ease, 1);
+            drawGeneBoard(app, m, 12, 92, item, ease, 1);
             right();
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 const int it = c.list[size_t(k)];
