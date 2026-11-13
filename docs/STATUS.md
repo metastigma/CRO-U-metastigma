@@ -478,3 +478,11 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [x] Считать параметры NPC из +30..+36; для каждого экземпляра отдельно вычислять pose по его action/time, чтобы NPC с одним model package не делили последнюю позу.
 - [x] Передавать параметры также для NPC, созданных скриптовым __EvtNpcMdlRead, а не только для исходного списка комнаты.
 - [ ] CI build и игровая сверка на iOS/Vita: положение, размеры и прозрачность теней; NPC с выключенным флагом не должен отбрасывать тень; проверить двух NPC одной модели с разными анимациями.
+
+
+## NPC Joint attachments — 2026-11-13
+
+- [x] Replace the fixed two-pass attachment update with recursive parent-first evaluation, so multi-level Joint chains no longer depend on NPC ID order.
+- [x] Reapply attachments after NPC draw-list rebuilds, script actor repositioning, animation updates and the end of each field step before interpolation is recorded.
+- [x] Preserve the old duplicate-ID behavior: last matching parent instance and all matching child instances; preserve last matching user/node record selection.
+- [ ] In-game verification: nested Joint chains, parent animation, parent repositioning, and repeated child IDs.
