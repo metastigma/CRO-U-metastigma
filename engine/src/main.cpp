@@ -6009,6 +6009,8 @@ void campOpenEntries(App& app, int plate) {
     c.plate = plate;
     c.plateCursor = c.listCursor, c.plateTop = c.listTop;
     c.phase = App::Camp::Entries;
+    c.anim = 0;
+    c.animClock = 0;
     c.listCursor = c.listTop = 0;
     campRefreshList(app);
 }
@@ -6016,6 +6018,8 @@ void campCloseEntries(App& app) {
     App::Camp& c = app.camp;
     c.plate = 0;
     c.phase = App::Camp::List;
+    c.anim = 0;
+    c.animClock = 0;
     c.listCursor = c.plateCursor, c.listTop = c.plateTop;
     campRefreshList(app);
 }
@@ -6169,6 +6173,8 @@ void campChoose(App& app) {
             }
             menuSound(app, se::kChoose);
             c.phase = App::Camp::List;
+            c.anim = 0;
+            c.animClock = 0;
         } else if (c.phase == App::Camp::List && !c.list.empty() && c.slot >= 3) {
             if (item == 0) {
                 pm.genes[c.slot - 3] = 0;

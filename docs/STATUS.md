@@ -484,4 +484,5 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 
 - [x] Advance Camp's eight-step transition on the same fixed 20 Hz clock as Options, rather than once per rendered frame; this keeps the easing duration consistent across display frame rates.
 - [x] Give HELP its own 16-step quadratic ease-out (0.8 s at 20 Hz): because the panel travels 480 units versus Options' 240, this matches the per-step movement of the Options windows; fade the panel, label and text with that same progress.
+- [x] Restart the Camp transition clock when Equip enters an equipment candidate list or opens/closes a gene-plate entries list, so HELP animates on every newly opened Equip subpage instead of inheriting the completed page timer.
 - [ ] CI build and in-game check: open Camp item lists at 60 FPS and verify the HELP panel enters as smoothly as the Options windows, with its final position and text outline unchanged.
