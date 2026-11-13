@@ -478,3 +478,10 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [x] Считать параметры NPC из +30..+36; для каждого экземпляра отдельно вычислять pose по его action/time, чтобы NPC с одним model package не делили последнюю позу.
 - [x] Передавать параметры также для NPC, созданных скриптовым __EvtNpcMdlRead, а не только для исходного списка комнаты.
 - [ ] CI build и игровая сверка на iOS/Vita: положение, размеры и прозрачность теней; NPC с выключенным флагом не должен отбрасывать тень; проверить двух NPC одной модели с разными анимациями.
+
+
+## Camp HELP panel slide-in — 2026-11-13
+
+- [x] HELP label, panel art and up to three help lines move together from the right using the existing Camp open/close easing.
+- [x] Preserve the existing outlined font and panel alpha; only the horizontal offset changes.
+- [ ] In-game verification: item description enters from beyond the right edge and settles at its current position without disturbing Camp list scrolling.
