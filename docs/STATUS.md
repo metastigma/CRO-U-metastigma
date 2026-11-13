@@ -482,6 +482,6 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 
 ## Camp HELP panel slide-in — 2026-11-13
 
-- [x] Restore the original MuScrList behavior: the HELP panel, label and text enter from the right using the Camp transition easing.
-- [x] Keep current main's outlined text rendering, panel positions, alpha fade and all Camp scroll/focus behavior unchanged.
-- [ ] In-game check: open Camp item lists and verify the HELP panel slides in from the right without changing its final position or the list outline.
+- [x] Advance Camp's eight-step transition on the same fixed 20 Hz clock as Options, rather than once per rendered frame; this keeps the easing duration consistent across display frame rates.
+- [x] Slide the HELP panel, HELP label and item description together from the right over the same 0.4-second quadratic ease-out; preserve final coordinates, alpha fade, text outline and Camp list behavior.
+- [ ] CI build and in-game check: open Camp item lists at 60 FPS and verify the HELP panel enters as smoothly as the Options windows, with its final position and text outline unchanged.

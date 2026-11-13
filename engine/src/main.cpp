@@ -476,6 +476,7 @@ struct App {
         std::string message;
         int messageFrames = 0;
         int anim = 0;
+        float animClock = 0;          // same fixed 20 Hz clock as Options' slide-in
         float scroll = 0;
         int scrollKey = -1;
         std::array<cr::Texture, 31> plateArt; // gene_m*c.mct, loaded when a board first shows them
@@ -6043,6 +6044,7 @@ void campOpenPage(App& app, int i) {
     }
     menuSound(app, se::kChoose);
     c.anim = 0;
+    c.animClock = 0;
     c.member = 0;
     c.message.clear();
     switch (i) {
@@ -6075,7 +6077,7 @@ void campBack(App& app) {
     case App::Camp::Items:
         if (c.phase == App::Camp::Ask) c.phase = App::Camp::Member;
         else if (c.phase == App::Camp::Member) c.phase = App::Camp::List;
-        else { c.page = App::Camp::Main; c.anim = 0; }
+        else { c.page = App::Camp::Main; c.anim = 0; c.animClock = 0; }
         return;
     case App::Camp::Equip:
         if (c.phase == App::Camp::Entries) { campCloseEntries(app); return; }
@@ -6083,15 +6085,17 @@ void campBack(App& app) {
         if (c.phase == App::Camp::Slot) { c.phase = App::Camp::Member; return; }
         c.page = App::Camp::Main;
         c.anim = 0;
+        c.animClock = 0;
         return;
     case App::Camp::Status:
         if (c.phase == App::Camp::Slot) { c.phase = App::Camp::Member; return; } // Slot = the detail
         c.page = App::Camp::Main;
         c.anim = 0;
+        c.animClock = 0;
         return;
     case App::Camp::Genes:
         if (c.phase == App::Camp::Entries) { campCloseEntries(app); return; }
-        c.page = App::Camp::Main; c.anim = 0; return;
+        c.page = App::Camp::Main; c.anim = 0; c.animClock = 0; return;
     }
 }
 
@@ -15686,7 +15690,11 @@ void drawFrame(App& app, bool present = true) {
         if (app.collection.open) drawCollection(app);
     }
     if (app.campOpen && !app.optionsOpen && !app.scc.open && !app.collection.open) {
-        ++app.camp.anim;
+        // Match Options: advance the eight-step Camp transition on the fixed 20 Hz clock,
+        // not once per rendered frame (which made it three times faster at 60 FPS).
+        for (app.camp.animClock += dt; app.camp.animClock >= 1.0f / kFramesPerSecond;
+             app.camp.animClock -= 1.0f / kFramesPerSecond)
+            ++app.camp.anim;
         drawCamp(app);
     }
     if (app.mapScreen.open) {
