@@ -14,15 +14,17 @@ positions, formula constants) where it needs them.
 
 Licence: GPL-2.0-or-later (`LICENSE`); the bundled libraries keep their own (`THIRD_PARTY.md`).
 
-## Russian localization and community
+## Russian localization — status
 
-The Russian localization of the first *Chaos Rings* has been released for iPad and PlayStation Vita.
-Project news, release information and discussion:
+The released Russian localization linked below is for the **first game, *Chaos Rings* (2010), for iPad and PlayStation Vita**. It is **not** a release for *Chaos Rings Omega*.
 
-- [Telegram — Chaos Rings Rus](https://t.me/ChaosRingsRus) · [iPad release announcement](https://t.me/ChaosRingsRus/13)
+- [Chaos Rings (first game) — iPad release announcement](https://t.me/ChaosRingsRus/13)
+- [Chaos Rings (first game) — PS Vita release listing](https://4pda.to/forum/index.php?showtopic=771459&st=3280)
+- [4PDA — iPad release announcement](https://4pda.to/forum/index.php?showtopic=948934&st=1360)
+- [Telegram — Chaos Rings Rus](https://t.me/ChaosRingsRus)
 - [VK — Chaos Rings translation community](https://vk.com/club224211635)
-- [4PDA — PS Vita Russian localization listing](https://4pda.to/forum/index.php?showtopic=771459&st=3280)
-- [4PDA — fan translation discussion and iPad release announcement](https://4pda.to/forum/index.php?showtopic=948934&st=1360)
+
+The Russian translation of *Chaos Rings Omega* is complete and is undergoing in-game testing and release preparation. No public Omega localization release has been published yet.
 
 ## Quick start
 
