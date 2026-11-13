@@ -25,11 +25,11 @@ Both scenarios were played to their endings by the built-in autoplayer. The rest
 ## Getting started
 
 1. Download the file for your system and unzip it.
-2. Start `chaosrings`. If it can't find your copy of the game, it asks you for one and sets it up.
+2. Start `chaosringsomega`. If it can't find your copy of the game, it asks you for one and sets it up.
 3. Play.
 
 - **Windows:** if SmartScreen warns about an unsigned program, choose *More info*, *Run anyway*.
-- **macOS:** right-click `chaosrings.app` and choose *Open* (it isn't signed).
+- **macOS:** right-click `chaosringsomega.app` and choose *Open* (it isn't signed).
 - **Linux:** `chmod +x` the AppImage, then run it.
 - **Android:** install the APK, then copy your game files over USB into
   `Android/data/local.preservation.chaosringsomega/files/`, in an `ios/`, `android/` or `vita/` folder.

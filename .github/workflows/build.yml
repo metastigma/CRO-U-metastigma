@@ -80,7 +80,7 @@ jobs:
         if: runner.os == 'Linux' && !matrix.dlss
         run: |
           mkdir -p dist
-          cp build/chaosrings build/crtool dist/
+          cp build/chaosringsomega build/crtool dist/
           cp README.md LICENSE THIRD_PARTY.md dist/
       - name: AppImage (Linux)
         if: runner.os == 'Linux' && !matrix.dlss
@@ -89,7 +89,7 @@ jobs:
         run: |
           wget -q -O linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy
-          ./linuxdeploy --appdir AppDir -e build/chaosrings -d packaging/linux/chaosringsomega.desktop -i packaging/linux/chaosringsomega.png --exclude-library "libvulkan.so*" --output appimage  # (the loader: the system's, with its drivers)
+          ./linuxdeploy --appdir AppDir -e build/chaosringsomega -d packaging/linux/chaosringsomega.desktop -i packaging/linux/chaosringsomega.png --exclude-library "libvulkan.so*" --output appimage  # (the loader: the system's, with its drivers)
           # (an AppImage runs on the oldest supported LTS too: nothing in it may need a newer glibc than 22.04's 2.35)
           need=$(find AppDir/usr -type f \( -name '*.so*' -o -path '*/bin/*' \) -exec objdump -T {} + 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
           echo "the AppImage needs $need"
@@ -107,12 +107,12 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           mkdir -p dist
-          lipo -info build/chaosrings.app/Contents/MacOS/chaosrings
-          ! otool -L build/chaosrings.app/Contents/MacOS/chaosrings | grep -e /opt/homebrew -e /usr/local  # (nothing of Homebrew's)
-          lipo -info build/chaosrings.app/Contents/Frameworks/libMoltenVK.dylib build/chaosrings.app/Contents/Frameworks/libvulkan.1.dylib
-          test -f build/chaosrings.app/Contents/Resources/vulkan/icd.d/MoltenVK_icd.json
+          lipo -info build/chaosringsomega.app/Contents/MacOS/chaosringsomega
+          ! otool -L build/chaosringsomega.app/Contents/MacOS/chaosringsomega | grep -e /opt/homebrew -e /usr/local  # (nothing of Homebrew's)
+          lipo -info build/chaosringsomega.app/Contents/Frameworks/libMoltenVK.dylib build/chaosringsomega.app/Contents/Frameworks/libvulkan.1.dylib
+          test -f build/chaosringsomega.app/Contents/Resources/vulkan/icd.d/MoltenVK_icd.json
           # (MoltenVK's and the loader's licences with them: Apache-2.0 - THIRD_PARTY.md)
-          lic=build/chaosrings.app/Contents/Resources/licenses
+          lic=build/chaosringsomega.app/Contents/Resources/licenses
           mkdir -p "$lic"
           find "$VULKAN_SDK/.." -maxdepth 5 \( -iname 'LICENSE*' -o -iname 'NOTICE*' \) | head -40
           for n in MoltenVK Vulkan-Loader; do
@@ -122,7 +122,7 @@ jobs:
           [ -f "$VULKAN_SDK/../Licenses/LICENSE.txt" ] && cp "$VULKAN_SDK/../Licenses/LICENSE.txt" "$lic/VulkanSDK-LICENSE.txt"  # (the SDK's: every component's)
           cp LICENSE THIRD_PARTY.md "$lic/"
           ls -la "$lic"
-          cp -R build/chaosrings.app dist/
+          cp -R build/chaosringsomega.app dist/
           cp build/crtool dist/
           cp README.md LICENSE THIRD_PARTY.md dist/
       # (packed here: an artifact keeps no file modes - the binaries' and the .app's executables)

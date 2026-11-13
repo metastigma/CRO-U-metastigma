@@ -493,3 +493,30 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [x] Reapply attachments after NPC draw-list rebuilds, script actor repositioning, animation updates and the end of each field step before interpolation is recorded.
 - [x] Preserve the old duplicate-ID behavior: last matching parent instance and all matching child instances; preserve last matching user/node record selection.
 - [ ] In-game verification: nested Joint chains, parent animation, parent repositioning, and repeated child IDs.
+
+## Desktop startup fullscreen and executable name — 2026-11-13
+
+- [x] Desktop default starts in SDL exclusive fullscreen using the monitor's current desktop mode; intentionally selected Window and Borderless modes remain available.
+- [x] Create the initial desktop window hidden and show it only after applying the selected display mode; deliberately windowed mode is centred.
+- [x] Keep Android/iOS startup behaviour unchanged; F11 toggles Windowed / exclusive fullscreen. A manually chosen resolution is tracked separately from the display-mode choice.
+- [x] Read and preserve legacy `settings.ini`; add `resolution_user_set` without removing or renaming existing keys.
+- [x] Rename the desktop CMake target and output to `chaosringsomega` (`chaosringsomega.exe` on Windows); update Linux launcher, macOS bundle paths, CI packaging, README and release notes.
+- [ ] CI build and runtime check on Windows: first launch must be exclusive fullscreen at the desktop resolution; inspect `CR_VIDEO_DEBUG=1` log to distinguish exclusive from borderless. Check F11, Alt+Tab, and Options > Display (Window / Fullscreen / Borderless). Confirm the executable is `chaosringsomega.exe`.
+
+
+
+## Portable settings and game saves — 2026-11-13
+
+- [x] Store desktop `settings.ini` beside the executable, using SDL's executable base path; retain `CR_SAVE_DIR` as an exact override for tests.
+- [x] Store desktop player slots, `resume.dat`, and imported Vita saves in `<exe>/saves/`; create the folder at startup and log its resolved path.
+- [x] Keep Android/iOS settings and saves in their writable app-specific folder rather than attempting to write beside a bundled executable.
+- [x] Route every existing slot/resume operation through the same save directory, including reset, autosave/resume, and Vita-save import.
+- [ ] CI and runtime verification: confirm `settings.ini` is read/written beside `chaosringsomega.exe`; confirm slot saves and `resume.dat` are read/written in `saves/`; move an existing save set into that folder and verify it appears in the title-screen Load flow.
+
+
+## Fullscreen startup ordering — 2026-11-13
+
+- [x] Keep the desktop window hidden while game data and `settings.ini` load; remove the earlier default-mode apply/show pass so the final saved mode is selected only once.
+- [x] Account for SDL3's deferred fullscreen flags on hidden windows: synchronize and inspect the mode only after showing the window.
+- [x] Retry a denied fullscreen request on the visible window; if exclusive mode is refused, retry desktop fullscreen rather than silently remaining windowed.
+- [ ] Windows runtime verification: repeated cold launches with `display=1`, `display_user_set=1`, `resolution_user_set=0` must always start full-screen; confirm `CR_VIDEO_DEBUG=1` reports the actual state.

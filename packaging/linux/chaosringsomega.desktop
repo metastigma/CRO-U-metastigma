@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=CRO-U
+Name=Chaos Rings Omega
 GenericName=Chaos Rings Omega (reimplementation)
 Comment=A reimplementation of Chaos Rings Omega (needs your own copy of the game)
-Exec=chaosrings
+Exec=chaosringsomega
 Icon=chaosringsomega
 Terminal=false
 Categories=Game;RolePlaying;
