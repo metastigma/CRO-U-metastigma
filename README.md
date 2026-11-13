@@ -20,7 +20,7 @@ Licence: GPL-2.0-or-later (`LICENSE`); the bundled libraries keep their own (`TH
 cd engine
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
-build/chaosrings
+build/chaosringsomega
 ```
 
 Your copy goes in the game folder - for this build `engine/build/`, or the folder you start it
@@ -64,16 +64,16 @@ the program - it finds it by itself. The game folder is:
 
 | Platform | The game folder |
 |---|---|
-| Windows, Linux | the folder holding `chaosrings.exe` / `chaosrings` |
+| Windows, Linux | the folder holding `chaosringsomega.exe` / `chaosringsomega` |
 | Linux AppImage | the folder holding the `.AppImage` |
-| macOS | the folder holding `chaosrings.app` (its `Contents/Resources/` works too) |
+| macOS | the folder holding `chaosringsomega.app` (its `Contents/Resources/` works too) |
 | Android | `Android/data/local.preservation.chaosringsomega/files/` on the shared storage (copy your files there over USB) |
 
 (then the working directory too). In it, a folder for each release you have - any one is enough:
 
 ```
 <game folder>/
-├── chaosrings                          (or chaosrings.exe, chaosrings.app, the .AppImage)
+├── chaosringsomega                          (or chaosringsomega.exe, chaosringsomega.app, the .AppImage)
 ├── font/                                your .ttf / .otf / .ttc files (optional)
 ├── ios/
 │   └── ChaosRingsOmegaHDeng.app/       the iPad 1.0.0's or 3.1.0's .app: its data/ (sys.evt, the .evt, .mct, .bin files)
@@ -117,7 +117,7 @@ profile locations and the optional command-line converter.
 Upscaled textures you make yourself, from your own copy - waifu2x or Real-ESRGAN, drawn in place of
 the originals:
 
-1. `chaosrings --export-textures` writes every picture the game draws to `<game folder>/textures/export/`
+1. `chaosringsomega --export-textures` writes every picture the game draws to `<game folder>/textures/export/`
    (`<hash>.crraw`; the profile folder's `textures/export/` if the game folder can't be written;
    `--export-textures <folder>` elsewhere). Each release exports its own pictures.
 2. `python3 tools/hd_textures.py <game folder>` upscales them into `<game folder>/textures/hd/`
@@ -142,7 +142,7 @@ anything shared.
 Models you make or improve yourself, drawn in place of the game's - more detailed, smoother,
 retextured - moving with the game's own skeleton and animations:
 
-1. `chaosrings --export-models` writes every model to `<game folder>/models/export/` as glTF 2.0
+1. `chaosringsomega --export-models` writes every model to `<game folder>/models/export/` as glTF 2.0
    (`<name>.glb`: its skeleton, meshes, materials, pictures and animations; `--export-models <folder>`
    elsewhere). Blender (File, Import, glTF 2.0) opens them as they are, animations included.
 2. Edit it - sculpt, subdivide, rebuild, re-weight, paint - keeping the armature: its bones are named
@@ -176,9 +176,9 @@ MetalFX, in particular, is compiled but untested.
 
 | Platform | Build | Renderer | The game folder (its `ios/`, `android/`, `vita/`, `textures/`) |
 |---|---|---|---|
-| Linux | as above | Vulkan, OpenGL 3.3; FSR 3.1, DLSS (with the SDK) | the folder holding `chaosrings`, or the AppImage |
-| Windows 10+ (x64) | MSVC and Ninja from a Developer prompt, the [Vulkan SDK](https://vulkan.lunarg.com/) for Vulkan - or from Linux with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): `-DCMAKE_TOOLCHAIN_FILE=engine/cmake/llvm-mingw-x86_64.cmake` (runs under Wine). SDL3 and zlib are built by CMake | Vulkan, OpenGL 3.3; FSR 3.1, DLSS (MSVC, with the SDK) | the folder holding `chaosrings.exe` |
-| macOS 11+ (Apple silicon and Intel) | Xcode's command-line tools, Ninja and the [Vulkan SDK](https://vulkan.lunarg.com/) (MoltenVK, copied into the `.app`); add `"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"` for both | Vulkan (MoltenVK), OpenGL 3.3; FSR 3.1, MetalFX (macOS 13+) | the folder holding `chaosrings.app` (or its `Contents/Resources/`) |
+| Linux | as above | Vulkan, OpenGL 3.3; FSR 3.1, DLSS (with the SDK) | the folder holding `chaosringsomega`, or the AppImage |
+| Windows 10+ (x64) | MSVC and Ninja from a Developer prompt, the [Vulkan SDK](https://vulkan.lunarg.com/) for Vulkan - or from Linux with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): `-DCMAKE_TOOLCHAIN_FILE=engine/cmake/llvm-mingw-x86_64.cmake` (runs under Wine). SDL3 and zlib are built by CMake | Vulkan, OpenGL 3.3; FSR 3.1, DLSS (MSVC, with the SDK) | the folder holding `chaosringsomega.exe` |
+| macOS 11+ (Apple silicon and Intel) | Xcode's command-line tools, Ninja and the [Vulkan SDK](https://vulkan.lunarg.com/) (MoltenVK, copied into the `.app`); add `"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"` for both | Vulkan (MoltenVK), OpenGL 3.3; FSR 3.1, MetalFX (macOS 13+) | the folder holding `chaosringsomega.app` (or its `Contents/Resources/`) |
 | Android 7+ (arm64, x86-64) | the Android SDK and NDK: `git clone -b release-3.2.0 https://github.com/libsdl-org/SDL android/SDL`, then `gradle assembleRelease` in `android/` | OpenGL ES 3.0 | `Android/data/local.preservation.chaosringsomega/files/` on the shared storage (copy your files there over USB) |
 
 `-DCR_GLES=ON` builds the desktop game on OpenGL ES 3.0, as Android runs it (Mesa has it): a way

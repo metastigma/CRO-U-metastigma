@@ -493,3 +493,13 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [x] Reapply attachments after NPC draw-list rebuilds, script actor repositioning, animation updates and the end of each field step before interpolation is recorded.
 - [x] Preserve the old duplicate-ID behavior: last matching parent instance and all matching child instances; preserve last matching user/node record selection.
 - [ ] In-game verification: nested Joint chains, parent animation, parent repositioning, and repeated child IDs.
+
+## Desktop startup fullscreen and executable name — 2026-11-13
+
+- [x] Desktop default starts in SDL exclusive fullscreen using the monitor's current desktop mode; intentionally selected Window and Borderless modes remain available.
+- [x] Create the initial desktop window hidden and show it only after applying the selected display mode; deliberately windowed mode is centred.
+- [x] Keep Android/iOS startup behaviour unchanged; F11 toggles Windowed / exclusive fullscreen. A manually chosen resolution is tracked separately from the display-mode choice.
+- [x] Read and preserve legacy `settings.ini`; add `resolution_user_set` without removing or renaming existing keys.
+- [x] Rename the desktop CMake target and output to `chaosringsomega` (`chaosringsomega.exe` on Windows); update Linux launcher, macOS bundle paths, CI packaging, README and release notes.
+- [ ] CI build and runtime check on Windows: first launch must be exclusive fullscreen at the desktop resolution; inspect `CR_VIDEO_DEBUG=1` log to distinguish exclusive from borderless. Check F11, Alt+Tab, and Options > Display (Window / Fullscreen / Borderless). Confirm the executable is `chaosringsomega.exe`.
+
