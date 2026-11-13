@@ -6504,11 +6504,14 @@ void campPointerUp(App& app, float px, float py) {
 
 // A list row (ComUty_CampItemPlate): plate 8 / 9, the icon, the name, the count at (222, 30)
 void drawCampRow(App& app, cr::MenuPainter& m, float x, float y, int item, int count, bool lit, float a,
-                 const std::string& label = std::string()) {
+                 const std::string& label = std::string(), bool worn = false) {
     m.picture(lit ? 9 : 8, x, y, a);
     if (const cr::ItemParam* p = app.itemTable.item(item); p && p->icon >= 0)
         m.piece(x + 12, y + 8, float(p->icon % 16) * 32, 248 + float(p->icon / 16) * 32, 32, 32, a);
-    m.text(item > 0 ? itemName(app, item) : std::string("-"), x + 56, y + 12, false, a, 14);
+    const std::string name = item > 0 ? itemName(app, item) : std::string("-");
+    // Match the original Camp's yellow worn-item tint, independently of the row cursor.
+    if (worn) m.textTint(name, x + 56, y + 12, 1, 1, 0.25f, a, 14);
+    else m.text(name, x + 56, y + 12, false, a, 14);
     if (!label.empty()) m.text(label, x + 56, y + 30, false, a * 0.8f, 11);
     if (count > 0) drawShopNumber(m, count, x + 222 - 10, y + 30, 2, 10, a, 2);
 }
@@ -8399,7 +8402,8 @@ void drawCamp(App& app) {
             right();
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 const int it = c.list[size_t(k)];
-                drawCampRow(app, m, x, y, it, it > 0 ? ownedCount(app, it) : 0, lit, ease);
+                const bool worn = it > 0 && pm.equip[size_t(c.slot)] == it;
+                drawCampRow(app, m, x, y, it, it > 0 ? ownedCount(app, it) : 0, lit, ease, std::string(), worn);
             });
             helpBoard(item);
         }
