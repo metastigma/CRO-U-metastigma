@@ -23001,7 +23001,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         if (event->key.key == SDLK_F11 && !event->key.repeat) {
             const bool wasFullscreen = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0;
             app.video.display = wasFullscreen ? 0 : 1;
-            app.video.displayExplicit = wasFullscreen; // re-enter fullscreen using remembered resolution or desktop mode
+            app.video.displayExplicit = true; // persist the F11-selected mode; fullscreen still uses native mode unless resolution was chosen
             applyVideo(app);
             saveMix(app);
             break;
