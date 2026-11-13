@@ -16842,14 +16842,42 @@ int controlHintsSelfTest(App& app) {
         shortcut = toggled && !app.showHud;
         problems += !shortcut;
     }
+
+    // F11 changes the live window only. Even a later saveMix() must not persist that temporary state.
+    auto readSettings = [&] {
+        size_t n = 0;
+        char* bytes = static_cast<char*>(SDL_LoadFile(settingsPath().c_str(), &n));
+        std::string contents = bytes ? std::string(bytes, n) : std::string();
+        SDL_free(bytes);
+        return contents;
+    };
+    const std::string marker = readSettings() + "f11_test_marker=must-survive\n";
+    const bool markerWritten = SDL_SaveFile(settingsPath().c_str(), marker.data(), marker.size()) == marker.size();
+    const int savedDisplay = app.video.display;
+    const bool savedDisplayExplicit = app.video.displayExplicit;
+    const bool wasFullscreen = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0;
+    SDL_Event f11{};
+    f11.type = SDL_EVENT_KEY_DOWN;
+    f11.key.key = SDLK_F11;
+    f11.key.down = true;
+    SDL_AppEvent(&app, &f11);
+    const bool f11Preserved = markerWritten && readSettings() == marker &&
+                              app.video.display == savedDisplay && app.video.displayExplicit == savedDisplayExplicit &&
+                              ((SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0) != wasFullscreen;
+    SDL_AppEvent(&app, &f11);
+    const bool f11Restored = markerWritten && readSettings() == marker &&
+                             app.video.display == savedDisplay && app.video.displayExplicit == savedDisplayExplicit &&
+                             (((SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) != 0) == wasFullscreen);
+    problems += !f11Preserved || !f11Restored;
     SDL_RemovePath(settingsPath().c_str());
     std::filesystem::remove(testDir);
     if (hadEnv) SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "CR_SAVE_DIR", keepEnv.c_str(), true);
     else SDL_UnsetEnvironmentVariable(SDL_GetEnvironment(), "CR_SAVE_DIR");
     app.showHud = keepHud;
     app.persist = keepPersist;
-    std::printf("control hints: settings Off persists %s, On persists %s, F3 persists %s; %d problems\n",
-                off ? "yes" : "NO", on ? "yes" : "NO", shortcut ? "yes" : "NO", problems);
+    std::printf("control hints: settings Off persists %s, On persists %s, F3 persists %s; F11 preserves settings %s and restores the window %s; %d problems\n",
+                off ? "yes" : "NO", on ? "yes" : "NO", shortcut ? "yes" : "NO",
+                f11Preserved ? "yes" : "NO", f11Restored ? "yes" : "NO", problems);
     return problems;
 }
 
@@ -22921,10 +22949,11 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         if (event->key.key == SDLK_X && !event->key.repeat && app.mode == Mode::Maps && app.runner.running())
             setSceneSkip(app, crinput::HeldSource::Keyboard, true);
         if (event->key.key == SDLK_F11 && !event->key.repeat) {
+            // F11 is a temporary window toggle, not a change to the display mode saved in settings.ini.
+            const int savedDisplay = app.video.display;
             app.video.display = (SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN) ? 0 : 2;
-            app.video.displayExplicit = true;
             applyVideo(app);
-            saveMix(app);
+            app.video.display = savedDisplay;
             break;
         }
         if (app.vitaLogo.phase) { // the Vita's logos: confirm cuts the hold short
