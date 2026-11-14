@@ -1,0 +1,43 @@
+diff --git a/src/joystick/windows/SDL_windowsjoystick.c b/src/joystick/windows/SDL_windowsjoystick.c
+--- a/src/joystick/windows/SDL_windowsjoystick.c
++++ b/src/joystick/windows/SDL_windowsjoystick.c
+@@
+ static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_Mutex *mutex)
+ {
+     MSG msg;
+     int lastret = 1;
++    bool timed_out = false;
+ 
+     if (!data->messageWindow) {
+         return false; // device notifications require a window
+     }
+ 
+     SDL_UnlockMutex(mutex);
+     while (lastret > 0 && !WindowsDeviceChanged()) {
+-        lastret = GetMessage(&msg, NULL, 0, 0); // WM_QUIT causes return value of 0
+-        if (lastret > 0) {
++        // A wireless controller can wake behind an already-enumerated USB receiver
++        // without producing WM_DEVICECHANGE. Periodically return to the XInput
++        // capability scan in SDL_JoystickThread instead of blocking indefinitely.
++        const DWORD wait_result = MsgWaitForMultipleObjectsEx(0, NULL, 1000, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
++        if (wait_result == WAIT_TIMEOUT) {
++            timed_out = true;
++            break;
++        }
++        if (wait_result != WAIT_OBJECT_0) {
++            lastret = -1;
++            break;
++        }
++        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
++            if (msg.message == WM_QUIT) {
++                lastret = 0;
++                break;
++            }
+             TranslateMessage(&msg);
+             DispatchMessage(&msg);
+         }
+     }
+     SDL_LockMutex(mutex);
+-    return (lastret != -1);
++    return (lastret != -1 && !timed_out);
+ }
