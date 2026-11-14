@@ -22207,14 +22207,6 @@ void videoArgs(App& app, int argc, char** argv) {
 
 SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
-#ifdef SDL_PLATFORM_WINDOWS
-    // Use SDL's XInput backend for the Vader. RawInput sees the always-connected
-    // receiver, not the controller's later XInput slot activation; XInput polling
-    // detects that state transition even when no USB device-arrival event occurs.
-    SDL_SetHint(SDL_HINT_JOYSTICK_RAWINPUT, "0");
-    SDL_SetHint(SDL_HINT_XINPUT_ENABLED, "1");
-    SDL_SetHint(SDL_HINT_JOYSTICK_THREAD, "1");
-#endif
     SDL_SetAppMetadata("Chaos Rings Omega HD (reimplementation)", "0.1", "local.preservation.chaosringsomega");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_Init: %s", SDL_GetError());
