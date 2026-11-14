@@ -71,7 +71,8 @@ static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_
         // A wireless XInput pad can wake behind an already-connected USB receiver
         // without a new HID device notification. Time out so SDL's existing thread
         // can poll XInputGetCapabilities() and trigger joystick re-enumeration.
-        const DWORD wait_result = MsgWaitForMultipleObjectsEx(0, NULL, 1000, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        // The caller's existing one-second condition wait drives the XInput slot scan.
+        const DWORD wait_result = MsgWaitForMultipleObjectsEx(0, NULL, 0, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         if (wait_result == WAIT_TIMEOUT) {
             timed_out = true;
             break;
