@@ -1,21 +1,40 @@
 diff --git a/src/joystick/windows/SDL_windowsjoystick.c b/src/joystick/windows/SDL_windowsjoystick.c
 --- a/src/joystick/windows/SDL_windowsjoystick.c
 +++ b/src/joystick/windows/SDL_windowsjoystick.c
-@@
- static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_Mutex *mutex)
- {
-     MSG msg;
-     int lastret = 1;
-+    bool timed_out = false;
- 
-     if (!data->messageWindow) {
-         return false; // device notifications require a window
-     }
- 
-     SDL_UnlockMutex(mutex);
-     while (lastret > 0 && !WindowsDeviceChanged()) {
+@@ -193,21 +193,36 @@
+-static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_Mutex *mutex)
+-{
+-    MSG msg;
+-    int lastret = 1;
+-
+-    if (!data->messageWindow) {
+-        return false; // device notifications require a window
+-    }
+-
+-    SDL_UnlockMutex(mutex);
+-    while (lastret > 0 && !WindowsDeviceChanged()) {
 -        lastret = GetMessage(&msg, NULL, 0, 0); // WM_QUIT causes return value of 0
 -        if (lastret > 0) {
+-            TranslateMessage(&msg);
+-            DispatchMessage(&msg);
+-        }
+-    }
+-    SDL_LockMutex(mutex);
+-    return (lastret != -1);
+-}
+-
++static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_Mutex *mutex)
++{
++    MSG msg;
++    int lastret = 1;
++    bool timed_out = false;
++
++    if (!data->messageWindow) {
++        return false; // device notifications require a window
++    }
++
++    SDL_UnlockMutex(mutex);
++    while (lastret > 0 && !WindowsDeviceChanged()) {
 +        // A wireless controller can wake behind an already-enumerated USB receiver
 +        // without producing WM_DEVICECHANGE. Periodically return to the XInput
 +        // capability scan in SDL_JoystickThread instead of blocking indefinitely.
@@ -33,11 +52,10 @@ diff --git a/src/joystick/windows/SDL_windowsjoystick.c b/src/joystick/windows/S
 +                lastret = 0;
 +                break;
 +            }
-             TranslateMessage(&msg);
-             DispatchMessage(&msg);
-         }
-     }
-     SDL_LockMutex(mutex);
--    return (lastret != -1);
++            TranslateMessage(&msg);
++            DispatchMessage(&msg);
++        }
++    }
++    SDL_LockMutex(mutex);
 +    return (lastret != -1 && !timed_out);
- }
++}
