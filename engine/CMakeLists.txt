@@ -10,16 +10,27 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# SDL3: use the system package when present (Linux, Homebrew, vcpkg), otherwise
-# fetch and build it from source (Windows/macOS without a package manager, Android).
-find_package(SDL3 CONFIG QUIET)
+# SDL3: use the modern Windows joystick drivers on desktop Windows. The pinned
+# upstream snapshot removes the old RawInput/WGI drivers and includes the
+# GameInput/XInput/DirectInput hot-plug and Flydigi XUSB detection fixes.
+# Keep the existing stable SDL dependency on other platforms.
+if(NOT WIN32)
+    find_package(SDL3 CONFIG QUIET)
+else()
+    set(SDL3_FOUND FALSE)
+endif()
 if(NOT SDL3_FOUND)
     include(FetchContent)
-    FetchContent_Declare(SDL3
-        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG release-3.2.0  # first stable SDL3; has every API we use. Safe to bump.
-        GIT_SHALLOW TRUE)
+    if(WIN32)
+        FetchContent_Declare(SDL3
+            GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+            GIT_TAG 59ccf612c1ee00e3845947503ead7da3f46f6615)
+    else()
+        FetchContent_Declare(SDL3
+            GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+            GIT_TAG release-3.2.0
+            GIT_SHALLOW TRUE)
+    endif()
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(SDL3)

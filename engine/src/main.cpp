@@ -507,6 +507,7 @@ struct App {
     // opens / closes the menu, □ skips text, L / R turn pages; in puzzle rooms START restarts,
     // SELECT shows the help, and □ (no text to skip) uses the ability, which the Vita leaves to touch
     SDL_Gamepad* pad = nullptr;
+    Uint64 padRescanAt = 0;              // retry discovery if a wireless controller wakes after startup
     bool padConfirmEast = true;
     // CRO-U's own (Options, Game: Field Speed, Battle Speed): the field - while the player walks it,
     // nothing over it - and the battles run this many times as fast (1, or 2 .. 5)
@@ -1696,6 +1697,7 @@ void startNewGame(App& app, int scenario = 0);
 void bootTitle(App& app);
 void padButton(App& app, int b);
 void padStep(App& app, float dt);
+void refreshGamepad(App& app, SDL_JoystickID preferredId, bool reportFailure);
 void puzzleTouchStep(App& app, float dt); // used by the controller gesture regression below
 void puzzleTouchPrepare(App& app); // called by the puzzle input self-test before its definition
 void puzzleTouchCacheBindings(App& app); // called by the puzzle input self-test before its definition
@@ -23124,8 +23126,78 @@ void padButton(App& app, int b) {
     if (confirm) padKey(app, SDLK_RETURN);
     else if (cancel && (padMenus(app) || app.mapScreen.open || app.staffRoll.open)) padKey(app, SDLK_ESCAPE); // (not on the field: Esc quits)
 }
+void closeGamepad(App& app) {
+    if (!app.pad) return;
+    setSceneSkip(app, crinput::HeldSource::Gamepad, false);
+    puzzleTouchCancel(app);
+    SDL_CloseGamepad(app.pad);
+    app.pad = nullptr;
+    app.puzzleTouch.rawR3Buttons.clear();
+    app.padHeld = -1;
+    app.padHeldFor = 0;
+    app.padHeldOver.cancel();
+}
+
+// Recover a controller that becomes available after a wireless receiver wakes it.
+void refreshGamepad(App& app, SDL_JoystickID preferredId, bool reportFailure) {
+    int count = 0;
+    SDL_JoystickID* devices = SDL_GetGamepads(&count);
+    if (!devices) {
+        if (reportFailure)
+            SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "controller: SDL_GetGamepads failed: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_JoystickID selectedId = 0;
+    if (preferredId != 0) {
+        // An ADDED event identifies the new device. Prefer it over a still-connected
+        // receiver/old handle instead of silently keeping the previous controller.
+        for (int i = 0; i < count; ++i) {
+            if (devices[i] == preferredId) {
+                selectedId = preferredId;
+                break;
+            }
+        }
+    } else if (app.pad && SDL_GamepadConnected(app.pad)) {
+        SDL_free(devices);
+        return;
+    } else if (count > 0) {
+        selectedId = devices[0];
+    }
+    SDL_free(devices);
+
+    if (selectedId == 0) {
+        if (reportFailure) {
+            if (preferredId != 0)
+                SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "controller: added gamepad %u is not in SDL_GetGamepads",
+                            unsigned(preferredId));
+            else
+                SDL_Log("controller: no mapped gamepads currently available");
+        }
+        return;
+    }
+
+    if (app.pad && SDL_GamepadConnected(app.pad) && SDL_GetGamepadID(app.pad) == selectedId)
+        return;
+
+    SDL_Gamepad* candidate = SDL_OpenGamepad(selectedId);
+    if (!candidate) {
+        if (reportFailure)
+            SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "controller: could not open gamepad %u: %s",
+                        unsigned(selectedId), SDL_GetError());
+        return;
+    }
+
+    // Open the replacement first. Only discard the old handle after the new one
+    // has opened successfully, so a transient open failure cannot lose working input.
+    if (app.pad) closeGamepad(app);
+    app.pad = candidate;
+    puzzleTouchCacheBindings(app);
+    SDL_Log("controller: %s (instance %u)", SDL_GetGamepadName(app.pad),
+            unsigned(SDL_GetGamepadID(app.pad)));
+}
 bool padLive(App& app) {
-    if (!app.pad) return false;
+    if (!app.pad || !SDL_GamepadConnected(app.pad)) return false;
     const float lx = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTX)) / 32767.0f;
     const float ly = float(SDL_GetGamepadAxis(app.pad, SDL_GAMEPAD_AXIS_LEFTY)) / 32767.0f;
     bool held = std::sqrt(lx * lx + ly * ly) >= 0.25f; // (the dead zone)
@@ -23198,22 +23270,34 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     switch (event->type) {
     case SDL_EVENT_QUIT:
         return SDL_APP_SUCCESS;
+    case SDL_EVENT_JOYSTICK_ADDED:
+        SDL_Log("joystick appeared: id=%u name=%s type=%d mapped_gamepad=%d",
+                unsigned(event->jdevice.which),
+                SDL_GetJoystickNameForID(event->jdevice.which) ? SDL_GetJoystickNameForID(event->jdevice.which) : "(unknown)",
+                int(SDL_GetJoystickTypeForID(event->jdevice.which)),
+                int(SDL_IsGamepad(event->jdevice.which)));
+        if (SDL_IsGamepad(event->jdevice.which))
+            refreshGamepad(app, event->jdevice.which, true);
+        break;
     case SDL_EVENT_GAMEPAD_ADDED:
-        if (!app.pad) {
-            app.pad = SDL_OpenGamepad(event->gdevice.which);
-            if (app.pad) {
-                puzzleTouchCacheBindings(app);
-                SDL_Log("controller: %s", SDL_GetGamepadName(app.pad));
-            }
+        SDL_Log("gamepad appeared: id=%u name=%s", unsigned(event->gdevice.which),
+                SDL_GetGamepadNameForID(event->gdevice.which) ? SDL_GetGamepadNameForID(event->gdevice.which) : "(unknown)");
+        refreshGamepad(app, event->gdevice.which, true);
+        break;
+    case SDL_EVENT_JOYSTICK_REMOVED:
+        SDL_Log("joystick removed: id=%u", unsigned(event->jdevice.which));
+        if (app.pad && SDL_GetGamepadID(app.pad) == event->jdevice.which) {
+            closeGamepad(app);
+            app.padRescanAt = 0;
+            refreshGamepad(app, 0, false);
         }
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
+        SDL_Log("gamepad removed: id=%u", unsigned(event->gdevice.which));
         if (app.pad && SDL_GetGamepadID(app.pad) == event->gdevice.which) {
-            setSceneSkip(app, crinput::HeldSource::Gamepad, false);
-            puzzleTouchCancel(app);
-            SDL_CloseGamepad(app.pad);
-            app.pad = nullptr;
-            app.puzzleTouch.rawR3Buttons.clear();
+            closeGamepad(app);
+            app.padRescanAt = 0;
+            refreshGamepad(app, 0, false);
         }
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
@@ -23653,6 +23737,12 @@ SDL_AppResult SDL_AppIterate(void* state) {
     App& app = *static_cast<App*>(state);
     const float activeDt = app.clock.step();
     stepCampScroll(app, activeDt);
+    const Uint64 padNow = SDL_GetTicks();
+    if ((!app.pad || !SDL_GamepadConnected(app.pad)) && padNow >= app.padRescanAt) {
+        app.padRescanAt = padNow + 1000;
+        SDL_UpdateJoysticks();
+        refreshGamepad(app, 0, false);
+    }
     padStep(app, activeDt);
     puzzleTouchStep(app, activeDt);
     app.music.update(activeDt);
