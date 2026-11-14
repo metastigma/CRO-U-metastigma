@@ -71,7 +71,8 @@ static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_
         // A wireless controller can wake behind an already-enumerated USB receiver
         // without producing WM_DEVICECHANGE. Periodically return to the XInput
         // capability scan in SDL_JoystickThread instead of blocking indefinitely.
-        const DWORD wait_result = MsgWaitForMultipleObjectsEx(0, NULL, 1000, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        // The caller's existing one-second condition wait drives the XInput capability scan.
+        const DWORD wait_result = MsgWaitForMultipleObjectsEx(0, NULL, 0, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         if (wait_result == WAIT_TIMEOUT) {
             timed_out = true;
             break;
