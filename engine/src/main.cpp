@@ -22208,9 +22208,10 @@ void videoArgs(App& app, int argc, char** argv) {
 SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #ifdef SDL_PLATFORM_WINDOWS
-    // This game explicitly uses XInput-mapped SDL gamepads. Keep SDL's native
-    // XInput backend enabled and its Windows device-detection thread polling
-    // controller slots when a wireless pad wakes behind an already-present receiver.
+    // The Vader is used in XInput mode. Keep SDL's RawInput/XInput correlation
+    // path active; the bundled SDL patch periodically re-enumerates RawInput
+    // devices when the controller wakes behind its already-connected receiver.
+    SDL_SetHint(SDL_HINT_JOYSTICK_RAWINPUT, "1");
     SDL_SetHint(SDL_HINT_XINPUT_ENABLED, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_THREAD, "1");
 #endif
