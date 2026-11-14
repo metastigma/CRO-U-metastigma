@@ -11,18 +11,51 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# SDL3: use the system package when present (Linux, Homebrew, vcpkg), otherwise
-# fetch and build it from source (Windows/macOS without a package manager, Android).
-find_package(SDL3 CONFIG QUIET)
+# SDL3: use the system package where possible. On Windows, use the pinned
+# bundled source so the XInput wake/hot-plug polling fix below is always applied.
+if(NOT WIN32)
+    find_package(SDL3 CONFIG QUIET)
+endif()
 if(NOT SDL3_FOUND)
     include(FetchContent)
     FetchContent_Declare(SDL3
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG release-3.2.0  # first stable SDL3; has every API we use. Safe to bump.
+        GIT_TAG release-3.2.0
         GIT_SHALLOW TRUE)
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(SDL3)
+
+    if(WIN32)
+        set(CR_SDL3_XINPUT_WAKE_PATCH
+            "${CMAKE_CURRENT_SOURCE_DIR}/patches/sdl3-windows-xinput-wake-poll.patch")
+        # FetchContent can reuse an already populated source tree. Apply the
+        # patch if needed, and accept the already-patched case on later configures.
+        execute_process(
+            COMMAND git apply --check "${CR_SDL3_XINPUT_WAKE_PATCH}"
+            WORKING_DIRECTORY "${sdl3_SOURCE_DIR}"
+            RESULT_VARIABLE CR_SDL3_XINPUT_PATCH_CHECK
+            OUTPUT_QUIET ERROR_QUIET)
+        if(CR_SDL3_XINPUT_PATCH_CHECK EQUAL 0)
+            execute_process(
+                COMMAND git apply "${CR_SDL3_XINPUT_WAKE_PATCH}"
+                WORKING_DIRECTORY "${sdl3_SOURCE_DIR}"
+                RESULT_VARIABLE CR_SDL3_XINPUT_PATCH_APPLY)
+            if(NOT CR_SDL3_XINPUT_PATCH_APPLY EQUAL 0)
+                message(FATAL_ERROR "Failed to apply Windows SDL XInput wake patch")
+            endif()
+        else()
+            execute_process(
+                COMMAND git apply --reverse --check "${CR_SDL3_XINPUT_WAKE_PATCH}"
+                WORKING_DIRECTORY "${sdl3_SOURCE_DIR}"
+                RESULT_VARIABLE CR_SDL3_XINPUT_PATCH_REVERSE
+                OUTPUT_QUIET ERROR_QUIET)
+            if(NOT CR_SDL3_XINPUT_PATCH_REVERSE EQUAL 0)
+                message(FATAL_ERROR "Bundled SDL3 source is neither clean nor patched for XInput wake detection")
+            endif()
+        endif()
+        message(STATUS "SDL3 Windows XInput wake polling patch enabled")
+    endif()
 endif()
 
 # Core library: everything that is not the app entry point, so tools can reuse it.
