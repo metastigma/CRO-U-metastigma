@@ -5937,18 +5937,44 @@ std::vector<int> campItems(const App& app, int category) {
 // What can go in member c's slot: the bag's items of the slot's kind that c may wear
 std::vector<int> campEquipList(const App& app, int c, int slot) {
     std::vector<int> out;
-    if (slot >= 3) { // gene plates: the bag's, but not one either member wears already - MuComMakeGenePlate:
-        // the Human Genes slot the characters' own (kind 13: 474..480), the others the rest (481..)
+    if (slot >= 3) { // gene plates: keep the plate in this slot visible; exclude plates worn elsewhere
+        // The Human Genes slot holds 474..480; the three ordinary slots hold 481..504.
+        const int geneSlot = slot - 3;
         const cr::PartyMember& pm = app.game.party[size_t(c)];
-        if (slot > 3 && pm.genes[slot - 3] > 0) out.push_back(0); // take it off
-        const int from = slot == 3 ? cr::kFirstPlate : cr::kFirstPlate + 7, to = slot == 3 ? cr::kFirstPlate + 7 : cr::kFirstPlate + cr::kPlates;
+        const int current = pm.genes[size_t(geneSlot)];
+        bool currentAvailable = false;
+
+        const int from = slot == 3 ? cr::kFirstPlate : cr::kFirstPlate + 7;
+        const int to = slot == 3 ? cr::kFirstPlate + 7 : cr::kFirstPlate + cr::kPlates;
         for (int p = from; p < to; ++p) {
-            if (ownedCount(app, p) <= 0) continue;
-            bool worn = false;
-            for (int k = 0; k < 2; ++k)
-                for (int g : app.game.party[size_t(campCharacter(app, k))].genes) worn |= g == p;
-            if (!worn) out.push_back(p);
+            // A plate already worn in another animal slot remains selectable: choosing it
+            // moves that single plate instead of making it disappear from every other slot.
+            bool wornByPair = false;
+            bool wornElsewhere = false;
+            for (int k = 0; k < campMembers(app); ++k) {
+                const int wearer = campCharacter(app, k);
+                const auto& genes = app.game.party[size_t(wearer)].genes;
+                for (int otherSlot = 0; otherSlot < cr::kGeneSlots; ++otherSlot) {
+                    if (genes[size_t(otherSlot)] != p) continue;
+                    wornByPair = true;
+                    if (!(wearer == c && otherSlot == geneSlot)) wornElsewhere = true;
+                }
+            }
+            if (ownedCount(app, p) <= 0 && p != current && !(slot > 3 && wornByPair)) continue;
+
+            if (slot > 3) {
+                // Animal plates can be moved between the three animal slots / active pair.
+                if (p == current) currentAvailable = true;
+                else out.push_back(p);
+            } else if (!wornElsewhere) {
+                // Keep Human Genes restricted to a single wearer.
+                if (p == current) currentAvailable = true;
+                else out.push_back(p);
+            }
         }
+        // Show the equipped plate first; keep the explicit removal choice after the available plates.
+        if (currentAvailable) out.insert(out.begin(), current);
+        if (slot > 3 && current > 0) out.push_back(0);
         return out;
     }
     const int kind = slot == cr::kWeapon ? cr::kKindWeapon : slot == cr::kArmor ? cr::kKindArmor : cr::kKindJewel;
@@ -5964,6 +5990,17 @@ std::vector<int> campEquipList(const App& app, int c, int slot) {
         out.push_back(n);
     }
     return out;
+}
+
+bool campGeneWornByCharacter(const App& app, int character, int plate) {
+    if (character < 0 || character >= cr::kCharacters || !cr::isPlate(plate)) return false;
+    const auto& genes = app.game.party[size_t(character)].genes;
+    return std::find(std::begin(genes), std::end(genes), plate) != std::end(genes);
+}
+bool campGeneWornByPair(const App& app, int plate) {
+    for (int k = 0; k < campMembers(app); ++k)
+        if (campGeneWornByCharacter(app, campCharacter(app, k), plate)) return true;
+    return false;
 }
 
 bool campUsable(int item) { return (item >= 3 && item <= 6) || (item >= 24 && item <= 27); }
@@ -6261,6 +6298,13 @@ void campChoose(App& app) {
         } else if (c.phase == App::Camp::Slot) {
             c.listCursor = c.listTop = 0;
             campRefreshList(app);
+            const int worn = c.slot < 3 ? pm.equip[size_t(c.slot)] : pm.genes[size_t(c.slot - 3)];
+            const auto equipped = std::find(c.list.begin(), c.list.end(), worn);
+            if (worn > 0 && equipped != c.list.end()) {
+                // Prefer the currently equipped item when opening its submenu.
+                c.listCursor = int(equipped - c.list.begin());
+                c.listTop = c.listCursor;
+            }
             if (c.list.empty()) {
                 if (c.slot == 3) campMessage(app, sysText(app, 58064));
                 menuSound(app, se::kBuzzer);
@@ -6282,6 +6326,16 @@ void campChoose(App& app) {
                 campOpenEntries(app, item);
             }
         } else if (c.phase == App::Camp::Entries && c.slot >= 3 && cr::isPlate(c.plate)) {
+            if (c.slot > 3) {
+                // Animal plates are unique within the active pair. Move the selected plate
+                // out of its previous animal slot before assigning it to the new one.
+                for (int k = 0; k < campMembers(app); ++k) {
+                    const int wearer = campCharacter(app, k);
+                    auto& genes = app.game.party[size_t(wearer)].genes;
+                    for (int animalSlot = 1; animalSlot < cr::kGeneSlots; ++animalSlot)
+                        if (genes[size_t(animalSlot)] == c.plate) genes[size_t(animalSlot)] = 0;
+                }
+            }
             pm.genes[c.slot - 3] = c.plate;
             menuSound(app, campui::kSoundEquip);
             c.plate = 0;
@@ -6504,11 +6558,14 @@ void campPointerUp(App& app, float px, float py) {
 
 // A list row (ComUty_CampItemPlate): plate 8 / 9, the icon, the name, the count at (222, 30)
 void drawCampRow(App& app, cr::MenuPainter& m, float x, float y, int item, int count, bool lit, float a,
-                 const std::string& label = std::string()) {
+                 const std::string& label = std::string(), bool worn = false) {
     m.picture(lit ? 9 : 8, x, y, a);
     if (const cr::ItemParam* p = app.itemTable.item(item); p && p->icon >= 0)
         m.piece(x + 12, y + 8, float(p->icon % 16) * 32, 248 + float(p->icon / 16) * 32, 32, 32, a);
-    m.text(item > 0 ? itemName(app, item) : std::string("-"), x + 56, y + 12, false, a, 14);
+    const std::string name = item > 0 ? itemName(app, item) : std::string("-");
+    // Match the original Camp's yellow worn-item tint, independently of the row cursor.
+    if (worn) m.textTint(name, x + 56, y + 12, 1, 1, 0.25f, a, 14);
+    else m.text(name, x + 56, y + 12, false, a, 14);
     if (!label.empty()) m.text(label, x + 56, y + 30, false, a * 0.8f, 11);
     if (count > 0) drawShopNumber(m, count, x + 222 - 10, y + 30, 2, 10, a, 2);
 }
@@ -6599,8 +6656,9 @@ void drawGeneBoard(App& app, cr::MenuPainter& m, float x, float y, int plate, fl
     }
 }
 
-void drawGeneAbilityRow(App& app, cr::MenuPainter& m, float x, float y, int it, int ch, bool lit, float a) {
-    drawCampRow(app, m, x, y, it, 0, lit, a);
+void drawGeneAbilityRow(App& app, cr::MenuPainter& m, float x, float y, int it, int ch, bool lit, float a,
+                        bool active = false) {
+    drawCampRow(app, m, x, y, it, 0, lit, a, std::string(), active);
     if (cr::isSkill(it)) return;
     const cr::BattleActionDef* act = app.battleActions.get(cr::geneAction(it));
     if (!act) return;
@@ -8374,22 +8432,25 @@ void drawCamp(App& app) {
             scrollList(kRowX, kEquipSlots, [&](int slot, float x, float y, bool lit) {
                 const int worn = slot < 3 ? pm.equip[slot] : pm.genes[slot - 3];
                 const int shown = worn > 0 ? worn : slot == 2 ? 0x1c6 : slot >= 3 ? 0x1c7 + (slot - 3) : 0;
-                drawCampRow(app, m, x, y, shown, 0, lit, ease);
+                drawCampRow(app, m, x, y, shown, 0, lit, ease, std::string(), worn > 0);
             });
             left();
         } else if (c.phase == App::Camp::Entries && c.slot >= 3) {
             drawGeneBoard(app, m, 12, 92, c.plate, ease, 2);
             right();
+            const bool activePlate = campGeneWornByCharacter(app, ch, c.plate);
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
-                drawGeneAbilityRow(app, m, x, y, c.list[size_t(k)], ch, lit, ease);
+                drawGeneAbilityRow(app, m, x, y, c.list[size_t(k)], ch, lit, ease, activePlate);
             });
             helpBoard(item);
         } else if (c.slot >= 3) { // a gene plate for the slot: its board beside the list
-            drawGeneBoard(app, m, 12, 92, item > 0 ? item : pm.genes[c.slot - 3], ease, 1);
+            // The "-" row means remove this plate; do not preview the currently worn plate
+            // there, otherwise the removal choice misleadingly looks like a second Mouse Genes row.
+            drawGeneBoard(app, m, 12, 92, item, ease, 1);
             right();
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 const int it = c.list[size_t(k)];
-                const bool worn = std::find(std::begin(pm.genes), std::end(pm.genes), it) != std::end(pm.genes);
+                const bool worn = campGeneWornByPair(app, it);
                 if (cr::isPlate(it)) drawGeneRow(app, m, x, y, it, lit, worn, ease);
                 else drawCampRow(app, m, x, y, it, 0, lit, ease);
             });
@@ -8399,7 +8460,8 @@ void drawCamp(App& app) {
             right();
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 const int it = c.list[size_t(k)];
-                drawCampRow(app, m, x, y, it, it > 0 ? ownedCount(app, it) : 0, lit, ease);
+                const bool worn = it > 0 && pm.equip[size_t(c.slot)] == it;
+                drawCampRow(app, m, x, y, it, it > 0 ? ownedCount(app, it) : 0, lit, ease, std::string(), worn);
             });
             helpBoard(item);
         }
@@ -8409,8 +8471,9 @@ void drawCamp(App& app) {
         if (c.phase == App::Camp::Entries) {
             drawGeneBoard(app, m, 14, 92, c.plate, ease, 2);
             right();
+            const bool activePlate = campGeneWornByPair(app, c.plate);
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
-                drawGeneAbilityRow(app, m, x, y, c.list[size_t(k)], ch, lit, ease);
+                drawGeneAbilityRow(app, m, x, y, c.list[size_t(k)], ch, lit, ease, activePlate);
             });
             helpBoard(item);
         } else {
@@ -8419,8 +8482,7 @@ void drawCamp(App& app) {
             if (c.list.empty()) m.text("No gene plates.", kRowX + 56, kRowY + 16, false, ease, 15);
             scrollList(kRowX, int(c.list.size()), [&](int k, float x, float y, bool lit) {
                 const int it = c.list[size_t(k)];
-                const cr::PartyMember& gm = app.game.party[size_t(ch)];
-                const bool worn = std::find(std::begin(gm.genes), std::end(gm.genes), it) != std::end(gm.genes);
+                const bool worn = campGeneWornByPair(app, it);
                 if (cr::isPlate(it)) drawGeneRow(app, m, x, y, it, lit, worn, ease);
                 else drawCampRow(app, m, x, y, it, 0, lit, ease);
             });
@@ -19204,6 +19266,84 @@ int runSelfTest(App& app) {
         for (int f = 0; f < 3; ++f) { app.lastTicks = 0; drawFrame(app, false); ++frames; }
         key(SDLK_RETURN);                                     // wear the Bastard Sword (the bag as it was)
         problems += app.game.party[0].equip[0] != 202 || ownedCount(app, 201) != 0 || ownedCount(app, 202) != 1;
+        { // Put the current plate first, retain removal last, and exclude plates worn elsewhere.
+            const cr::GameState keepGame = app.game;
+            int keepGenes0[cr::kGeneSlots]{};
+            int keepGenes1[cr::kGeneSlots]{};
+            std::copy(std::begin(app.game.party[0].genes), std::end(app.game.party[0].genes), std::begin(keepGenes0));
+            std::copy(std::begin(app.game.party[1].genes), std::end(app.game.party[1].genes), std::begin(keepGenes1));
+            app.game.pairs[0] = {0, 1};
+            app.game.setFlag(0xfed, false);
+            app.game.party[0].genes[0] = 474;
+            app.game.party[0].genes[1] = 481;
+            app.game.party[0].genes[2] = 482;
+            app.game.party[0].genes[3] = 0;
+            app.game.party[1].genes[0] = 475;
+            app.game.party[1].genes[1] = 483;
+            app.game.party[1].genes[2] = 0;
+            app.game.party[1].genes[3] = 0;
+            app.game.items[481] = app.game.items[482] = app.game.items[483] = 1;
+            app.game.items[108] = 1; // known entry on plate 481
+            app.game.items[93] = 1;  // known entry on plate 483
+            c.page = App::Camp::Equip;
+            c.phase = App::Camp::Slot;
+            c.member = 0;
+            c.slot = 4; // second plate
+            c.listCursor = c.listTop = 0;
+            campChoose(app);
+            const bool currentVisible = std::find(c.list.begin(), c.list.end(), 481) != c.list.end();
+            const bool otherSlotVisible = std::find(c.list.begin(), c.list.end(), 482) != c.list.end();
+            const bool otherMemberVisible = std::find(c.list.begin(), c.list.end(), 483) != c.list.end();
+            const bool currentSelected = !c.list.empty() && c.list[size_t(c.listCursor)] == 481;
+            const bool currentFirst = !c.list.empty() && c.list.front() == 481;
+            const bool removeLast = c.list.size() > 1 && c.list.back() == 0;
+
+            // Mouse Genes remains visible in the next slot even while worn in the previous one.
+            bool mouseVisibleForTransfer = false;
+            bool movedBetweenSlots = false;
+            c.slot = 5;
+            c.phase = App::Camp::Slot;
+            campChoose(app); // refresh the second animal-slot list
+            const auto mouse = std::find(c.list.begin(), c.list.end(), 481);
+            mouseVisibleForTransfer = mouse != c.list.end();
+            if (mouseVisibleForTransfer) {
+                c.listCursor = int(mouse - c.list.begin());
+                campChoose(app);
+                if (c.phase == App::Camp::Entries && !c.list.empty()) {
+                    c.listCursor = 0;
+                    campChoose(app);
+                    movedBetweenSlots = app.game.party[0].genes[1] != 481 &&
+                                        app.game.party[0].genes[2] == 481;
+                }
+            }
+
+            // Crocodile Genes can likewise move from the other member into this slot.
+            bool movedFromPartner = false;
+            c.phase = App::Camp::Slot;
+            campChoose(app); // refresh the destination list
+            const auto croc = std::find(c.list.begin(), c.list.end(), 483);
+            if (croc != c.list.end()) {
+                c.listCursor = int(croc - c.list.begin());
+                campChoose(app);
+                if (c.phase == App::Camp::Entries && !c.list.empty()) {
+                    c.listCursor = 0;
+                    campChoose(app);
+                    movedFromPartner = app.game.party[0].genes[2] == 483 &&
+                                       app.game.party[1].genes[1] != 483;
+                }
+            }
+            problems += c.phase != App::Camp::Slot || !currentVisible || !otherSlotVisible || !otherMemberVisible ||
+                        !currentSelected || !currentFirst || !removeLast || !campGeneWornByPair(app, 481) ||
+                        !mouseVisibleForTransfer || !movedFromPartner || !movedBetweenSlots;
+            app.game = keepGame;
+            std::copy(std::begin(keepGenes0), std::end(keepGenes0), std::begin(app.game.party[0].genes));
+            std::copy(std::begin(keepGenes1), std::end(keepGenes1), std::begin(app.game.party[1].genes));
+            c.page = App::Camp::Equip;
+            c.phase = App::Camp::Slot;
+            c.member = 0;
+            c.slot = 0;
+            c.listCursor = c.listTop = 0;
+        }
         app.shop.selling = true;                              // worn: none of it to sell
         problems += shopMaxCount(app, 202) != 0;
         app.shop.selling = false;
