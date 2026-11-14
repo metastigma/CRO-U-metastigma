@@ -27,32 +27,82 @@ if(NOT SDL3_FOUND)
     FetchContent_MakeAvailable(SDL3)
 
     if(WIN32)
-        set(CR_SDL3_XINPUT_WAKE_PATCH
-            "${CMAKE_CURRENT_SOURCE_DIR}/patches/sdl3-windows-xinput-wake-poll.patch")
-        # FetchContent can reuse an already populated source tree. Apply the
-        # patch if needed, and accept the already-patched case on later configures.
-        execute_process(
-            COMMAND git apply --check "${CR_SDL3_XINPUT_WAKE_PATCH}"
-            WORKING_DIRECTORY "${sdl3_SOURCE_DIR}"
-            RESULT_VARIABLE CR_SDL3_XINPUT_PATCH_CHECK
-            OUTPUT_QUIET ERROR_QUIET)
-        if(CR_SDL3_XINPUT_PATCH_CHECK EQUAL 0)
-            execute_process(
-                COMMAND git apply "${CR_SDL3_XINPUT_WAKE_PATCH}"
-                WORKING_DIRECTORY "${sdl3_SOURCE_DIR}"
-                RESULT_VARIABLE CR_SDL3_XINPUT_PATCH_APPLY)
-            if(NOT CR_SDL3_XINPUT_PATCH_APPLY EQUAL 0)
-                message(FATAL_ERROR "Failed to apply Windows SDL XInput wake patch")
+        set(CR_SDL3_WINDOWS_JOYSTICK_FILE
+            "${sdl3_SOURCE_DIR}/src/joystick/windows/SDL_windowsjoystick.c")
+        file(READ "${CR_SDL3_WINDOWS_JOYSTICK_FILE}" CR_SDL3_WINDOWS_JOYSTICK_SOURCE)
+        # Normalize line endings because Git may check out the SDL source as CRLF on Windows.
+        string(REPLACE "\r\n" "\n" CR_SDL3_WINDOWS_JOYSTICK_SOURCE "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}")
+
+        set(CR_SDL3_XINPUT_WAIT_OLD [=[
+static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_Mutex *mutex)
+{
+    MSG msg;
+    int lastret = 1;
+
+    if (!data->messageWindow) {
+        return false; // device notifications require a window
+    }
+
+    SDL_UnlockMutex(mutex);
+    while (lastret > 0 && !WindowsDeviceChanged()) {
+        lastret = GetMessage(&msg, NULL, 0, 0); // WM_QUIT causes return value of 0
+        if (lastret > 0) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+    SDL_LockMutex(mutex);
+    return (lastret != -1);
+}
+]=])
+        set(CR_SDL3_XINPUT_WAIT_NEW [=[
+static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_Mutex *mutex)
+{
+    MSG msg;
+    int lastret = 1;
+    bool timed_out = false;
+
+    if (!data->messageWindow) {
+        return false; // device notifications require a window
+    }
+
+    SDL_UnlockMutex(mutex);
+    while (lastret > 0 && !WindowsDeviceChanged()) {
+        // A wireless controller can wake behind an already-enumerated USB receiver
+        // without producing WM_DEVICECHANGE. Periodically return to the XInput
+        // capability scan in SDL_JoystickThread instead of blocking indefinitely.
+        const DWORD wait_result = MsgWaitForMultipleObjectsEx(0, NULL, 1000, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (wait_result == WAIT_TIMEOUT) {
+            timed_out = true;
+            break;
+        }
+        if (wait_result != WAIT_OBJECT_0) {
+            lastret = -1;
+            break;
+        }
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                lastret = 0;
+                break;
+            }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+    SDL_LockMutex(mutex);
+    return (lastret != -1 && !timed_out);
+}
+]=])
+
+        string(FIND "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}" "${CR_SDL3_XINPUT_WAIT_NEW}" CR_SDL3_XINPUT_ALREADY_PATCHED)
+        if(CR_SDL3_XINPUT_ALREADY_PATCHED LESS 0)
+            string(FIND "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}" "${CR_SDL3_XINPUT_WAIT_OLD}" CR_SDL3_XINPUT_OLD_FUNCTION)
+            if(CR_SDL3_XINPUT_OLD_FUNCTION LESS 0)
+                message(FATAL_ERROR "Cannot find the expected SDL 3.2.0 Windows joystick wait function")
             endif()
-        else()
-            execute_process(
-                COMMAND git apply --reverse --check "${CR_SDL3_XINPUT_WAKE_PATCH}"
-                WORKING_DIRECTORY "${sdl3_SOURCE_DIR}"
-                RESULT_VARIABLE CR_SDL3_XINPUT_PATCH_REVERSE
-                OUTPUT_QUIET ERROR_QUIET)
-            if(NOT CR_SDL3_XINPUT_PATCH_REVERSE EQUAL 0)
-                message(FATAL_ERROR "Bundled SDL3 source is neither clean nor patched for XInput wake detection")
-            endif()
+            string(REPLACE "${CR_SDL3_XINPUT_WAIT_OLD}" "${CR_SDL3_XINPUT_WAIT_NEW}"
+                   CR_SDL3_WINDOWS_JOYSTICK_SOURCE "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}")
+            file(WRITE "${CR_SDL3_WINDOWS_JOYSTICK_FILE}" "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}")
         endif()
         message(STATUS "SDL3 Windows XInput wake polling patch enabled")
     endif()
