@@ -11,102 +11,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# SDL3: use the system package where possible. On Windows, use the pinned
-# bundled source so the XInput wake/hot-plug polling fix below is always applied.
-if(NOT WIN32)
-    find_package(SDL3 CONFIG QUIET)
-endif()
+# SDL3: use the system package when present (Linux, Homebrew, vcpkg), otherwise
+# fetch and build it from source (Windows/macOS without a package manager, Android).
+find_package(SDL3 CONFIG QUIET)
 if(NOT SDL3_FOUND)
     include(FetchContent)
     FetchContent_Declare(SDL3
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG release-3.2.0
+        GIT_TAG release-3.2.0  # first stable SDL3; has every API we use. Safe to bump.
         GIT_SHALLOW TRUE)
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(SDL3)
-
-    if(WIN32)
-        set(CR_SDL3_WINDOWS_JOYSTICK_FILE
-            "${sdl3_SOURCE_DIR}/src/joystick/windows/SDL_windowsjoystick.c")
-        file(READ "${CR_SDL3_WINDOWS_JOYSTICK_FILE}" CR_SDL3_WINDOWS_JOYSTICK_SOURCE)
-        # Normalize line endings because Git may check out SDL source as CRLF on Windows.
-        string(REPLACE "\r\n" "\n" CR_SDL3_WINDOWS_JOYSTICK_SOURCE "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}")
-
-        set(CR_SDL3_XINPUT_WAIT_OLD [=[
-static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_Mutex *mutex)
-{
-    MSG msg;
-    int lastret = 1;
-
-    if (!data->messageWindow) {
-        return false; // device notifications require a window
-    }
-
-    SDL_UnlockMutex(mutex);
-    while (lastret > 0 && !WindowsDeviceChanged()) {
-        lastret = GetMessage(&msg, NULL, 0, 0); // WM_QUIT causes return value of 0
-        if (lastret > 0) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-    }
-    SDL_LockMutex(mutex);
-    return (lastret != -1);
-}
-]=])
-        set(CR_SDL3_XINPUT_WAIT_NEW [=[
-static bool SDL_WaitForDeviceNotification(SDL_DeviceNotificationData *data, SDL_Mutex *mutex)
-{
-    MSG msg;
-    int lastret = 1;
-    bool timed_out = false;
-
-    if (!data->messageWindow) {
-        return false; // device notifications require a window
-    }
-
-    SDL_UnlockMutex(mutex);
-    while (lastret > 0 && !WindowsDeviceChanged()) {
-        // A wireless XInput pad can wake behind an already-connected USB receiver
-        // without a new HID device notification. Time out so SDL's existing thread
-        // can poll XInputGetCapabilities() and trigger joystick re-enumeration.
-        // The caller's existing one-second condition wait drives the XInput slot scan.
-        const DWORD wait_result = MsgWaitForMultipleObjectsEx(0, NULL, 0, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
-        if (wait_result == WAIT_TIMEOUT) {
-            timed_out = true;
-            break;
-        }
-        if (wait_result != WAIT_OBJECT_0) {
-            lastret = -1;
-            break;
-        }
-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) {
-                lastret = 0;
-                break;
-            }
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-    }
-    SDL_LockMutex(mutex);
-    return (lastret != -1 && !timed_out);
-}
-]=])
-
-        string(FIND "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}" "${CR_SDL3_XINPUT_WAIT_NEW}" CR_SDL3_XINPUT_ALREADY_PATCHED)
-        if(CR_SDL3_XINPUT_ALREADY_PATCHED LESS 0)
-            string(FIND "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}" "${CR_SDL3_XINPUT_WAIT_OLD}" CR_SDL3_XINPUT_OLD_FUNCTION)
-            if(CR_SDL3_XINPUT_OLD_FUNCTION LESS 0)
-                message(FATAL_ERROR "Cannot find the expected SDL 3.2.0 Windows joystick wait function")
-            endif()
-            string(REPLACE "${CR_SDL3_XINPUT_WAIT_OLD}" "${CR_SDL3_XINPUT_WAIT_NEW}"
-                   CR_SDL3_WINDOWS_JOYSTICK_SOURCE "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}")
-            file(WRITE "${CR_SDL3_WINDOWS_JOYSTICK_FILE}" "${CR_SDL3_WINDOWS_JOYSTICK_SOURCE}")
-        endif()
-        message(STATUS "SDL3 Windows XInput slot polling enabled")
-    endif()
 endif()
 
 # Core library: everything that is not the app entry point, so tools can reuse it.
