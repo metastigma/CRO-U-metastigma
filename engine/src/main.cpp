@@ -1911,11 +1911,21 @@ bool playerShown(const App& app) {
     return it == app.npcShown.end() || it->second;
 }
 
-bool npcActive(const App& app, const cr::FieldNpc& n) {
-    // Born / Kill override the flags until the room reloads
-    if (auto it = app.npcShown.find(n.id); it != app.npcShown.end()) return it->second;
-    // npc_setup hides an NPC whose show-flag is clear (guess for the hide flag: hidden once set)
+bool npcCreateFlags(const App& app, const cr::FieldNpc& n) {
     return (n.flagShow < 0 || app.game.flag(n.flagShow)) && (n.flagHide < 0 || !app.game.flag(n.flagHide));
+}
+
+// npc_setup's story actors start hidden and are explicitly shown by Born. The puzzle room
+// (area 1) is the exception; area 8 uses the 301..349 block instead of 400..449.
+bool npcStoryActor(const App& app, int id) {
+    if (app.area == 1) return false;
+    return app.area == 8 ? id >= 301 && id < 350 : id >= 400 && id < 450;
+}
+
+bool npcActive(const App& app, const cr::FieldNpc& n) {
+    // Born / Kill override the room's initial setup until the next room load.
+    if (auto it = app.npcShown.find(n.id); it != app.npcShown.end()) return it->second;
+    return npcCreateFlags(app, n) && !npcStoryActor(app, n.id);
 }
 
 namespace puzzle { void enter(App& app); }
@@ -2020,6 +2030,13 @@ void enterMap(App& app) {
     if (worldBoxes)
         for (const auto& e : pick) boxes.push_back({e[0], e[1]});
     cr::applyTreasureFlags(app.events, app.npcs, boxes, app.game, true);
+    // RectWrapper::init / npc_setup: snapshot flag visibility once per room, and keep story
+    // actors hidden until Born. Flags changed by an event do not alter the room's NPC visibility.
+    app.npcShown.clear();
+    app.flagTalked.clear();
+    app.examineLinger.clear();
+    for (const cr::FieldNpc& n : app.npcs)
+        app.npcShown[n.id] = npcCreateFlags(app, n) && !npcStoryActor(app, n.id);
     puzzle::enter(app); // PuzzleScene::init in a puzzle room (stage -1 elsewhere)
     app.puzzleStartPending = app.puzzle.stage >= 0;
     app.npcDraws.clear(); // npc_setup reads the room's models again: no fade carried over from the last room
