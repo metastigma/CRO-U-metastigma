@@ -4349,8 +4349,8 @@ std::vector<OptRow> optionRows(App& app, int page) {
         });
         rows.back().enabled = app.font.loaded();
         rows.back().hint = optionText(app, "TrueType font size: 80% to 200%, in 10% steps. Default: 125%.", "Размер шрифта TrueType: от 80% до 200%, шаг 10%. По умолчанию: 125%.");
-        onOff(sysLabel(app, 58108, optionText(app, "Environment Effects", "Эффекты окружения")), &app.environmentEffects, nullptr);
-        onOff(sysLabel(app, 58109, optionText(app, "Lock Screen Orientation", "Фиксировать ориентацию экрана")), &app.lockOrientation,
+        onOff(optionText(app, "Environment Effects", "Эффекты окружения"), &app.environmentEffects, nullptr);
+        onOff(optionText(app, "Lock Screen Orientation", "Фиксировать ориентацию экрана"), &app.lockOrientation,
               [&app] { applyOrientation(app, app.lockOrientation); });
         onOff(optionText(app, "Control Hints", "Подсказки управления"), &app.showHud, nullptr);
         rows.back().hint = optionText(app, "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut.", "Показывать подсказки управления и строку состояния. F3 переключает их отображение.");
@@ -4426,15 +4426,15 @@ std::vector<OptRow> optionRows(App& app, int page) {
                                         : "\u00d7 (the bottom button) confirms, \u25cb (the right one) goes back");
         rows.push_back(swap);
         OptRow manual; // the topics and their pages (MuScrList + MsgUty)
-        manual.label = sysLabel(app, 58081, optionText(app, "Instruction Manual", "Руководство"));
+        manual.label = optionText(app, "Instruction Manual", "Руководство");
         manual.act = [&app](int) { openManual(app, 0); };
         rows.push_back(manual);
         OptRow title;
         if (app.optionsFromTitle) { // ModeOptionMenu(1): erasing the save data, asked twice
-            title.label = sysLabel(app, 58122, optionText(app, "Reset Data", "Сбросить данные"));
+            title.label = optionText(app, "Reset Data", "Сбросить данные");
             title.act = [&app](int) { app.resetAsk = 1, app.resetConfirm = 1; };
         } else {
-            title.label = sysLabel(app, 58123, optionText(app, "Return to Title", "На главный экран"));
+            title.label = optionText(app, "Return to Title", "На главный экран");
             title.enabled = app.mode == Mode::Maps && !app.booting;
             title.act = [&app](int) { bootTitle(app); };
         }
@@ -4443,8 +4443,8 @@ std::vector<OptRow> optionRows(App& app, int page) {
     }
     case 1: { // Sound
         gauge(optionText(app, "Master Volume", "Общая громкость"), &app.mix.master, int(se::kVolume));
-        gauge(sysLabel(app, 58085, optionText(app, "BGM", "Музыка")), &app.mix.music, -1);
-        gauge(sysLabel(app, 58086, optionText(app, "Sound Effects", "Звуковые эффекты")), &app.mix.effects, int(se::kVolume));
+        gauge(optionText(app, "BGM", "Музыка"), &app.mix.music, -1);
+        gauge(optionText(app, "Sound Effects", "Звуковые эффекты"), &app.mix.effects, int(se::kVolume));
         gauge(optionText(app, "Voice Volume", "Громкость голосов"), &app.mix.voice, -1);
         char test[32];
         SDL_snprintf(test, sizeof test, "%03d", app.soundTestEntry);
