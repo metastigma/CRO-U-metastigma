@@ -39,6 +39,7 @@
 #include <tuple>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -16230,6 +16231,51 @@ int battleSelfTest(App& app, int& frames, int& glErrors) {
                 bool cast = false;
                 while (pr.nextTurn(app.battleActions, gt)) cast |= gt.kind == cr::kCmdGene && gt.actors[0] == 0;
                 bad += !cast || pr.f[0].mp != mp0 - cost || pr.f[1].mp != mp1 - cost;
+                { // Options' Cheats: no MP paid, no party deaths, enemy kills, permanent Break and scaled EXP
+                    int fell = 0, paid = 0, cleared = 0, brk = 0;
+                    for (uint32_t seed = 1; seed <= 20; ++seed) {
+                        cr::BattleRules ch;
+                        ch.seed(seed);
+                        ch.setupParty(g, app.itemTable, 0);
+                        ch.setupEnemies(app.battleData, app.battleData.group(1), 0);
+                        ch.cheatHp = ch.cheatMp = ch.cheatOneHit = ch.cheatBreak = true;
+                        ch.breakStarted = true, ch.breakTarget = ch.breakGauge = 8;
+                        ch.pair = true;
+                        ch.f[0].hp = ch.f[1].hp = 1;
+                        const int m0 = ch.f[0].mp, m1 = ch.f[1].mp;
+                        for (int round = 0; round < 8 && ch.outcome() == 0; ++round) {
+                            cr::BattleCommand commands[2];
+                            int target = 2;
+                            for (int t = 4; t >= 2; --t)
+                                if (ch.f[size_t(t)].alive()) { target = t; break; }
+                            commands[0].kind = cr::kCmdGene;
+                            commands[0].action = cr::geneAction(94);
+                            commands[0].target = target;
+                            ch.beginRound(commands, app.battleActions);
+                            cr::BattleTurn turn;
+                            while (ch.nextTurn(app.battleActions, turn)) {}
+                            ch.endRound();
+                        }
+                        paid += ch.f[0].mp < m0 || ch.f[1].mp < m1;
+                        brk += ch.breakGauge != 8;
+                        fell += !ch.f[0].alive() || !ch.f[1].alive();
+                        cleared += ch.outcome() == 2;
+                    }
+                    cr::BattleRules scaled;
+                    scaled.setupParty(g, app.itemTable, 0);
+                    scaled.setupEnemies(app.battleData, app.battleData.group(1), 0);
+                    scaled.defeatEnemies();
+                    cr::GameState normal = g, fivefold = g;
+                    scaled.applyRewards(normal);
+                    scaled.expScale = 5;
+                    scaled.applyRewards(fivefold);
+                    const int character = scaled.f[0].character;
+                    const int baseExp = normal.party[size_t(character)].exp - g.party[size_t(character)].exp;
+                    const int scaledExp = fivefold.party[size_t(character)].exp - g.party[size_t(character)].exp;
+                    bad += paid != 0 || fell != 0 || cleared < 18 || brk != 0 || baseExp <= 0 || scaledExp != 5 * baseExp;
+                    std::printf("cheats: MP paid %d/20, party member fell %d/20, battles cleared %d/20, Break deviations %d; EXP %d -> %d at 5x\n",
+                                paid, fell, cleared, brk, baseExp, scaledExp);
+                }
                 std::printf("genes: new game knows %zu, a plate adds %zu, plates dropped %d/40, genes taught %d/40\n", own.size(),
                             more.size() - own.size(), plates, taught);
             }
