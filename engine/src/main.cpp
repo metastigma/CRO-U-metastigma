@@ -273,7 +273,8 @@ struct App {
     std::set<std::string> hdRefused;       // invalid replacement files: log once
     std::string modelsDir;                 // replacement models: models/hd/ in the game folder, or CR_HD_MODELS
     int hdModelsLoaded = 0;                // since startup
-    int language = 1;                      // text language (cr::kLanguageName): English by default
+    int language = 1;                      // game text language (0 Japanese .. 7 Korean)
+    int uiLanguage = 1;                    // built-in Options language: 0 English, 1 Russian
     cr::Font font;                         // selected face from the local font/ folder
     std::string fontDir, fontSelection;
     std::vector<std::string> fontFiles;
@@ -3744,6 +3745,7 @@ void loadMix(App& app) {
         for (int i = 0; i < 4; ++i)
             if (const char* at = SDL_strstr(text, keys[i])) *fields[i] = std::clamp(SDL_atoi(at + SDL_strlen(keys[i])), 0, 100);
         if (const char* at = SDL_strstr(text, "language=")) app.language = std::clamp(SDL_atoi(at + 9), 0, cr::kLanguages - 1);
+        if (const char* at = SDL_strstr(text, "ui_language=")) app.uiLanguage = std::clamp(SDL_atoi(at + 12), 0, 1);
         if (const char* at = SDL_strstr(text, "font=")) {
             at += 5;
             const char* end = at;
@@ -3803,7 +3805,8 @@ void saveMix(const App& app) {
          std::to_string(int(ch.oz)) + "," + std::to_string(int(ch.firstStrike)) + "," +
          std::to_string(int(ch.noEncounters)) + "," + std::to_string(int(ch.oneHit)) + "," +
          std::to_string(ch.exp) + "," + std::to_string(int(ch.fullBreak)) + "\n";
-    const std::string all = t + "language=" + std::to_string(app.language) + "\nfont=" + app.fontSelection +
+    const std::string all = t + "language=" + std::to_string(app.language) + "\nui_language=" + std::to_string(app.uiLanguage) +
+                             "\nfont=" + app.fontSelection +
                              "\nfont_scale=" + std::to_string(app.fontScale) + "\nvoice_entries=" + list + "\n" + video;
     std::string error;
     if (!crstorage::replaceFile(settingsPath(), all, &error)) SDL_Log("settings: %s", error.c_str());
@@ -3825,6 +3828,14 @@ struct UpscaleMode {
 constexpr UpscaleMode kUpscaleModes[] = {
     {"Native AA", 1.0f}, {"Quality", 1.5f}, {"Balanced", 1.7f}, {"Performance", 2.0f}, {"Ultra Perf.", 3.0f}};
 constexpr const char* kUpscalerName[] = {"Off", "FSR 3.1", "DLSS", "MetalFX"};
+
+std::string optionUpscaleModeName(const App& app, int mode) {
+    static const char* const russian[] = {
+        "Нативное сглаживание", "Качество", "Баланс", "Производительность", "Ультрапроизводительность"
+    };
+    const int i = std::clamp(mode, 0, int(sizeof kUpscaleModes / sizeof kUpscaleModes[0]) - 1);
+    return app.uiLanguage == 1 ? russian[i] : kUpscaleModes[i].name;
+}
 constexpr cr::Upscaler kUpscaler[] = {cr::Upscaler::Off, cr::Upscaler::Fsr3, cr::Upscaler::Dlss, cr::Upscaler::MetalFx};
 #ifdef __APPLE__
 constexpr int kUpscalers = 4; // (MetalFX: Apple's own)
@@ -4188,7 +4199,28 @@ struct OptRow {
 
 constexpr int kOptionPages = 6;
 constexpr int kOptionsBackRow = 99;
-const char* const kOptionPageName[kOptionPages] = {"Game", "Sound", "Display", "Detail", "Cheats", "Graphics"};
+const char* optionText(const App& app, const char* english, const char* russian) {
+    return app.uiLanguage == 1 ? russian : english;
+}
+
+const char* optionPageName(const App& app, int page) {
+    static const char* const english[kOptionPages] = {"Game", "Sound", "Display", "Detail", "Cheats", "Graphics"};
+    static const char* const russian[kOptionPages] = {"Игра", "Звук", "Экран", "Детализация", "Читы", "Графика"};
+    const int i = std::clamp(page, 0, kOptionPages - 1);
+    return optionText(app, english[i], russian[i]);
+}
+
+const char* optionLanguageName(const App& app, int language) {
+    static const char* const english[cr::kLanguages] = {
+        "Japanese", "English", "French", "German", "Spanish", "Chinese (simplified)", "Chinese (traditional)", "Korean"
+    };
+    static const char* const russian[cr::kLanguages] = {
+        "Японский", "Английский", "Французский", "Немецкий", "Испанский",
+        "Китайский (упрощённый)", "Китайский (традиционный)", "Корейский"
+    };
+    const int i = std::clamp(language, 0, cr::kLanguages - 1);
+    return optionText(app, english[i], russian[i]);
+}
 // Layout, in menu units
 constexpr float kOptRowTop = 52, kOptRowPitch = 36, kOptCtrlX = 224, kOptCtrlScale = 0.85f;
 constexpr float kOptBackY = 344, kOptPageY = 350;
