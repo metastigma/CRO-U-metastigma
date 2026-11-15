@@ -3,7 +3,12 @@
 # MinGW's windres) and the .app's (Contents/Resources, CFBundleIconFile).
 function(cr_app_icon target id)
     set(packaging ${CMAKE_CURRENT_SOURCE_DIR}/../packaging)
-    if(WIN32 AND EXISTS ${packaging}/windows/${id}.ico)
+    if(IOS AND EXISTS ${packaging}/ios/Assets.xcassets)
+        set(assets ${packaging}/ios/Assets.xcassets)
+        set_source_files_properties(${assets} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+        target_sources(${target} PRIVATE ${assets})
+        set_target_properties(${target} PROPERTIES XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon)
+    elseif(WIN32 AND EXISTS ${packaging}/windows/${id}.ico)
         set(rc ${CMAKE_CURRENT_BINARY_DIR}/${id}_icon.rc)
         file(WRITE ${rc} "1 ICON \"${packaging}/windows/${id}.ico\"\n")
         target_sources(${target} PRIVATE ${rc})
