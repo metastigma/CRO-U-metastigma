@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 project(ChaosRingsOmega LANGUAGES C CXX)
+set(CR_VERSION "0.7.0" CACHE STRING "The app's version (x.y.z)")
 if(WIN32)
     enable_language(RC) # (the .exe's icon: cmake/app-icon.cmake)
 endif()
@@ -218,7 +219,27 @@ set_source_files_properties(${THIRD_PARTY_DIR}/gltf_libs.c PROPERTIES COMPILE_OP
 
 # Vulkan back end: the loader + headers and glslc (shaders are compiled to SPIR-V at build time
 # and embedded). Without them the game builds with OpenGL only.
-find_package(Vulkan QUIET)
+# iOS: use MoltenVK's static XCFramework when supplied; OpenGL ES is the fallback.
+set(CR_MOLTENVK "" CACHE PATH "iOS: path to a MoltenVK release's MoltenVK folder")
+if(IOS AND CR_MOLTENVK)
+    set(mvk_lib ${CR_MOLTENVK}/MoltenVK/static/MoltenVK.xcframework/ios-arm64/libMoltenVK.a)
+    if(EXISTS ${mvk_lib})
+        add_library(Vulkan::Vulkan STATIC IMPORTED)
+        set_target_properties(Vulkan::Vulkan PROPERTIES
+            IMPORTED_LOCATION ${mvk_lib}
+            INTERFACE_INCLUDE_DIRECTORIES ${CR_MOLTENVK}/MoltenVK/include
+            INTERFACE_LINK_LIBRARIES "-framework Metal;-framework IOSurface;-framework QuartzCore;-framework UIKit;-framework Foundation;-framework CoreGraphics;c++")
+        set(Vulkan_FOUND TRUE)
+        set(Vulkan_INCLUDE_DIRS ${CR_MOLTENVK}/MoltenVK/include)
+        set(Vulkan_VERSION "MoltenVK (static, iOS)")
+        find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin NO_CMAKE_FIND_ROOT_PATH)
+    else()
+        message(WARNING "CR_MOLTENVK: no ${mvk_lib} - using OpenGL ES")
+    endif()
+endif()
+if(NOT IOS)
+    find_package(Vulkan QUIET)
+endif()
 if(NOT Vulkan_FOUND AND MINGW AND CMAKE_CROSSCOMPILING)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/mingw-vulkan.cmake) # (llvm-mingw: no Vulkan SDK)
 endif()
@@ -340,13 +361,29 @@ else()
     set_target_properties(chaosringsomega PROPERTIES
         MACOSX_BUNDLE_BUNDLE_NAME "Chaos Rings Omega"
         MACOSX_BUNDLE_GUI_IDENTIFIER "local.preservation.chaosringsomega")
+    if(IOS)
+        target_sources(chaosringsomega PRIVATE src/platform/ios_picker.mm)
+        set_source_files_properties(src/platform/ios_picker.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+        target_link_libraries(chaosringsomega PRIVATE
+            "-framework OpenGLES" "-framework QuartzCore" "-framework UIKit" "-framework UniformTypeIdentifiers")
+        target_compile_definitions(chaosringsomega PRIVATE CR_GLES=1 CR_RELEASE=1)
+        set_target_properties(chaosringsomega PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/ios/Info.plist.in
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${CR_VERSION}"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${CR_VERSION}"
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "local.preservation.chaosringsomega"
+            XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO")
+    endif()
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/app-icon.cmake)
     cr_app_icon(chaosringsomega chaosringsomega)
 
     # Headless asset tool (decode/verify), desktop only
-    add_executable(crtool tools/crtool.cpp)
-    target_link_libraries(crtool PRIVATE crcore)
-    target_include_directories(crtool SYSTEM PRIVATE ${THIRD_PARTY_DIR})
+    if(NOT IOS)
+        add_executable(crtool tools/crtool.cpp)
+        target_link_libraries(crtool PRIVATE crcore)
+        target_include_directories(crtool SYSTEM PRIVATE ${THIRD_PARTY_DIR})
+    endif()
 endif()
 
 # Vita NoNpDrm PFS decryption and SELF crypto are built into crcore for every platform.
