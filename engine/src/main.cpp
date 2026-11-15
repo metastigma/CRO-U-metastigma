@@ -253,9 +253,13 @@ struct App {
         int renderScale = 100;             // % of the window's pixels (Vulkan)
         int msaa = 1;                      // 1, 2, 4, 8 (Vulkan)
         bool vsync = true;
+#ifdef SDL_PLATFORM_IOS
+        int frameLimit = 0;                // use the iPhone / iPad display's native refresh rate
+#else
         int frameLimit = 60;               // frames drawn a second at most (0: as many as the display takes); the
                                            // game itself runs at 20 (core/timing.hpp), the frames between show
                                            // it moving
+#endif
         int upscaler = 0;                  // 0 off, 1 FSR 3.1, 2 DLSS (Vulkan; MSAA is off meanwhile)
         int upscaleMode = 0;               // kUpscaleModes: 0 native AA (DLAA) .. 4 ultra performance
         int sharpness = 25;                // % (FSR's RCAS pass; 0 = none)
@@ -3825,6 +3829,18 @@ void applyOrientation(App& app, bool captureDirection = false) {
 #endif
 }
 
+// Auto layout: the active iPhone display / foldable screen is the one SDL reports now.
+bool smallScreen(const App& app) {
+#ifdef SDL_PLATFORM_IOS
+    int w = 0, h = 0;
+    return app.window && SDL_GetWindowSize(app.window, &w, &h) && w > 0 && h > 0 && std::min(w, h) < 540;
+#else
+    (void)app;
+    return false;
+#endif
+}
+bool autoPhoneLayout(const App& app) { return app.phoneData || app.vitaOnly || smallScreen(app); }
+
 // Window size / fullscreen mode and the renderer's options from app.video
 void applyVideo(App& app) {
     App::Video& v = app.video;
@@ -3832,7 +3848,7 @@ void applyVideo(App& app) {
     r.setWidescreen(v.widescreen);
     // 2.2.0's / Omega's iPhone screens (3:2): the iPhone's data, or the Vita's alone - its art is the
     // iPhone's Retina sheets (the Vita ran the iPhone code path) - unless the iPad layout is asked for
-    const bool phone = v.layout >= 2 || (v.layout == 0 && (app.phoneData || app.vitaOnly));
+    const bool phone = v.layout >= 2 || (v.layout == 0 && autoPhoneLayout(app));
     r.setVitaScreen(v.layout == 3 || (v.layout == 0 && app.vitaOnly)); // (its 960 x 544: the Vita alone's own)
     r.setAndroidScreen(v.layout == 4); // (the Android release's: docs/ANDROID.md)
     const bool changed = phone != r.phoneLayout();
@@ -22468,6 +22484,9 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         return s;
     }();
     app->fontDir = beside + "font/";
+#ifdef SDL_PLATFORM_IOS
+    if (const auto folders = cr::gameFolders(); !folders.empty()) app->fontDir = folders.front() + "font/";
+#endif
     auto isDir = [](const std::string& p) {
         SDL_PathInfo info;
         return SDL_GetPathInfo(p.c_str(), &info) && info.type == SDL_PATHTYPE_DIRECTORY;
@@ -22581,11 +22600,11 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     if (!app->modelsDir.empty() && app->modelsDir.back() != '/') app->modelsDir += '/';
     if (app->dataDir.empty()) {
         const std::vector<std::string> g = cr::gameFolders();
-#ifdef SDL_PLATFORM_ANDROID
-        if (!g.empty()) // (the folders made, to be seen over USB)
-            for (const char* f : {"ios", "android", "vita"}) SDL_CreateDirectory((g.front() + f).c_str());
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+        if (!g.empty()) // the game's writable folders (Files on iOS, shared storage on Android)
+            for (const char* f : {"ios", "android", "vita", "font"}) SDL_CreateDirectory((g.front() + f).c_str());
 #endif
-#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+#if !defined(SDL_PLATFORM_ANDROID)
         // The first start without a copy: where is it? (platform/setup.hpp - what's chosen copied into
         // the game folder's ios/, android/, vita/: found as on any start)
         static bool setupAsked = false;
@@ -23347,6 +23366,9 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
     switch (event->type) {
     case SDL_EVENT_QUIT:
         return SDL_APP_SUCCESS;
+    case SDL_EVENT_WINDOW_RESIZED: // a foldable's active screen may change between iPhone / iPad layout
+        if (app.video.layout == 0 && autoPhoneLayout(app) != app.renderer.phoneLayout()) applyVideo(app);
+        break;
     case SDL_EVENT_JOYSTICK_ADDED:
         SDL_Log("joystick appeared: id=%u name=%s type=%d mapped_gamepad=%d",
                 unsigned(event->jdevice.which),
