@@ -303,6 +303,7 @@ struct App {
     int entryArea = -1;                    // area whose script 0 last ran
     std::map<int, bool> npcShown;          // Born / Kill in this room (npc 0 = the player)
     std::set<int> flagTalked;              // FlagWindow: suppress a person's news mark after talking until re-entry
+    std::map<int, int> examineLinger;       // FollowWindow/FlagWindow remains interactable for ten frames after leaving reach
     std::map<int, std::pair<int, int>> npcJoints; // Joint: npc -> (parent npc, its node), this room
     struct Move {                          // FrmAdjc / FrmAdjc2 (npc_autoctl_prc), npc 0 = the player
         int npc = 0;
@@ -1733,7 +1734,9 @@ std::string sysText(const App& app, int id, const std::string& name = std::strin
 bool actorPos(App& app, int id, cr::Vec3& out);
 void setActor(App& app, int id, cr::Vec3 p, const float* yaw, bool keepY);
 bool scriptFloor(const App& app, cr::Vec3 p, float radius, float& y);
+bool npcExaminable(const App& app, const cr::FieldNpc& n);
 bool npcInReach(const App& app, const cr::FieldNpc& n);
+void stepExamineWindows(App& app);
 bool flagMarkUp(const App& app, const cr::FieldNpc& n);
 
 // Shows a field by collision file. `forcedMap` / `forcedArea` select the exact map (and so
@@ -1970,6 +1973,7 @@ void enterMap(App& app) {
     app.lastEvent.clear();
     app.npcShown.clear();
     app.flagTalked.clear();
+    app.examineLinger.clear();
     app.npcJoints.clear();
     app.placedNpcs.clear();
     app.actorSlots.clear();
@@ -2111,13 +2115,18 @@ bool performWarp(App& app, const cr::WarpRequest& w, int fromEvent) {
 // The NPC in reach to examine or talk to: kind bit 3, displayed, and the player inside its box grown
 // by the walker radius + 1.5. RectWrapper::checkFollowWindow gives objects (bit 4 clear) the "!"
 // badge; checkFlagWindow gives people (bit 4 set) the talk badge. Both start the NPC's script.
-bool npcInReach(const App& app, const cr::FieldNpc& n) {
+bool npcExaminable(const App& app, const cr::FieldNpc& n) {
     if (!(n.kind & 8) || !npcActive(app, n)) return false;
     if (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) return false;
     if (n.treasure & 3) {
         cr::NpcRow lid;
         if (app.events.npcRow(n.id + 1, lid) && lid.flagHide >= 0 && app.game.flag(lid.flagHide)) return false;
     }
+    return true;
+}
+
+bool npcInReach(const App& app, const cr::FieldNpc& n) {
+    if (!npcExaminable(app, n)) return false;
     const float k = n.model == 0 || n.model == 1 ? 1.0f : 0.0f;
     const float cx = n.pos[0] + (k + 1.0f) * n.offset[0];
     const float cz = n.pos[2] + (k + 1.0f) * n.offset[2];
@@ -2126,10 +2135,21 @@ bool npcInReach(const App& app, const cr::FieldNpc& n) {
     return std::fabs(app.walker.pos.x - cx) <= hx && std::fabs(app.walker.pos.z - cz) <= hz;
 }
 
+// The two original follow windows linger for ten frames after leaving the actor's reach.
+// A new approach restores a person's red FlagWindow marker until the person is talked to again.
+void stepExamineWindows(App& app) {
+    for (auto it = app.examineLinger.begin(); it != app.examineLinger.end();)
+        it = --it->second <= 0 ? app.examineLinger.erase(it) : std::next(it);
+    if (!app.havePlayer || app.runner.running()) return;
+    for (const cr::FieldNpc& n : app.npcs)
+        if (npcInReach(app, n)) app.examineLinger[n.id] = 10, app.flagTalked.erase(n.id);
+}
+
 // FlagWindow type 1: a red news mark for a visible person whose row +22 flag is set.
 bool flagMarkUp(const App& app, const cr::FieldNpc& n) {
     return (n.kind & 0x10) && n.link[0] != 0 && app.game.flag(n.link[0]) &&
-           !app.flagTalked.count(n.id) && n.model >= 0 && npcActive(app, n) && n.pos[1] < 900.0f;
+           !app.examineLinger.count(n.id) && !app.flagTalked.count(n.id) &&
+           n.model >= 0 && npcActive(app, n) && n.pos[1] < 900.0f;
 }
 
 const cr::FieldNpc* interactTarget(const App& app) {
@@ -2139,7 +2159,9 @@ const cr::FieldNpc* interactTarget(const App& app) {
         const cr::FieldNpc* best = nullptr;
         float bestD = 1e30f;
         for (const cr::FieldNpc& n : app.npcs) {
-            if (bool(n.kind & 0x10) != bool(people) || !npcInReach(app, n)) continue;
+            const auto up = app.examineLinger.find(n.id);
+            const bool lingering = up != app.examineLinger.end() && npcExaminable(app, n);
+            if (bool(n.kind & 0x10) != bool(people) || (!lingering && !npcInReach(app, n))) continue;
             const float dx = app.walker.pos.x - (n.base(0) + n.offset[0]);
             const float dy = app.walker.pos.y - (n.base(1) + n.offset[1]);
             const float dz = app.walker.pos.z - (n.base(2) + n.offset[2]);
@@ -2169,6 +2191,7 @@ bool interact(App& app, bool instant) {
         script = n->id + 1;
     }
     const int id = n->id;
+    app.examineLinger.erase(id); // _FollowWindowOff
     if (n->kind & 0x10) app.flagTalked.insert(id); // FlagWindow::TouchFollowWindowUtil (Work state 2)
     if (!instant) { // played over the next frames (animations, item window, fades)
         app.runnerWhat = "examined " + what.substr(0, what.size() - 4) + " (" + std::to_string(id) + ")";
@@ -10848,6 +10871,7 @@ void stepEvents(App& app) {
     // left them for its updates): the present packs - the second scenario's five extra trials and
     // their presents - open
     for (int f = 101; f <= 106; ++f) app.game.setFlag(f, true);
+    stepExamineWindows(app);
     if (app.npcNativesPending) {
         app.npcNativesPending = false;
         ViewerHost natives(app);
@@ -21274,6 +21298,7 @@ void bootTitle(App& app) {
     app.npcDraws.clear();
     app.npcHeld.clear();
     app.flagTalked.clear();
+    app.examineLinger.clear();
     app.dialogue.clear();
     app.dialogueInfo.clear();
     app.choiceFlag = -1;
