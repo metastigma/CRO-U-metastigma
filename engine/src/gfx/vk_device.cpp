@@ -270,7 +270,15 @@ public:
             }
         if (index == textures_.size()) textures_.emplace_back();
         TextureRec& rec = textures_[index];
+        // A failed earlier upload leaves the slot non-live. Release any partial image/view/memory
+        // before reusing it; simply assigning TextureRec() here leaked device-local allocations.
+        if (rec.image || rec.view || rec.mem.block >= 0) freeTexture(rec);
         rec = TextureRec();
+        auto fail = [&]() {
+            freeTexture(rec);
+            return t;
+        };
+
         VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         ii.imageType = VK_IMAGE_TYPE_2D;
         ii.format = kColorFormat;
@@ -281,21 +289,28 @@ public:
         ii.samples = VK_SAMPLE_COUNT_1_BIT;
         ii.tiling = VK_IMAGE_TILING_OPTIMAL;
         ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        if (!ok(vkCreateImage(device_, &ii, nullptr, &rec.image))) return t;
+        if (!ok(vkCreateImage(device_, &ii, nullptr, &rec.image))) return fail();
+
         VkMemoryRequirements req;
         vkGetImageMemoryRequirements(device_, rec.image, &req);
         if (!allocate(req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, false, rec.mem) ||
-            !ok(vkBindImageMemory(device_, rec.image, blocks_[size_t(rec.mem.block)].memory, rec.mem.offset))) {
-            vkDestroyImage(device_, rec.image, nullptr);
-            return t;
-        }
+            !ok(vkBindImageMemory(device_, rec.image, blocks_[size_t(rec.mem.block)].memory, rec.mem.offset)))
+            return fail();
+
         rec.view = makeView(rec.image, kColorFormat, VK_IMAGE_ASPECT_COLOR_BIT, rec.mips);
-        // Staging copy
+        if (!rec.view) return fail();
+
+        // Staging copy. If host memory is exhausted, release the image and its device allocation.
         const VkDeviceSize bytes = VkDeviceSize(img.width) * img.height * 4;
         Alloc staging;
-        if (!allocateBuffer(bytes, 16, staging)) return t;
+        if (!allocateBuffer(bytes, 16, staging)) return fail();
         std::memcpy(blocks_[size_t(staging.block)].mapped + staging.offset, img.rgba.data(), size_t(bytes));
+
         VkCommandBuffer cb = beginOneTime();
+        if (!cb) {
+            freeAlloc(staging);
+            return fail();
+        }
         barrier(cb, rec.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, rec.mips);
         VkBufferImageCopy region{};
@@ -304,7 +319,6 @@ public:
         region.imageExtent = ii.extent;
         vkCmdCopyBufferToImage(cb, blocks_[size_t(staging.block)].buffer, rec.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                                &region);
-        // The mip chain: each level filtered down from the one above
         int mw = img.width, mh = img.height;
         for (uint32_t m = 1; m < rec.mips; ++m) {
             barrierMip(cb, rec.image, m - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -323,7 +337,10 @@ public:
         }
         barrierMip(cb, rec.image, rec.mips - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-        endOneTime(cb);
+        if (!endOneTime(cb)) {
+            freeAlloc(staging);
+            return fail();
+        }
         freeAlloc(staging);
         rec.live = true;
         t.id = unsigned(index + 1);
@@ -355,10 +372,19 @@ public:
             }
         if (index == meshes_.size()) meshes_.emplace_back();
         MeshRec& rec = meshes_[index];
+        // A non-live slot can still own one allocation when an earlier upload failed.
+        freeAlloc(rec.vertices);
+        freeAlloc(rec.indices);
         rec = MeshRec();
-        if (!allocateBuffer(std::max<VkDeviceSize>(vertices.size(), 4), 16, rec.vertices) ||
-            !allocateBuffer(std::max<VkDeviceSize>(indices.size() * 4, 4), 16, rec.indices))
+        if (!allocateBuffer(std::max<VkDeviceSize>(vertices.size(), 4), 16, rec.vertices)) {
+            rec = MeshRec();
             return g;
+        }
+        if (!allocateBuffer(std::max<VkDeviceSize>(indices.size() * 4, 4), 16, rec.indices)) {
+            freeAlloc(rec.vertices);
+            rec = MeshRec();
+            return g;
+        }
         if (!vertices.empty())
             std::memcpy(blocks_[size_t(rec.vertices.block)].mapped + rec.vertices.offset, vertices.data(), vertices.size());
         if (!indices.empty())
@@ -1462,20 +1488,33 @@ private:
     }
 
     bool createHostBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buf, VkDeviceMemory& mem, uint8_t*& mapped) {
+        buf = VK_NULL_HANDLE;
+        mem = VK_NULL_HANDLE;
+        mapped = nullptr;
         VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bi.size = size;
         bi.usage = usage;
         if (!ok(vkCreateBuffer(device_, &bi, nullptr, &buf))) return false;
+        auto fail = [&]() {
+            if (mapped && mem) vkUnmapMemory(device_, mem);
+            mapped = nullptr;
+            if (mem) vkFreeMemory(device_, mem, nullptr);
+            mem = VK_NULL_HANDLE;
+            if (buf) vkDestroyBuffer(device_, buf, nullptr);
+            buf = VK_NULL_HANDLE;
+            return false;
+        };
         VkMemoryRequirements req;
         vkGetBufferMemoryRequirements(device_, buf, &req);
         const int type = findType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (type < 0) return fail();
         VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         ai.allocationSize = req.size;
         ai.memoryTypeIndex = uint32_t(type);
-        if (type < 0 || !ok(vkAllocateMemory(device_, &ai, nullptr, &mem))) return false;
-        vkBindBufferMemory(device_, buf, mem, 0);
+        if (!ok(vkAllocateMemory(device_, &ai, nullptr, &mem))) return fail();
+        if (!ok(vkBindBufferMemory(device_, buf, mem, 0))) return fail();
         void* p = nullptr;
-        if (!ok(vkMapMemory(device_, mem, 0, VK_WHOLE_SIZE, 0, &p))) return false;
+        if (!ok(vkMapMemory(device_, mem, 0, VK_WHOLE_SIZE, 0, &p))) return fail();
         mapped = static_cast<uint8_t*>(p);
         return true;
     }
@@ -1498,7 +1537,13 @@ private:
         b.ranges.init(b.size);
         blocks_.push_back(b);
         Block& nb = blocks_.back();
-        if (!nb.ranges.alloc(size, align, out.offset)) return false;
+        if (!nb.ranges.alloc(size, align, out.offset)) {
+            if (nb.mapped && nb.memory) vkUnmapMemory(device_, nb.memory);
+            if (nb.buffer) vkDestroyBuffer(device_, nb.buffer, nullptr);
+            if (nb.memory) vkFreeMemory(device_, nb.memory, nullptr);
+            blocks_.pop_back();
+            return false;
+        }
         out.block = int(blocks_.size() - 1);
         out.size = size;
         return true;
@@ -1524,7 +1569,11 @@ private:
         if (!ok(vkAllocateMemory(device_, &ai, nullptr, &b.memory))) return false;
         b.ranges.init(b.size);
         blocks_.push_back(b);
-        if (!blocks_.back().ranges.alloc(req.size, req.alignment, out.offset)) return false;
+        if (!blocks_.back().ranges.alloc(req.size, req.alignment, out.offset)) {
+            if (blocks_.back().memory) vkFreeMemory(device_, blocks_.back().memory, nullptr);
+            blocks_.pop_back();
+            return false;
+        }
         out.block = int(blocks_.size() - 1);
         out.size = req.size;
         return true;
@@ -1602,19 +1651,21 @@ private:
     VkCommandBuffer beginOneTime() {
         VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkResetCommandBuffer(uploadCmd_, 0);
-        vkBeginCommandBuffer(uploadCmd_, &bi);
+        if (!ok(vkResetCommandBuffer(uploadCmd_, 0)) || !ok(vkBeginCommandBuffer(uploadCmd_, &bi)))
+            return VK_NULL_HANDLE;
         return uploadCmd_;
     }
 
-    void endOneTime(VkCommandBuffer cb) {
-        ok(vkEndCommandBuffer(cb));
+    bool endOneTime(VkCommandBuffer cb) {
+        if (!cb || !ok(vkEndCommandBuffer(cb))) return false;
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount = 1;
         si.pCommandBuffers = &cb;
-        vkResetFences(device_, 1, &uploadFence_);
-        ok(vkQueueSubmit(queue_, 1, &si, uploadFence_));
-        vkWaitForFences(device_, 1, &uploadFence_, VK_TRUE, UINT64_MAX);
+        if (!ok(vkResetFences(device_, 1, &uploadFence_)) ||
+            !ok(vkQueueSubmit(queue_, 1, &si, uploadFence_)) ||
+            !ok(vkWaitForFences(device_, 1, &uploadFence_, VK_TRUE, UINT64_MAX)))
+            return false;
+        return true;
     }
 
     bool createImage(int w, int h, VkFormat format, VkImageUsageFlags usage, VkImage& image, Alloc& mem, int samples = 1) {
