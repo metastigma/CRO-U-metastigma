@@ -121,6 +121,7 @@ void Renderer::begin3DRect(float x, float y, float w, float h) {
         layoutToScreen(x, y);
         w *= layoutScale(), h *= layoutScale();
     }
+    interfaceRect(x, y, w, h);
     dev_->setViewport(offX_ + x * scaleX_, offY_ + y * scaleY_, w * scaleX_, h * scaleY_);
 }
 
@@ -197,10 +198,22 @@ void Renderer::mapScreen(int drawableW, int drawableH) {
     // inside the frame and centred
     const float least = vitaScreen() ? 960.0f / 544.0f : phone_ ? 1.5f : 4.0f / 3.0f; // the Vita's, the iPhone's 3:2, the iPad's 4:3
     const float fixed = androidScreen() ? 16.0f / 9.0f : least; // (Android: a 1280 x 720 phone's)
-    const float aspect = widescreen_ ? std::clamp(windowAspect_, least, 21.0f / 9.0f) : fixed;
+    const float narrowest = fillScreen_ ? std::min(least, 4.0f / 3.0f) : least;
+    const float aspect = widescreen_ ? std::clamp(windowAspect_, narrowest, 21.0f / 9.0f) : fixed;
     screenW_ = kLogicalH * aspect;
     const float sx = float(frameW_) / screenW_, sy = float(frameH_) / kLogicalH;
     scale_ = sx < sy ? sx : sy;
+    // Keep the picture and 3D at the full screen size. Only interface rectangles
+    // shrink, symmetrically, if the camera cutout would overlap the logical UI.
+    uiShrink_ = 1.0f;
+    {
+        const float k = float(frameW_) / float(windowW_);
+        const float bar = (float(frameW_) - screenW_ * scale_) * 0.5f;
+        const float cut = scale_ > 0 ? std::max(0.0f, (std::max(safeL_, safeR_) * k - bar) / scale_) : 0.0f;
+        const float need = phone_ ? kLogicalH * fixed : float(kLogicalW);
+        if (screenW_ - 2.0f * cut < need)
+            uiShrink_ = std::clamp((screenW_ - 2.0f * cut) / need, 0.5f, 1.0f);
+    }
     // ... and a smaller scene (upscaling) is exactly the frame scaled down per axis, so its pixels
     // land where the upscaler puts them
     const float kx = float(drawableW) / float(frameW_), ky = float(drawableH) / float(frameH_);
@@ -219,6 +232,35 @@ void Renderer::mapScreen(int drawableW, int drawableH) {
         -(r + l) / (r - l), -(t + b) / (t - b), 0, 1,
     };
     std::memcpy(proj_, proj, sizeof proj);
+}
+
+// Clips a vertical quad span and keeps its texture coordinates in sync.
+bool Renderer::clipV(float& y, float& h, float& t0, float& t1) const {
+    if (y >= clipY0_ && y + h <= clipY1_) return true;
+    if (h <= 0 || y + h <= clipY0_ || y >= clipY1_) return false;
+    const float y0 = std::max(y, clipY0_), y1 = std::min(y + h, clipY1_);
+    const float dt = (t1 - t0) / h;
+    t1 = t0 + (y1 - y) * dt;
+    t0 = t0 + (y0 - y) * dt;
+    y = y0;
+    h = y1 - y0;
+    return true;
+}
+
+float Renderer::safeEdge(float insetPx) const {
+    if (insetPx <= 0 || scale_ <= 0) return 0;
+    const float k = float(frameW_) / float(windowW_);
+    const float bar = (float(frameW_) - screenW_ * scale_) * 0.5f;
+    return std::clamp((insetPx * k - bar) / scale_, 0.0f, screenW_ * 0.25f);
+}
+
+void Renderer::interfaceRect(float& x, float& y, float& w, float& h) const {
+    if (uiShrink_ >= 1.0f || pictureLayer_ || std::fabs(w) >= screenW_ * 0.98f) return;
+    const float cx = screenW_ * 0.5f, cy = kLogicalH * 0.5f;
+    x = cx + (x - cx) * uiShrink_;
+    y = cy + (y - cy) * uiShrink_;
+    w *= uiShrink_;
+    h *= uiShrink_;
 }
 
 void Renderer::endScene() {
@@ -272,14 +314,17 @@ void Renderer::setSamples(int n) {
 void Renderer::drawQuad(const Texture& tex, float x, float y, float w, float h, float r, float g,
                         float b, float a) {
     if (!tex.id) return;
+    float t0 = 0.0f, t1 = 1.0f;
+    if (!clipV(y, h, t0, t1)) return;
     x += originX_;
     if (phone_) {
         layoutToScreen(x, y);
         w *= layoutScale(), h *= layoutScale();
     }
+    interfaceRect(x, y, w, h);
     const float v[24] = {
-        x, y, 0, 0,  x + w, y, 1, 0,  x + w, y + h, 1, 1,
-        x, y, 0, 0,  x + w, y + h, 1, 1,  x, y + h, 0, 1,
+        x, y, 0, t0,  x + w, y, 1, t0,  x + w, y + h, 1, t1,
+        x, y, 0, t0,  x + w, y + h, 1, t1,  x, y + h, 0, t1,
     };
     const float c[4] = {r, g, b, a};
     dev_->drawQuad(tex, v, proj_, c);
@@ -288,12 +333,15 @@ void Renderer::drawQuad(const Texture& tex, float x, float y, float w, float h, 
 void Renderer::drawQuadUV(const Texture& tex, float x, float y, float w, float h, float sx, float sy, float sw,
                           float sh, float r, float g, float b, float a) {
     if (!tex.id || tex.width <= 0 || tex.height <= 0) return;
+    float v0 = sy / tex.height, v1 = (sy + sh) / tex.height;
+    if (!clipV(y, h, v0, v1)) return;
     x += originX_;
     if (phone_) {
         layoutToScreen(x, y);
         w *= layoutScale(), h *= layoutScale();
     }
-    const float u0 = sx / tex.width, v0 = sy / tex.height, u1 = (sx + sw) / tex.width, v1 = (sy + sh) / tex.height;
+    interfaceRect(x, y, w, h);
+    const float u0 = sx / tex.width, u1 = (sx + sw) / tex.width;
     const float v[24] = {
         x, y, u0, v0,  x + w, y, u1, v0,  x + w, y + h, u1, v1,
         x, y, u0, v0,  x + w, y + h, u1, v1,  x, y + h, u0, v1,
@@ -309,6 +357,12 @@ void Renderer::drawQuadUVRotated(const Texture& tex, float cx, float cy, float w
     if (phone_) {
         layoutToScreen(cx, cy);
         w *= layoutScale(), h *= layoutScale();
+    }
+    if (uiShrink_ < 1.0f && !pictureLayer_ && std::fabs(w) < screenW_ * 0.98f) {
+        const float midX = screenW_ * 0.5f, midY = kLogicalH * 0.5f;
+        cx = midX + (cx - midX) * uiShrink_;
+        cy = midY + (cy - midY) * uiShrink_;
+        w *= uiShrink_, h *= uiShrink_;
     }
     const float c = std::cos(angle), s = std::sin(angle);
     auto at = [&](float dx, float dy, float* out) {
@@ -340,6 +394,18 @@ void Renderer::fillQuad(const float xy[8], float r, float g, float b, float a) {
         p[2 * k] = xy[2 * k] + originX_, p[2 * k + 1] = xy[2 * k + 1];
         if (phone_) layoutToScreen(p[2 * k], p[2 * k + 1]);
     }
+    float minX = p[0], maxX = p[0], minY = p[1], maxY = p[1];
+    for (int k = 1; k < 4; ++k) {
+        minX = std::min(minX, p[2 * k]); maxX = std::max(maxX, p[2 * k]);
+        minY = std::min(minY, p[2 * k + 1]); maxY = std::max(maxY, p[2 * k + 1]);
+    }
+    if (uiShrink_ < 1.0f && !pictureLayer_ && maxX - minX < screenW_ * 0.98f) {
+        const float cx = screenW_ * 0.5f, cy = kLogicalH * 0.5f;
+        for (int k = 0; k < 4; ++k) {
+            p[2 * k] = cx + (p[2 * k] - cx) * uiShrink_;
+            p[2 * k + 1] = cy + (p[2 * k + 1] - cy) * uiShrink_;
+        }
+    }
     const float v[24] = {
         p[0], p[1], 0, 0,  p[2], p[3], 1, 0,  p[4], p[5], 1, 1,
         p[0], p[1], 0, 0,  p[4], p[5], 1, 1,  p[6], p[7], 0, 1,
@@ -355,6 +421,11 @@ void Renderer::toLogical(float px, float py, float& lx, float& ly) const {
 void Renderer::toLogicalAtLayer(float px, float py, float& lx, float& ly, int layer) const {
     lx = (px - offX_) / scaleX_;
     ly = (py - offY_) / scaleY_;
+    if (uiShrink_ < 1.0f) {
+        const float cx = screenW_ * 0.5f, cy = kLogicalH * 0.5f;
+        lx = cx + (lx - cx) / uiShrink_;
+        ly = cy + (ly - cy) / uiShrink_;
+    }
     if (phone_) screenToLayout(lx, ly, layer);
 }
 
