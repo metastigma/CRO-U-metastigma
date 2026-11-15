@@ -2270,8 +2270,8 @@ bool selectFontFile(App& app, const std::string& name) {
 
 void applyFontScale(App& app) {
     const float scale = float(std::clamp(app.fontScale, 80, 200)) / 100.0f;
-    for (cr::Hud* h : {&app.dialogueHud, &app.promptHud, &app.itemHud, &app.choiceHud, &app.nameHud,
-                       &app.pageHud, &app.battleHud}) h->setFontScale(scale);
+    for (cr::Hud* h : {&app.hud, &app.dialogueHud, &app.promptHud, &app.itemHud, &app.choiceHud,
+                       &app.nameHud, &app.pageHud, &app.battleHud}) h->setFontScale(scale);
     for (cr::Hud& h : app.lineHud) h.setFontScale(scale);
 }
 
@@ -22872,16 +22872,22 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     for (const std::string& path : fontCandidates)
         if (fontProbe.load(path)) app->fontFiles.push_back(path);
     if (!app->fontFiles.empty()) {
-        selectFontFile(*app, fontFileName(app->fontFiles.front()));
-        SDL_Log("font: %s", app->font.path().c_str());
+        // This installation's Russian UI uses the supplied Spectral face. Do not let an
+        // unrelated alphabetically earlier font silently become the default.
+        auto preferred = std::find_if(app->fontFiles.begin(), app->fontFiles.end(), [](const std::string& path) {
+            return SDL_strcasecmp(fontFileName(path).c_str(), "Spectral-BoldItalic.ttf") == 0;
+        });
+        const std::string& initialFont = preferred != app->fontFiles.end() ? *preferred : app->fontFiles.front();
+        selectFontFile(*app, fontFileName(initialFont));
+        SDL_Log("font: selected %s (%s)", app->fontSelection.c_str(), app->font.path().c_str());
     } else {
         app->fontSelection.clear();
         app->fontIndex = -1;
         SDL_Log("font/: no usable .ttf/.otf/.ttc; using the built-in bitmap font");
     }
     // (the options menu is the engine's own, column-aligned for the 8x8 font)
-    for (cr::Hud* h : {&app->dialogueHud, &app->promptHud, &app->itemHud, &app->choiceHud, &app->nameHud,
-                       &app->pageHud, &app->battleHud})
+    for (cr::Hud* h : {&app->hud, &app->dialogueHud, &app->promptHud, &app->itemHud, &app->choiceHud,
+                       &app->nameHud, &app->pageHud, &app->battleHud})
         h->setFont(&app->font);
     for (cr::Hud& h : app->lineHud) h.setFont(&app->font);
     // --language n (or CR_LANGUAGE): 0 Japanese, 1 English, ... 7 Korean (cr::kLanguageName)
