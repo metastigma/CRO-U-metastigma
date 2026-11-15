@@ -5,6 +5,10 @@
 # .app needs no Vulkan SDK where it runs.
 function(cr_apple_vulkan target)
     target_link_libraries(${target} PRIVATE "-framework Metal" "-framework Foundation" "-weak_framework MetalFX")
+    if(IOS)
+        message(STATUS "Upscalers (iOS): MetalFX (iOS 16+), FSR 3.1; MoltenVK linked in")
+        return()
+    endif()
     get_target_property(bundle ${target} MACOSX_BUNDLE)
     if(NOT bundle)
         return()
