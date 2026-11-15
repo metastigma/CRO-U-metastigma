@@ -4203,6 +4203,21 @@ const char* optionText(const App& app, const char* english, const char* russian)
     return app.uiLanguage == 1 ? russian : english;
 }
 
+std::string localizeUpscalerProblem(const App& app, const std::string& reason) {
+    if (app.uiLanguage == 0) return reason;
+    if (reason == "this GPU lacks what temporal upscaling needs")
+        return "Видеокарта не поддерживает необходимые функции временного масштабирования.";
+    if (reason == "this GPU can't run FSR 3.1")
+        return "Эта видеокарта не поддерживает FSR 3.1.";
+    if (reason == "needs MoltenVK's VK_EXT_metal_objects")
+        return "Требуется VK_EXT_metal_objects из MoltenVK.";
+    if (reason == "MetalFX is Apple's: macOS only")
+        return "MetalFX — технология Apple, доступная только в macOS.";
+    if (reason == "no renderer")
+        return "Рендерер не инициализирован.";
+    return "Эта функция недоступна в текущей конфигурации: " + reason;
+}
+
 const char* optionPageName(const App& app, int page) {
     static const char* const english[kOptionPages] = {"Game", "Sound", "Display", "Detail", "Cheats", "Graphics"};
     static const char* const russian[kOptionPages] = {"Игра", "Звук", "Экран", "Детализация", "Читы", "Графика"};
@@ -4299,7 +4314,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         OptRow uiLang;
         uiLang.label = optionText(app, "Interface Language", "Язык интерфейса");
         uiLang.kind = OptControl::Pair;
-        uiLang.texts[0] = "English";
+        uiLang.texts[0] = optionText(app, "English", "Английский");
         uiLang.texts[1] = "Русский";
         uiLang.selected = app.uiLanguage;
         uiLang.act = [&app](int i) { app.uiLanguage = std::clamp(i, 0, 1); saveMix(app); };
@@ -4331,15 +4346,15 @@ std::vector<OptRow> optionRows(App& app, int page) {
             applyLanguage(app);
             saveMix(app);
         });
-        value(optionText(app, "Font", "Шрифт"), app.fontSelection.empty() ? "Bitmap" : app.fontSelection, [&app](int dir) {
+        value(optionText(app, "Font", "Шрифт"), app.fontSelection.empty() ? optionText(app, "Bitmap", "Встроенный") : app.fontSelection, [&app](int dir) {
             if (app.fontFiles.empty()) return;
             const int next = wrap(app.fontIndex + (dir ? dir : 1), app.fontFiles.size());
             if (selectFontFile(app, fontFileName(app.fontFiles[size_t(next)]))) saveMix(app);
         });
         rows.back().enabled = !app.fontFiles.empty();
         rows.back().hint = app.fontFiles.empty()
-                               ? "No local fonts found. Put .ttf, .otf or .ttc files in font/ beside the game."
-                               : "Left / Right: choose a font file from font/ beside the game. The choice is saved.";
+                               ? optionText(app, "No local fonts found. Put .ttf, .otf or .ttc files in font/ beside the game.", "Шрифты не найдены. Поместите файлы .ttf, .otf или .ttc в папку font/ рядом с игрой.")
+                               : optionText(app, "Left / Right: choose a font file from font/ beside the game. The choice is saved.", "Влево / Вправо: выбрать файл шрифта из папки font/ рядом с игрой. Выбор сохраняется.");
         value(optionText(app, "Text Size", "Размер текста"), std::to_string(app.fontScale) + "%", [&app](int dir) {
             const int next = std::clamp(app.fontScale + (dir ? dir : 1) * 10, 80, 200);
             if (next == app.fontScale) return;
@@ -4382,7 +4397,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
                                : optionText(app, "Enter: select your Vita copy's PCSG00499 folder; Left / Right: none", "Enter: выберите папку PCSG00499 с копией Vita; влево / вправо: нет");
         }
         { // the Android copy to take assets from (a folder holding its main.*.obb and APK; Left / Right: none)
-            std::string shown = "None";
+            std::string shown = optionText(app, "None", "Нет");
             if (!app.androidPath.empty()) {
                 std::string p = app.androidPath;
                 while (p.size() > 1 && p.back() == '/') p.pop_back();
@@ -4412,18 +4427,19 @@ std::vector<OptRow> optionRows(App& app, int page) {
         speed(optionText(app, "Field Speed", "Скорость передвижения"), &app.fieldSpeed, optionText(app, "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are", "Передвижение по локации в 2–5 раз быстрее; сцены, диалоги и меню идут в обычном темпе."));
         speed(optionText(app, "Battle Speed", "Скорость боя"), &app.battleSpeed, optionText(app, "The battles 2 .. 5 times as fast", "Сражения проходят в 2–5 раз быстрее."));
         OptRow swap; // the controller's ○ (east) / × (south): Off as on the Vita, ○ confirms
-        swap.label = "Swap \u25cb and \u00d7";
+        swap.label = optionText(app, "Swap \u25cb and \u00d7", "Поменять местами \u25cb и \u00d7");
         swap.kind = OptControl::Pair;
-        swap.words[0] = 33; // On
-        swap.words[1] = 34; // Off
+        swap.words[0] = swap.words[1] = -1;
+        swap.texts[0] = optionText(app, "On", "Вкл.");
+        swap.texts[1] = optionText(app, "Off", "Выкл.");
         swap.selected = app.padConfirmEast ? 1 : 0;
         swap.act = [&app](int i) {
             app.padConfirmEast = i == 1;
             saveMix(app);
         };
-        swap.hint = std::string(app.pad ? std::string("Controller: ") + SDL_GetGamepadName(app.pad) + ". " : "With a controller: ") +
-                    (app.padConfirmEast ? "\u25cb (the right button) confirms, \u00d7 (the bottom one) goes back - as on the Vita"
-                                        : "\u00d7 (the bottom button) confirms, \u25cb (the right one) goes back");
+        swap.hint = std::string(app.pad ? std::string(optionText(app, "Controller: ", "Геймпад: ")) + SDL_GetGamepadName(app.pad) + ". " : optionText(app, "With a controller: ", "При использовании геймпада: ")) +
+                    (app.padConfirmEast ? optionText(app, "\u25cb (the right button) confirms, \u00d7 (the bottom one) goes back - as on the Vita", "\u25cb (правая кнопка) подтверждает, \u00d7 (нижняя) возвращает назад — как на Vita")
+                                        : optionText(app, "\u00d7 (the bottom button) confirms, \u25cb (the right one) goes back", "\u00d7 (нижняя кнопка) подтверждает, \u25cb (правая) возвращает назад"));
         rows.push_back(swap);
         OptRow manual; // the topics and their pages (MuScrList + MsgUty)
         manual.label = optionText(app, "Instruction Manual", "Руководство");
@@ -4467,17 +4483,16 @@ std::vector<OptRow> optionRows(App& app, int page) {
         });
         const char* const kLayout[] = {optionText(app, "Auto", "Авто"), "iPad", "iPhone", "Vita", "Android"};
         value(optionText(app, "Layout", "Макет экрана"), kLayout[std::clamp(v.layout, 0, 4)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
-        rows.back().hint = "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android "
-                           "release's (16:9, its screens centred); Auto follows the data";
+        rows.back().hint = optionText(app, "Screen layout: iPad (4:3), iPhone (3:2), Vita or Android (16:9, centred); Auto follows the selected game data.", "Макет экрана: iPad (4:3), iPhone (3:2), Vita или Android (16:9, изображение по центру). «Авто» выбирает макет по используемым данным игры.");
         const char* const kPaintings[] = {optionText(app, "Original", "Оригинал"), optionText(app, "Whole", "Полностью"), optionText(app, "Fill Width", "По ширине")};
         value(optionText(app, "Painted Rooms", "Фоны локаций"), kPaintings[std::clamp(v.paintings, 0, 2)], [&app](int dir) { adjustVideo(app, 3, dir ? dir : 1); });
         onOff(optionText(app, "VSync", "Вертикальная синхронизация"), &v.vsync, [&app] { applyVideo(app); });
         value(optionText(app, "Frame Rate", "Ограничение кадров"), v.frameLimit ? std::to_string(v.frameLimit) : std::string(optionText(app, "Unlimited", "Без ограничений")),
               [&app](int dir) { adjustVideo(app, 15, dir ? dir : 1); });
-        rows.back().hint = "Frames drawn a second at most; the game runs at its own 20 a second, shown moving between them";
+        rows.back().hint = optionText(app, "Maximum frames drawn per second. Game logic still updates at its original 20 updates per second.", "Максимальная частота отображения кадров. Логика игры по-прежнему обновляется с исходной частотой 20 раз в секунду.");
         OptRow restore;
         restore.label = optionText(app, "Original Presentation", "Исходный вид");
-        restore.hint = "Every display and graphics option back to the original's";
+        restore.hint = optionText(app, "Restore all display and graphics options to their original values.", "Вернуть все параметры экрана и графики к исходным значениям.");
         restore.act = [&app](int) { adjustVideo(app, 7, 0); };
         rows.push_back(restore);
         break;
@@ -4489,8 +4504,8 @@ std::vector<OptRow> optionRows(App& app, int page) {
         };
         {
             const bool have = !app.hdDir.empty() && SDL_GetPathInfo(app.hdDir.c_str(), nullptr);
-            rows.back().hint = have ? "waifu2x / Real-ESRGAN upscales from textures/hd (tools/hd_textures.py); from the next room on"
-                                    : "None in textures/hd yet: --export-textures, then tools/hd_textures.py";
+            rows.back().hint = have ? optionText(app, "Uses upscaled replacements from textures/hd (waifu2x / Real-ESRGAN, tools/hd_textures.py). Changes apply from the next room.", "Использует увеличенные текстуры из textures/hd (waifu2x / Real-ESRGAN, tools/hd_textures.py). Изменения применяются со следующей локации.")
+                                    : optionText(app, "No replacements in textures/hd yet. Run --export-textures, then tools/hd_textures.py.", "В textures/hd пока нет замен. Выполните --export-textures, затем обработайте текстуры через tools/hd_textures.py.");
         }
         onOff(optionText(app, "HD Models", "Модели HD"), &v.hdModels, nullptr);
         rows.back().act = [&app](int i) {
@@ -4498,24 +4513,24 @@ std::vector<OptRow> optionRows(App& app, int page) {
         };
         {
             const bool have = !app.modelsDir.empty() && SDL_GetPathInfo(app.modelsDir.c_str(), nullptr);
-            rows.back().hint = have ? "Replacement models (glTF) from models/hd, in place of the game's; from the next room on"
-                                    : "None in models/hd yet: --export-models, edit in Blender, save as models/hd/<name>.glb";
+            rows.back().hint = have ? optionText(app, "glTF models in models/hd replace the original models. Changes apply from the next room.", "Модели glTF из models/hd заменяют оригинальные. Изменения применяются со следующей локации.")
+                                    : optionText(app, "No models in models/hd yet. Run --export-models, edit in Blender, then save as models/hd/<name>.glb.", "В models/hd пока нет моделей. Выполните --export-models, отредактируйте модели в Blender и сохраните их как models/hd/<name>.glb.");
         }
         const char* const kSmooth[] = {optionText(app, "Off", "Выкл."), "", optionText(app, "Smooth", "Сглаженная"), optionText(app, "Smoother", "Усиленное сглаживание")};
         value(optionText(app, "Smooth Models", "Сглаживание моделей"), kSmooth[v.smoothModels], [&app](int dir) { adjustVideo(app, 13, dir ? dir : 1); });
-        rows.back().hint = v.smoothModels ? "Rounder models (4x / 9x triangles), hard edges kept; from the next room on"
-                                          : "Rounds the models' silhouettes - characters, monsters, props, stages (PN triangles)";
+        rows.back().hint = v.smoothModels ? optionText(app, "Rounds model geometry (4x / 9x triangles) while preserving hard edges. Applies from the next room.", "Сглаживает геометрию моделей (в 4 или 9 раз больше треугольников), сохраняя жёсткие грани. Применяется со следующей локации.")
+                                          : optionText(app, "Rounds the silhouettes of characters, monsters, props and stages using PN triangles.", "Скругляет силуэты персонажей, монстров, предметов и локаций с помощью PN-треугольников.");
         {
             const int most = std::max(app.renderer.maxAnisotropy(), 1);
             value(optionText(app, "Anisotropic Filtering", "Анизотропная фильтрация"), v.anisotropy > 1 && most > 1 ? std::to_string(std::min(v.anisotropy, most)) + "x" : std::string(optionText(app, "Off", "Выкл.")),
                   [&app](int dir) { adjustVideo(app, 16, dir ? dir : 1); });
             rows.back().enabled = most > 1;
-            rows.back().hint = most > 1 ? "Textures stay sharp on floors and walls seen at an angle" : "Not on this GPU";
+            rows.back().hint = most > 1 ? optionText(app, "Keeps floor and wall textures sharp when viewed at an angle.", "Сохраняет чёткость текстур пола и стен при взгляде под углом.") : optionText(app, "Not supported by this GPU.", "Не поддерживается этой видеокартой.");
         }
         pair(optionText(app, "Texture Filtering", "Фильтрация текстур"), optionText(app, "Smooth", "Сглаженная"), optionText(app, "Sharp", "Чёткая"), v.sharpTextures ? 1 : 0, [&app](int i) {
             if (app.video.sharpTextures != (i == 1)) adjustVideo(app, 17, 1);
         });
-        rows.back().hint = "Sharp: the world's textures magnified by the nearest texel (square pixels up close)";
+        rows.back().hint = optionText(app, "Sharp: magnified textures use the nearest texel, keeping pixels crisp.", "Режим «Чёткая»: при увеличении выбирается ближайший тексель, поэтому пиксели остаются чёткими.");
         break;
     }
     case 4: { // Cheats (the port's own): the user's - "Infinite HP and MP. Infinite Maxed out Money, xp multipliers. always advantage"
@@ -4549,29 +4564,29 @@ std::vector<OptRow> optionRows(App& app, int page) {
         const bool scalable = app.renderer.scalable();
         const std::string why = app.renderer.upscalerProblem(kUpscaler[std::clamp(v.upscaler, 0, kUpscalers - 1)]);
         auto unavailable = [&](OptRow& r) {
-            if (v.upscaler && !why.empty()) r.hint = std::string(kUpscalerName[v.upscaler]) + " is off here: " + why;
+            if (v.upscaler && !why.empty()) r.hint = std::string(kUpscalerName[v.upscaler]) + optionText(app, " is unavailable here: ", " недоступен в этой конфигурации: ") + localizeUpscalerProblem(app, why);
         };
         value(optionText(app, "Render Scale", "Масштаб рендеринга"), scalable ? std::to_string(v.renderScale) + "%" : "100%", [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 4, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
-        rows.back().hint = scalable ? "The frame at this size, then scaled to the window" : "Needs the Vulkan renderer";
+        rows.back().hint = scalable ? optionText(app, "Renders the scene at this resolution, then scales it to the window.", "Сцена сначала рендерится в этом разрешении, затем масштабируется до размера окна.") : optionText(app, "Requires the Vulkan renderer.", "Требуется рендерер Vulkan.");
         const std::string na = v.upscaler && !why.empty() ? " n/a" : ""; // chosen, but can't run here
         value(optionText(app, "Anti-aliasing", "Сглаживание"), scalable ? aaName(v) + na : optionText(app, "Off", "Выкл."), [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 8, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
-        rows.back().hint = !scalable ? "Needs the Vulkan renderer"
-                           : v.upscaler ? "Temporal: jittered frames accumulated (MSAA is off meanwhile)"
-                                        : "MSAA, or FSR Native AA / DLAA at full resolution";
+        rows.back().hint = !scalable ? optionText(app, "Requires the Vulkan renderer.", "Требуется рендерер Vulkan.")
+                           : v.upscaler ? optionText(app, "Temporal: frames with sub-pixel jitter are accumulated (MSAA is disabled while active).", "Временное сглаживание: накапливаются кадры со смещением субпиксельной выборки (на это время MSAA отключается).")
+                                        : optionText(app, "MSAA, FSR Native AA or DLAA at full resolution.", "MSAA, FSR Native AA или DLAA в исходном разрешении.");
         unavailable(rows.back());
         value(optionText(app, "Upscaler", "Масштабирование"), scalable ? kUpscalerName[v.upscaler] + na : optionText(app, "Off", "Выкл."), [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 9, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
-        rows.back().hint = "The scene renders smaller and is reconstructed; the menus stay sharp";
+        rows.back().hint = optionText(app, "The scene is rendered at a lower resolution and reconstructed; the menus remain sharp.", "Сцена рендерится в меньшем разрешении и восстанавливается до полного; меню остаются чёткими.");
         unavailable(rows.back());
-        value(optionText(app, "Upscale Mode", "Режим масштабирования"), v.upscaler == 2 && v.upscaleMode == 0 ? "DLAA" : kUpscaleModes[v.upscaleMode].name,
+        value(optionText(app, "Upscale Mode", "Режим масштабирования"), v.upscaler == 2 && v.upscaleMode == 0 ? "DLAA" : optionUpscaleModeName(app, v.upscaleMode),
               [&app](int dir) {
                   if (app.video.upscaler) adjustVideo(app, 10, dir ? dir : 1);
               });
@@ -4579,14 +4594,14 @@ std::vector<OptRow> optionRows(App& app, int page) {
         {
             const float ratio = kUpscaleModes[v.upscaleMode].ratio;
             char h[96];
-            SDL_snprintf(h, sizeof h, "The scene at %d%% of the frame per side", int(100.0f / ratio + 0.5f));
+            SDL_snprintf(h, sizeof h, optionText(app, "Scene resolution: %d%% of the output frame on each axis.", "Разрешение сцены: %d%% от итогового кадра по каждой оси."), int(100.0f / ratio + 0.5f));
             rows.back().hint = h;
         }
         value(optionText(app, "Sharpness", "Резкость"), std::to_string(v.sharpness) + "%", [&app](int dir) {
             if (app.video.upscaler == 1) adjustVideo(app, 11, dir ? dir : 1);
         });
         rows.back().enabled = scalable && v.upscaler == 1;
-        rows.back().hint = "FSR's sharpening pass (RCAS); DLSS has none";
+        rows.back().hint = optionText(app, "FSR sharpening pass (RCAS); DLSS does not use this setting.", "Этап повышения резкости FSR (RCAS); в DLSS этот параметр не используется.");
         break;
     }
     }
