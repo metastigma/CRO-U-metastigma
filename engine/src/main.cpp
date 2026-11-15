@@ -3467,7 +3467,7 @@ struct ViewerHost : cr::EventHost {
         n.native = row.native;
         n.mdlRead = n.model >= 0;
         n.scale = row.scale;
-        if (id >= 400 || !npcActive(app, n)) app.npcShown[id] = false;
+        if (npcStoryActor(app, id) || !npcActive(app, n)) app.npcShown[id] = false;
         app.npcs.push_back(n);
         app.npcWarps.push_back(false);
         buildNpcDraws(app); // retain a model read by a script even when its hidden bit is set
