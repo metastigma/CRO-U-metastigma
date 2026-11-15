@@ -4356,7 +4356,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         uiLang.label = optionText(app, "Interface Language", "Язык интерфейса");
         uiLang.kind = OptControl::Pair;
         uiLang.texts[0] = optionText(app, "English", "Английский");
-        uiLang.texts[1] = "Русский";
+        uiLang.texts[1] = optionText(app, "Russian", "Русский");
         uiLang.selected = app.uiLanguage;
         uiLang.act = [&app](int i) { app.uiLanguage = std::clamp(i, 0, 1); saveMix(app); };
         rows.push_back(uiLang);
