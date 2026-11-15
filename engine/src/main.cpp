@@ -31,6 +31,7 @@
 #include <atomic>
 #include <bitset>
 #include <functional>
+#include <iterator>
 #include <ctime>
 #include <map>
 #include <mutex>
