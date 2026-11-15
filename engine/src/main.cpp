@@ -4215,6 +4215,10 @@ std::string localizeUpscalerProblem(const App& app, const std::string& reason) {
         return "MetalFX — технология Apple, доступная только в macOS.";
     if (reason == "no renderer")
         return "Рендерер не инициализирован.";
+    if (reason == "built without the DLSS SDK")
+        return "Сборка выполнена без SDK DLSS.";
+    if (reason == "NVIDIA NGX is not available")
+        return "NVIDIA NGX недоступна.";
     return "Эта функция недоступна в текущей конфигурации: " + reason;
 }
 
