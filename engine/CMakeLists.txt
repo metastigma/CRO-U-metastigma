@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 project(ChaosRingsOmega LANGUAGES C CXX)
+if(IOS)
+    enable_language(OBJCXX)
+endif()
 set(CR_VERSION "0.7.0" CACHE STRING "The app's version (x.y.z)")
 if(WIN32)
     enable_language(RC) # (the .exe's icon: cmake/app-icon.cmake)
