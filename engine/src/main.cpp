@@ -248,6 +248,7 @@ struct App {
         bool displayExplicit = false;       // saved display choice overrides the desktop default
         bool resolutionExplicit = false;    // saved resolution choice overrides the native desktop mode
         bool widescreen = false;           // the screen widens to the window (up to 21:9); else 4:3
+        bool avoidCutout = true;           // mobile: keep the interface clear of camera notches / punch holes
         int paintings = 0;                 // painted rooms: 0 the original's (2x, a screen-sized window following
                                            // the player), 1 the whole painting at the screen's height, 2 at its width
         int renderScale = 100;             // % of the window's pixels (Vulkan)
@@ -3714,7 +3715,8 @@ void saveMix(const App& app) {
                               "\nwidescreen=" + std::to_string(int(v.widescreen)) +
                               "\npainted_rooms=" + std::to_string(v.paintings) + "\nrender_scale=" +
                               std::to_string(v.renderScale) + "\nmsaa=" + std::to_string(v.msaa) +
-                              "\nvsync=" + std::to_string(int(v.vsync)) + "\nframe_limit=" + std::to_string(v.frameLimit) + "\nupscaler=" + std::to_string(v.upscaler) +
+                              "\nvsync=" + std::to_string(int(v.vsync)) + "\nframe_limit=" + std::to_string(v.frameLimit) +
+                              "\navoid_cutout=" + std::to_string(int(v.avoidCutout)) + "\nupscaler=" + std::to_string(v.upscaler) +
                               "\nupscale_mode=" + std::to_string(v.upscaleMode) + "\nsharpness=" +
                               std::to_string(v.sharpness) + "\nhd_textures=" + std::to_string(int(v.hdTextures)) +
                               "\nsmooth_models=" + std::to_string(v.smoothModels) + "\nhd_models=" + std::to_string(int(v.hdModels)) +
@@ -3787,6 +3789,7 @@ void loadVideo(App& app, const char* text) {
     v.msaa = std::clamp(keyValue(text, "\nmsaa=", v.msaa), 1, 8);
     v.vsync = keyValue(text, "\nvsync=", v.vsync) != 0;
     v.frameLimit = std::clamp(keyValue(text, "\nframe_limit=", v.frameLimit), 0, 1000);
+    v.avoidCutout = keyValue(text, "\navoid_cutout=", v.avoidCutout) != 0;
     v.upscaler = std::clamp(keyValue(text, "\nupscaler=", v.upscaler), 0, kUpscalers - 1);
     v.upscaleMode = std::clamp(keyValue(text, "\nupscale_mode=", v.upscaleMode), 0, 4);
     v.sharpness = std::clamp(keyValue(text, "\nsharpness=", v.sharpness), 0, 100);
@@ -3862,6 +3865,15 @@ bool autoPhoneLayout(const App& app) { return app.phoneData || app.vitaOnly || s
 void applyVideo(App& app) {
     App::Video& v = app.video;
     cr::Renderer& r = app.renderer;
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+    // Mobile builds always use the device's native display; the image fills it,
+    // while only UI geometry observes the safe area.
+    v.display = 0;
+    v.widescreen = true;
+    r.setFillScreen(true);
+#else
+    r.setFillScreen(SDL_getenv("CR_PHONE_FILL") != nullptr);
+#endif
     r.setWidescreen(v.widescreen);
     // 2.2.0's / Omega's iPhone screens (3:2): the iPhone's data, or the Vita's alone - its art is the
     // iPhone's Retina sheets (the Vita ran the iPhone code path) - unless the iPad layout is asked for
@@ -3891,6 +3903,10 @@ void applyVideo(App& app) {
     tf.lodBias = up.mode != cr::Upscaler::Off ? -std::log2(up.ratio) : 0.0f;
     r.setFiltering(tf);
     if (!app.window) return;
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+    if (!SDL_SetWindowFullscreen(app.window, true))
+        SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "mobile fullscreen: %s", SDL_GetError());
+#else
     if (v.display == 0) {
         if (!SDL_SetWindowFullscreen(app.window, false))
             SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "leaving fullscreen: %s", SDL_GetError());
@@ -3957,6 +3973,7 @@ void applyVideo(App& app) {
         else if (v.display == 1 && fullscreen && !activeMode)
             SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "fullscreen is desktop-borderless, not exclusive");
     }
+#endif
     applyOrientation(app);
     // The window manager applies the size when it gets to it: wait for it (up to a second) so the
     // next frame, and captures, have it
@@ -4356,6 +4373,13 @@ std::vector<OptRow> optionRows(App& app, int page) {
         break;
     }
     case 2: { // Display
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+        pair("Camera Cutout", "Avoid", "Ignore", v.avoidCutout ? 0 : 1, [&app](int i) {
+            app.video.avoidCutout = i == 0;
+            saveMix(app);
+        });
+        rows.back().hint = "Avoid keeps menus and buttons clear of the camera notch or punch hole; the picture still fills the screen. Ignore lets the interface reach the edges.";
+#else
         static const char* const kDisplay[] = {"Window", "Fullscreen", "Borderless"};
         value("Resolution", (v.display == 2 || (v.display == 1 && !v.resolutionExplicit)) ?
                                   "Desktop" : std::to_string(v.width) + " x " + std::to_string(v.height),
@@ -4364,6 +4388,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         pair("Aspect", "4:3", "Wide", v.widescreen ? 1 : 0, [&app](int i) {
             if (app.video.widescreen != (i == 1)) adjustVideo(app, 2, 1);
         });
+#endif
         static const char* const kLayout[] = {"Auto", "iPad", "iPhone", "Vita", "Android"};
         value("Layout", kLayout[std::clamp(v.layout, 0, 4)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
         rows.back().hint = "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android "
@@ -4587,8 +4612,14 @@ void phoneMenuPoint(const App& app, float& mx, float& my) {
 // Widescreen (the iPad layout): the origins of a screen's left- and right-hand groups - kept to
 // the screen's edges, as the later widescreen release does (and the shop and the battle here),
 // the rest centred (uiX). The iPhone layout's one 480-wide screen doesn't spread
-float wideLeft(const App& app) { return app.renderer.phoneLayout() ? app.renderer.uiX() : 0.0f; }
-float wideRight(const App& app) { return app.renderer.phoneLayout() ? app.renderer.uiX() : 2 * app.renderer.uiX(); }
+float wideLeft(const App& app) {
+    const cr::Renderer& r = app.renderer;
+    return r.phoneLayout() || r.interfaceShrink() < 1.0f ? r.uiX() : r.safeLeft();
+}
+float wideRight(const App& app) {
+    const cr::Renderer& r = app.renderer;
+    return r.phoneLayout() || r.interfaceShrink() < 1.0f ? r.uiX() : 2 * r.uiX() - r.safeRight();
+}
 // A logical point in menu units of the group drawn from `origin`
 void menuPointAt(const App& app, float lx, float ly, float origin, float& mx, float& my) {
     mx = (lx - origin) / 2, my = ly / 2;
@@ -15642,9 +15673,24 @@ void drawFrame(App& app, bool present = true) {
         else if (e == 3) loseToArk(app);
         else bootTitle(app);
     }
-    int w = 0, h = 0;
+    int w = 0, h = 0, ww = 0, wh = 0;
     SDL_GetWindowSizeInPixels(app.window, &w, &h);
+    SDL_GetWindowSize(app.window, &ww, &wh);
     auto& r = app.renderer;
+    float safeL = 0, safeT = 0, safeR = 0, safeB = 0;
+    SDL_Rect safe{};
+    if (const char* test = SDL_getenv("CR_SAFE_INSETS");
+        test && std::sscanf(test, "%f,%f,%f,%f", &safeL, &safeT, &safeR, &safeB) == 4) {
+        // Explicit pixel insets for desktop layout / cutout regression tests.
+    } else if (SDL_GetWindowSafeArea(app.window, &safe) && ww > 0 && wh > 0) {
+        const float sx = float(w) / float(ww), sy = float(h) / float(wh);
+        safeL = float(safe.x) * sx;
+        safeT = float(safe.y) * sy;
+        safeR = float(ww - safe.x - safe.w) * sx;
+        safeB = float(wh - safe.y - safe.h) * sy;
+    }
+    if (!app.video.avoidCutout) safeL = safeT = safeR = safeB = 0;
+    r.setSafeInsets(safeL, safeT, safeR, safeB);
     r.beginFrame(w, h);
     // W: the game's 2D layout (1024); SW: the whole logical screen (wider in widescreen)
     const float W = cr::Renderer::kLogicalW, H = cr::Renderer::kLogicalH, SW = r.screenW();
