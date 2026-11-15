@@ -15544,7 +15544,7 @@ void drawPrompt(App& app, const cr::Mat4& vp, float rx, float ry, float rw, floa
     float sx, sy;
     if (!project(*n, sx, sy)) return;
     app.promptX = sx;
-    app.promptY = sy;
+    app.promptY = sy - 20.5f; // preserve the existing FollowWindow touch hitbox for its 40x41 badge
     if (app.windowTex.id) drawWinPiece(app, kWinBadge, sx - 20, sy - 41, 40, 41);
     else app.promptHud.drawAt(app.renderer, {"[E]"}, sx - 24, sy - 16, 2.0f, 0, 0, 0.8f);
 }
@@ -20470,7 +20470,7 @@ int runSelfTest(App& app) {
             std::printf("cutscene actor %s area %d: hidden on Kill %s, hidden Anim retained %s, fade/Born state retained %s, hidden again %s; %d problems\n",
                         b.model, b.area, hidden ? "yes" : "NO", held ? "yes" : "NO", shown ? "yes" : "NO",
                         killed ? "yes" : "NO", sceneProblems);
-            problems += sceneProblems;            problems += sceneProblems;
+            problems += sceneProblems;
         }
         app.game = keepGame;
         mapErrors += problems;
