@@ -365,7 +365,8 @@ else()
         target_sources(chaosringsomega PRIVATE src/platform/ios_picker.mm)
         set_source_files_properties(src/platform/ios_picker.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
         target_link_libraries(chaosringsomega PRIVATE
-            "-framework OpenGLES" "-framework QuartzCore" "-framework UIKit" "-framework UniformTypeIdentifiers")
+            "-framework OpenGLES" "-framework QuartzCore" "-framework UIKit" "-framework UniformTypeIdentifiers"
+            "-framework CoreText")
         target_compile_definitions(chaosringsomega PRIVATE CR_GLES=1 CR_RELEASE=1)
         set_target_properties(chaosringsomega PROPERTIES
             MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/ios/Info.plist.in
