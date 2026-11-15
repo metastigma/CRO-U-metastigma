@@ -373,8 +373,16 @@ multiple of 16 bytes); every vertex index is in range. `tools/cmp.py`.
         s16    attr2  always 7
         4 bytes padding (0xAFAFAFFF)
      nNodes × node (KD 32 bytes, QUAD 40): +0 index-list pointer slot,
-        +4..+10 four s16 counts, +24 s16 (child/leaf marker)
-     per node: sum(counts) × s16 polygon index
+        +4..+10 four s16 counts (+4 floors, +6 walls; +8/+10 are other lists)
+        +24 s16 (child/leaf marker)
+     per node: sum(counts) × s16 polygon index, in node order - floors, walls, then other lists
+
+The distinction between "no lists" and "no floor/wall entries" matters. Scene-stage collision files
+(e.g. `t0150_10.cmp`, `d0150..d0650_10.cmp`, `d0799_10.cmp`) can have a non-empty +10 list while
++4 and +6 remain empty. Keep that node's floor/wall lists empty: `_get_floor(x,y,z,10)` searches the
+local KD node and asks only its +4 floor list within 20 units of the recorded Y. With no such floor,
+a placed scene actor keeps the Y from its event record. Do not turn the +10 polygon into a floor by
+rebuilding a leaf from polygon normals. Only files with no node lists at all use the legacy fallback.
 ```
 
 Data: 2,716 floor polygons (normal.y > 0.7), 3,860 walls, 1 ceiling.

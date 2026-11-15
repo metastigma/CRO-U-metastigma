@@ -31,6 +31,7 @@
 #include <atomic>
 #include <bitset>
 #include <functional>
+#include <iterator>
 #include <ctime>
 #include <map>
 #include <mutex>
@@ -302,6 +303,8 @@ struct App {
     enum class Entry { None, Area, Room } pendingEntry = Entry::None;
     int entryArea = -1;                    // area whose script 0 last ran
     std::map<int, bool> npcShown;          // Born / Kill in this room (npc 0 = the player)
+    std::set<int> flagTalked;              // FlagWindow: suppress a person's news mark after talking until re-entry
+    std::map<int, int> examineLinger;       // FollowWindow/FlagWindow remains interactable for ten frames after leaving reach
     std::map<int, std::pair<int, int>> npcJoints; // Joint: npc -> (parent npc, its node), this room
     struct Move {                          // FrmAdjc / FrmAdjc2 (npc_autoctl_prc), npc 0 = the player
         int npc = 0;
@@ -758,8 +761,10 @@ struct App {
         float alpha = 1, alphaFrom = 1, alphaTo = 1; // NpcFade / mdl_fadein / mdl_fadeout
         int fadeFrames = 0, fadeLeft = 0;
         bool faded = false;  // mdl_set_alpha: alpha-blended for good, even when the fade ends at 255
+        bool lit = false;    // a fade temporarily puts a hidden model back into mdl_put
     };
     std::vector<NpcDraw> npcDraws;         // this map's visible NPCs
+    std::vector<NpcDraw> npcHeld;          // loaded but hidden models; event ops still update their action/fade state
     // A puzzle room (PuzzleManager, game/puzzle.hpp): its objects - the room's NPCs that have
     // NPC table +20 bits - on a grid of 3 layers (0 the floor's switches, 1 blocks and gems, 2
     // the warp crystals), the touch ability's state and the ESP count
@@ -1729,6 +1734,11 @@ int partyLevel(const App& app);
 std::string sysText(const App& app, int id, const std::string& name = std::string());
 bool actorPos(App& app, int id, cr::Vec3& out);
 void setActor(App& app, int id, cr::Vec3 p, const float* yaw, bool keepY);
+bool scriptFloor(const App& app, cr::Vec3 p, float radius, float& y);
+bool npcExaminable(const App& app, const cr::FieldNpc& n);
+bool npcInReach(const App& app, const cr::FieldNpc& n);
+void stepExamineWindows(App& app);
+bool flagMarkUp(const App& app, const cr::FieldNpc& n);
 
 // Shows a field by collision file. `forcedMap` / `forcedArea` select the exact map (and so
 // camera and event lists) when arriving by warp; otherwise the best-framing camera is used.
@@ -1901,11 +1911,21 @@ bool playerShown(const App& app) {
     return it == app.npcShown.end() || it->second;
 }
 
-bool npcActive(const App& app, const cr::FieldNpc& n) {
-    // Born / Kill override the flags until the room reloads
-    if (auto it = app.npcShown.find(n.id); it != app.npcShown.end()) return it->second;
-    // npc_setup hides an NPC whose show-flag is clear (guess for the hide flag: hidden once set)
+bool npcCreateFlags(const App& app, const cr::FieldNpc& n) {
     return (n.flagShow < 0 || app.game.flag(n.flagShow)) && (n.flagHide < 0 || !app.game.flag(n.flagHide));
+}
+
+// npc_setup's story actors start hidden and are explicitly shown by Born. The puzzle room
+// (area 1) is the exception; area 8 uses the 301..349 block instead of 400..449.
+bool npcStoryActor(const App& app, int id) {
+    if (app.area == 1) return false;
+    return app.area == 8 ? id >= 301 && id < 350 : id >= 400 && id < 450;
+}
+
+bool npcActive(const App& app, const cr::FieldNpc& n) {
+    // Born / Kill override the room's initial setup until the next room load.
+    if (auto it = app.npcShown.find(n.id); it != app.npcShown.end()) return it->second;
+    return npcCreateFlags(app, n) && !npcStoryActor(app, n.id);
 }
 
 namespace puzzle { void enter(App& app); }
@@ -1963,6 +1983,8 @@ void enterMap(App& app) {
     app.lastKick = 0;
     app.lastEvent.clear();
     app.npcShown.clear();
+    app.flagTalked.clear();
+    app.examineLinger.clear();
     app.npcJoints.clear();
     app.placedNpcs.clear();
     app.actorSlots.clear();
@@ -2008,9 +2030,17 @@ void enterMap(App& app) {
     if (worldBoxes)
         for (const auto& e : pick) boxes.push_back({e[0], e[1]});
     cr::applyTreasureFlags(app.events, app.npcs, boxes, app.game, true);
+    // RectWrapper::init / npc_setup: snapshot flag visibility once per room, and keep story
+    // actors hidden until Born. Flags changed by an event do not alter the room's NPC visibility.
+    app.npcShown.clear();
+    app.flagTalked.clear();
+    app.examineLinger.clear();
+    for (const cr::FieldNpc& n : app.npcs)
+        app.npcShown[n.id] = npcCreateFlags(app, n) && !npcStoryActor(app, n.id);
     puzzle::enter(app); // PuzzleScene::init in a puzzle room (stage -1 elsewhere)
     app.puzzleStartPending = app.puzzle.stage >= 0;
     app.npcDraws.clear(); // npc_setup reads the room's models again: no fade carried over from the last room
+    app.npcHeld.clear();
     buildNpcDraws(app);
     buildWalkCollision(app);
     cr::Mesh mesh;
@@ -2103,21 +2133,62 @@ bool performWarp(App& app, const cr::WarpRequest& w, int fromEvent) {
 // The NPC in reach to examine or talk to: kind bit 3, displayed, and the player inside its box grown
 // by the walker radius + 1.5. RectWrapper::checkFollowWindow gives objects (bit 4 clear) the "!"
 // badge; checkFlagWindow gives people (bit 4 set) the talk badge. Both start the NPC's script.
+bool npcExaminable(const App& app, const cr::FieldNpc& n) {
+    if (!(n.kind & 8) || !npcActive(app, n)) return false;
+    if (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) return false;
+    if (n.treasure & 3) {
+        cr::NpcRow lid;
+        if (app.events.npcRow(n.id + 1, lid) && lid.flagHide >= 0 && app.game.flag(lid.flagHide)) return false;
+    }
+    return true;
+}
+
+bool npcInReach(const App& app, const cr::FieldNpc& n) {
+    if (!npcExaminable(app, n)) return false;
+    const float k = n.model == 0 || n.model == 1 ? 1.0f : 0.0f;
+    const float cx = n.pos[0] + (k + 1.0f) * n.offset[0];
+    const float cz = n.pos[2] + (k + 1.0f) * n.offset[2];
+    const float hx = n.box[0] / 2 + app.walker.radius + 1.5f;
+    const float hz = n.box[2] / 2 + app.walker.radius + 1.5f;
+    return std::fabs(app.walker.pos.x - cx) <= hx && std::fabs(app.walker.pos.z - cz) <= hz;
+}
+
+// The two original follow windows linger for ten frames after leaving the actor's reach.
+// A new approach restores a person's red FlagWindow marker until the person is talked to again.
+void stepExamineWindows(App& app) {
+    for (auto it = app.examineLinger.begin(); it != app.examineLinger.end();)
+        it = --it->second <= 0 ? app.examineLinger.erase(it) : std::next(it);
+    if (!app.havePlayer || app.runner.running()) return;
+    for (const cr::FieldNpc& n : app.npcs)
+        if (npcInReach(app, n)) app.examineLinger[n.id] = 10, app.flagTalked.erase(n.id);
+}
+
+// FlagWindow type 1: a red news mark for a visible person whose row +22 flag is set.
+bool flagMarkUp(const App& app, const cr::FieldNpc& n) {
+    return (n.kind & 0x10) && n.link[0] != 0 && app.game.flag(n.link[0]) &&
+           !app.examineLinger.count(n.id) && !app.flagTalked.count(n.id) &&
+           n.model >= 0 && npcActive(app, n) && n.pos[1] < 900.0f;
+}
+
 const cr::FieldNpc* interactTarget(const App& app) {
     if (!app.havePlayer) return nullptr;
-    const cr::FieldNpc* best = nullptr;
-    float bestD = 1e30f;
-    for (const cr::FieldNpc& n : app.npcs) {
-        if (!(n.kind & 8) || !npcActive(app, n)) continue;
-        if (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) continue; // (story actors waiting)
-        const float k = n.model <= 1 ? 1.0f : 0.0f;
-        const float cx = n.pos[0] + k * n.offset[0] + n.offset[0], cz = n.pos[2] + k * n.offset[2] + n.offset[2];
-        const float hx = n.box[0] / 2 + app.walker.radius + 1.5f, hz = n.box[2] / 2 + app.walker.radius + 1.5f;
-        const float dx = app.walker.pos.x - cx, dz = app.walker.pos.z - cz;
-        if (std::fabs(dx) > hx || std::fabs(dz) > hz) continue;
-        if (dx * dx + dz * dz < bestD) { bestD = dx * dx + dz * dz; best = &n; }
+    // FollowWindow (objects) runs before FlagWindow (people).
+    for (int people = 0; people < 2; ++people) {
+        const cr::FieldNpc* best = nullptr;
+        float bestD = 1e30f;
+        for (const cr::FieldNpc& n : app.npcs) {
+            const auto up = app.examineLinger.find(n.id);
+            const bool lingering = up != app.examineLinger.end() && npcExaminable(app, n);
+            if (bool(n.kind & 0x10) != bool(people) || (!lingering && !npcInReach(app, n))) continue;
+            const float dx = app.walker.pos.x - (n.base(0) + n.offset[0]);
+            const float dy = app.walker.pos.y - (n.base(1) + n.offset[1]);
+            const float dz = app.walker.pos.z - (n.base(2) + n.offset[2]);
+            const float d = dx * dx + dy * dy + dz * dz;
+            if (d < bestD) bestD = d, best = &n;
+        }
+        if (best) return best;
     }
-    return best;
+    return nullptr;
 }
 
 // Examines / talks to the NPC in reach, as FollowWindow::TouchFollowWindowUtil does: a treasure
@@ -2138,6 +2209,8 @@ bool interact(App& app, bool instant) {
         script = n->id + 1;
     }
     const int id = n->id;
+    app.examineLinger.erase(id); // _FollowWindowOff
+    if (n->kind & 0x10) app.flagTalked.insert(id); // FlagWindow::TouchFollowWindowUtil (Work state 2)
     if (!instant) { // played over the next frames (animations, item window, fades)
         app.runnerWhat = "examined " + what.substr(0, what.size() - 4) + " (" + std::to_string(id) + ")";
         app.lastEvent = app.runnerWhat;
@@ -2197,8 +2270,8 @@ bool selectFontFile(App& app, const std::string& name) {
 
 void applyFontScale(App& app) {
     const float scale = float(std::clamp(app.fontScale, 80, 200)) / 100.0f;
-    for (cr::Hud* h : {&app.dialogueHud, &app.promptHud, &app.itemHud, &app.choiceHud, &app.nameHud,
-                       &app.pageHud, &app.battleHud}) h->setFontScale(scale);
+    for (cr::Hud* h : {&app.hud, &app.dialogueHud, &app.promptHud, &app.itemHud, &app.choiceHud,
+                       &app.nameHud, &app.pageHud, &app.battleHud}) h->setFontScale(scale);
     for (cr::Hud& h : app.lineHud) h.setFontScale(scale);
 }
 
@@ -3049,10 +3122,12 @@ void stepEffects(App& app, std::vector<Effect>& list);
 struct ViewerHost : cr::EventHost {
     App& app;
     explicit ViewerHost(App& a) : app(a) {}
+    // Event opcodes address the model record regardless of its NPC hidden bit.
     std::vector<App::NpcDraw*> npc(int id) {
         std::vector<App::NpcDraw*> out;
-        for (auto& d : app.npcDraws)
-            if (d.id == id) out.push_back(&d);
+        for (auto* list : {&app.npcDraws, &app.npcHeld})
+            for (auto& d : *list)
+                if (d.id == id) out.push_back(&d);
         return out;
     }
     void showMessage(int id) override { showMessages(app, {id}); }
@@ -3139,12 +3214,16 @@ struct ViewerHost : cr::EventHost {
             app.playerFadeFrames = app.playerFadeLeft = frames;
             return;
         }
+        bool lit = false;
         for (auto* d : npc(id)) {
+            const bool held = std::any_of(app.npcHeld.begin(), app.npcHeld.end(), [&](App::NpcDraw& o) { return &o == d; });
             d->faded = true;
             if (frames <= 0) { d->fadeLeft = 0; continue; }
             d->alphaFrom = from; d->alphaTo = to; d->alpha = from;
             d->fadeFrames = d->fadeLeft = std::max(frames, 1);
+            if (held) d->lit = lit = true; // _mdl_set_alpha: colour +0xfb4 0 -> 1
         }
+        if (lit) buildNpcDraws(app);
     }
     void jointNpc(int npc, int parent, int node) override {
         if (parent < 1) { // back where its row puts it
@@ -3154,6 +3233,8 @@ struct ViewerHost : cr::EventHost {
     void showNpc(int id, bool shown) override {
         app.npcShown[id] = shown;
         if (id == 0) return; // the player: drawn while showPlayer and not hidden here
+        if (!shown) // Kill clears the model colour too; a fade-lit hidden model stops drawing
+            for (auto* d : npc(id)) d->lit = false;
         // Born explicitly activates the actor at its current position, the origin if a script loaded
         // it (d0208's 425, d06's 421 and 467, no Setc): __EvtBorn clears its hide bit and no more.
         if (shown) app.placedNpcs.insert(id);
@@ -3256,7 +3337,13 @@ struct ViewerHost : cr::EventHost {
             if (std::fabs(p.x - old.x) + std::fabs(p.z - old.z) < 1e-4f) facing = Facing::Keep;
             else yaw = std::atan2(p.x - old.x, p.z - old.z);
         }
-        setActor(app, id, p, facing == Facing::Keep ? nullptr : &yaw, false);
+        if (id == 0) { setActor(app, id, p, facing == Facing::Keep ? nullptr : &yaw, false); return; }
+        cr::Vec3 at = p;
+        float floorY;
+        if (scriptFloor(app, at, 10.0f, floorY)) at.y = floorY;
+        // The original snaps a placed actor only to the floor list in its KD node within 20 units;
+        // with no such floor the scene record's Y is retained (unlike a normal floor-following move).
+        setActor(app, id, at, facing == Facing::Keep ? nullptr : &yaw, true);
     }
     void moveNpc(int id, const float* v, float yawDeg, Facing facing, int frames, int mode) override {
         App::Move m;
@@ -3360,7 +3447,10 @@ struct ViewerHost : cr::EventHost {
     }
     void loadNpc(int id) override {
         if (cr::FieldNpc* had = findNpc(app, id)) {
-            if (had->model >= 0) had->mdlRead = true;
+            if (had->model >= 0) {
+                had->mdlRead = true;
+                buildNpcDraws(app); // NpcMdlRead also registers an already-listed hidden actor
+            }
             return;
         }
         cr::NpcRow row;
@@ -3377,9 +3467,10 @@ struct ViewerHost : cr::EventHost {
         n.native = row.native;
         n.mdlRead = n.model >= 0;
         n.scale = row.scale;
-        if (id >= 400 || !npcActive(app, n)) app.npcShown[id] = false;
+        if (npcStoryActor(app, id) || !npcActive(app, n)) app.npcShown[id] = false;
         app.npcs.push_back(n);
         app.npcWarps.push_back(false);
+        buildNpcDraws(app); // retain a model read by a script even when its hidden bit is set
     }
     void freeCamera(bool on) override { app.cam.free = on; if (!on) app.cam.set = false; }
     void setCamera(const float* eye, const float* target, int frames) override {
@@ -10801,6 +10892,7 @@ void stepEvents(App& app) {
     // left them for its updates): the present packs - the second scenario's five extra trials and
     // their presents - open
     for (int f = 101; f <= 106; ++f) app.game.setFlag(f, true);
+    stepExamineWindows(app);
     if (app.npcNativesPending) {
         app.npcNativesPending = false;
         ViewerHost natives(app);
@@ -10824,11 +10916,17 @@ void stepEvents(App& app) {
     stepVitaLogo(app);
     stepTutoTex(app);
     if (app.fadeT < app.fadeFrames) ++app.fadeT;
+    bool unlit = false;
     for (auto& d : app.npcDraws)
         if (d.fadeLeft > 0) {
             --d.fadeLeft;
             d.alpha = d.alphaTo + (d.alphaFrom - d.alphaTo) * float(d.fadeLeft) / float(d.fadeFrames);
+            if (d.fadeLeft == 0 && d.lit && d.alpha <= 0) d.lit = false, unlit = true;
         }
+    if (unlit) buildNpcDraws(app);
+    if (!app.runner.running())
+        for (const cr::FieldNpc& n : app.npcs)
+            if (npcInReach(app, n)) app.flagTalked.erase(n.id);
     if (app.playerFadeLeft > 0) {
         --app.playerFadeLeft;
         app.playerAlpha = app.playerAlphaTo + (app.playerAlphaFrom - app.playerAlphaTo) * float(app.playerFadeLeft) /
@@ -11230,6 +11328,16 @@ bool actorPos(App& app, int id, cr::Vec3& out) {
     return true;
 }
 
+// _get_floor(out, x, y, z, radius): search the point's KD node, then read only that node's floor list
+// within twice the requested radius. No local floor means the scene's recorded Y is left unchanged.
+bool scriptFloor(const App& app, cr::Vec3 p, float radius, float& y) {
+    const int node = cr::searchNode(app.collisionData, p, radius);
+    float height;
+    if (node < 0 || cr::getFloor(app.collisionData, node, p, 2.0f * radius, height) < 0) return false;
+    y = height;
+    return true;
+}
+
 // Moves / turns a script actor and its drawn model (get_floor snaps y unless keepY)
 void setActor(App& app, int id, cr::Vec3 p, const float* yaw, bool keepY) {
     float y;
@@ -11254,32 +11362,46 @@ void setActor(App& app, int id, cr::Vec3 p, const float* yaw, bool keepY) {
     else updateNpcJoints(app);
 }
 
+// A model is needed only while visible, already retained, or explicitly read by a script.
+// Do not preload every flag-eligible NPC: their meshes and DDS/other textures stay GPU-resident.
+bool npcNeedsModel(bool drawn, bool kept, bool mdlRead) {
+    return drawn || kept || mdlRead;
+}
+
 void buildNpcDraws(App& app) {
     std::vector<App::NpcDraw> old;
     old.swap(app.npcDraws);
-    if (!app.showNpcs) return;
+    old.insert(old.end(), app.npcHeld.begin(), app.npcHeld.end());
+    app.npcHeld.clear();
+    if (!app.showNpcs) {
+        app.npcHeld = std::move(old);
+        return;
+    }
     for (size_t i = 0; i < app.npcs.size(); ++i) {
         const cr::FieldNpc& n = app.npcs[i];
-        if (n.model < 0 || n.model >= cr::kNumNpcModels || !npcDrawn(app, i)) continue;
-        // Cutscene actor slots wait parked at y 995..1000 or at the origin until a scene places
-        // them (FrmSetc2) - but not a stage model (Omega's scenes bring a battle stage in as an
-        // actor at the origin: d0550's deck is NPC 517, t0155bt)
+        if (n.model < 0 || n.model >= cr::kNumNpcModels) continue;
         const std::string file = cr::kNpcModelFile[n.model];
+        const App::NpcDraw* kept = nullptr;
+        for (const App::NpcDraw& o : old)
+            if (o.index == int(i) && o.model == file) { kept = &o; break; }
+        const bool lit = kept && kept->lit;
+        bool drawn = npcDrawn(app, i) || lit;
         const bool stageModel = file.size() > 6 && file.compare(file.size() - 6, 6, "bt.bin") == 0;
-        if (!stageModel && (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) &&
-            !app.placedNpcs.count(n.id)) // (a table NPC below 400 may stand at a room's origin: c101_d07's 142)
-            continue;
+        if (!stageModel && !lit &&
+            (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) &&
+            !app.placedNpcs.count(n.id))
+            drawn = false;
+        if (!npcNeedsModel(drawn, kept != nullptr, n.mdlRead)) continue;
         LoadedModel& lm = npcModel(app, file);
         if (lm.meshes.empty()) continue;
-        const cr::Mat4 w = npcWorld(n);
         App::NpcDraw d;
-        for (const App::NpcDraw& o : old) // the same NPC: keep its animation and fade
-            if (o.index == int(i) && o.model == file) { d = o; break; }
+        if (kept) d = *kept;
         d.model = file;
-        d.world = w;
+        d.world = npcWorld(n);
         d.id = n.id;
         d.index = int(i);
-        app.npcDraws.push_back(d);
+        if (drawn) app.npcDraws.push_back(d);
+        else app.npcHeld.push_back(d);
     }
     updateNpcJoints(app); // rebuilding draw instances must not detach Joint children
 }
@@ -11583,7 +11705,8 @@ extern const float kWinSmallPanel[4] = {0, 1600, 512, 96}; // dark small window
 constexpr float kWinParchment[4] = {1024, 248, 1024, 280};
 constexpr float kWinSkip[4] = {680, 1700, 50, 50};
 constexpr float kWinNext[4] = {672, 1750, 62, 30};
-constexpr float kWinBadge[4] = {936, 399, 81, 83};         // round "!" badge
+constexpr float kWinBadge[4] = {936, 399, 81, 83};         // FollowWindow's "!" bubble
+constexpr float kWinFlag[4] = {960, 32, 64, 64};           // FlagWindow's red "!" (source tex2d 480,16; 32x32)
 
 // A message page in the game's message window, across the whole screen's width: the parchment
 // while portraits are up, else the grey band; `next`: the page waits for a tap (the diamond)
@@ -15412,29 +15535,42 @@ void battleClick(App& app, float px, float py) {
 void drawPrompt(App& app, const cr::Mat4& vp, float rx, float ry, float rw, float rh) {
     app.promptX = app.promptY = -1;
     if (app.runner.running() || !app.dialogue.empty() || app.itemWindowOpen) return;
-    const cr::FieldNpc* n = interactTarget(app);
-    if (!n) return;
-    const float k = n->model <= 1 ? 1.0f : 0.0f;
-    const float p[3] = {n->pos[0] + k * n->offset[0] + n->offset[0], n->pos[1] + std::max(n->box[1], 6.0f) + 4,
-                        n->pos[2] + k * n->offset[2] + n->offset[2]};
-    const float* m = vp.m;
-    const float cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
-    if (cw <= 0) return;
-    float sx = rx + ((m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / cw * 0.5f + 0.5f) * rw;
-    float sy = ry + (0.5f - (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw * 0.5f) * rh;
-    { // The projection is in painted layer 3; the prompt and its touch target are on UI layer 0.
+    auto project = [&](const cr::FieldNpc& n, float& sx, float& sy) {
+        const float k = n.model == 0 || n.model == 1 ? 1.0f : 0.0f;
+        const float p[3] = {n.pos[0] + (k + 1.0f) * n.offset[0],
+                            n.pos[1] + (k + 1.0f) * n.offset[1] + n.box[1],
+                            n.pos[2] + (k + 1.0f) * n.offset[2]};
+        const float* m = vp.m;
+        const float cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+        if (cw <= 0) return false;
+        float x = rx + ((m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / cw * 0.5f + 0.5f) * rw;
+        float y = ry + (0.5f - (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw * 0.5f) * rh;
         cr::Renderer& r = app.renderer;
         const int keep = r.layer();
-        float x = sx, y = sy;
         r.setLayer(3);
         r.layoutToScreen(x, y);
         r.setLayer(0);
         r.screenToLayout(x, y);
         r.setLayer(keep);
-        sx = x, sy = y;
-    }
-    app.promptX = sx, app.promptY = sy - 20.5f; // (a tap there examines it: touchPadDown)
-    if (app.windowTex.id) drawWinPiece(app, kWinBadge, sx - 20, sy - 41, 40, 41); // the "!" badge
+        sx = x;
+        sy = y;
+        return true;
+    };
+
+    if (app.windowTex.id && app.havePlayer)
+        for (const cr::FieldNpc& person : app.npcs) {
+            if (!flagMarkUp(app, person) || npcInReach(app, person)) continue;
+            float x, y;
+            if (project(person, x, y)) drawWinPiece(app, kWinFlag, x - 32, y - 32, 64, 64);
+        }
+
+    const cr::FieldNpc* n = interactTarget(app);
+    if (!n) return;
+    float sx, sy;
+    if (!project(*n, sx, sy)) return;
+    app.promptX = sx;
+    app.promptY = sy - 20.5f; // preserve the existing FollowWindow touch hitbox for its 40x41 badge
+    if (app.windowTex.id) drawWinPiece(app, kWinBadge, sx - 20, sy - 41, 40, 41);
     else app.promptHud.drawAt(app.renderer, {"[E]"}, sx - 24, sy - 16, 2.0f, 0, 0, 0.8f);
 }
 
@@ -20326,22 +20462,113 @@ int runSelfTest(App& app) {
             app.runner.stop();
             app.pendingEntry = App::Entry::None;
             ViewerHost host(app);
+            auto drawn = [&](int id) {
+                int count = 0;
+                for (const App::NpcDraw& d : app.npcDraws) count += d.id == id;
+                return count;
+            };
             host.loadNpc(b.npc);
             host.showNpc(b.npc, false);
-            const bool hidden = host.npc(b.npc).empty();
+            const bool hidden = drawn(b.npc) == 0 && host.npc(b.npc).size() == 1;
+            auto frame = [&] { stepEvents(app); animateNpcs(app, 1.0f / kFramesPerSecond); };
+            host.playAnim(b.npc, 1, 0, 0);
+            frame();
+            auto one = [&]() -> App::NpcDraw* {
+                const auto v = host.npc(b.npc);
+                return v.size() == 1 ? v[0] : nullptr;
+            };
+            bool held = drawn(b.npc) == 0 && one() && one()->action == 1 && one()->time == 0;
+            host.fadeNpc(b.npc, 0, 1, 40);
+            held = held && drawn(b.npc) == 1 && one() && one()->fadeLeft == 40;
+            host.showNpc(b.npc, false);
+            frame();
+            held = held && drawn(b.npc) == 0 && one() && one()->fadeLeft == 40 && one()->alpha == 0;
             host.showNpc(b.npc, true);
             const auto draws = host.npc(b.npc);
-            const bool shown = draws.size() == 1 && draws[0]->model == b.model && draws[0]->world.m[12] == 0 &&
-                               draws[0]->world.m[13] == 0 && draws[0]->world.m[14] == 0;
+            const bool shown = drawn(b.npc) == 1 && draws.size() == 1 && draws[0]->model == b.model &&
+                               draws[0]->world.m[12] == 0 && draws[0]->world.m[13] == 0 && draws[0]->world.m[14] == 0 &&
+                               draws[0]->alpha == 0 && draws[0]->fadeLeft == 40 && draws[0]->action == 1;
+            for (auto* d : host.npc(b.npc)) d->alpha = 1, d->fadeLeft = 0;
             host.showNpc(b.npc, false);
-            const bool killed = host.npc(b.npc).empty();
-            const int sceneProblems = !hidden + !shown + !killed + app.renderer.takeErrors();
-            std::printf("cutscene actor %s area %d: hidden on Kill %s, shown at origin on Born %s, hidden again %s; %d problems\n",
-                        b.model, b.area, hidden ? "yes" : "NO", shown ? "yes" : "NO", killed ? "yes" : "NO", sceneProblems);
+            const bool killed = drawn(b.npc) == 0;
+            const int sceneProblems = !hidden + !held + !shown + !killed + app.renderer.takeErrors();
+            std::printf("cutscene actor %s area %d: hidden on Kill %s, hidden Anim retained %s, fade/Born state retained %s, hidden again %s; %d problems\n",
+                        b.model, b.area, hidden ? "yes" : "NO", held ? "yes" : "NO", shown ? "yes" : "NO",
+                        killed ? "yes" : "NO", sceneProblems);
             problems += sceneProblems;
         }
         app.game = keepGame;
         mapErrors += problems;
+    }
+    { // Scene NPC rules: a placed actor uses only its KD node's floors within 2*radius;
+      // FlagWindow's red mark follows the row flag and is suppressed after a talk.
+        const cr::Collision keepCollision = app.collisionData;
+        const cr::GameState keepGame = app.game;
+        const auto keepShown = app.npcShown;
+        const auto keepTalked = app.flagTalked;
+        cr::Collision sample;
+        sample.radius = 3;
+        sample.vertices = {-10, 0, -10, 10, 0, -10, 0, 0, 10};
+        cr::CollisionPolygon floor;
+        floor.normal[1] = 1;
+        floor.index[0] = 0; floor.index[1] = 2; floor.index[2] = 1; // agree with the +Y normal
+        floor.count = 3; floor.floor = true;
+        sample.polygons.push_back(floor);
+        cr::CollisionNode node;
+        node.child[0] = node.child[1] = -1;
+        node.floors.push_back(0);
+        sample.nodes.push_back(node);
+        app.collisionData = sample;
+        float y = -999;
+        const bool floorNear = scriptFloor(app, {0, 15, 0}, 10, y) && std::fabs(y) < 1e-4f;
+        const bool floorFar = !scriptFloor(app, {0, 25, 0}, 10, y);
+
+        app.game = cr::GameState();
+        cr::FieldNpc person;
+        person.id = 0x7ffe;
+        person.model = 2;
+        person.kind = 0x18;
+        person.link[0] = 0x345;
+        app.npcShown[person.id] = true;
+        app.game.setFlag(person.link[0], true);
+        app.flagTalked.erase(person.id);
+        const bool mark = flagMarkUp(app, person);
+        app.flagTalked.insert(person.id);
+        const bool talked = !flagMarkUp(app, person);
+        app.flagTalked.erase(person.id);
+        app.game.setFlag(person.link[0], false);
+        const bool cleared = !flagMarkUp(app, person);
+
+        const int keepArea = app.area;
+        app.area = 0;
+        const bool mainStoryActors = npcStoryActor(app, 425);
+        app.area = 8;
+        const bool areaEightStoryActors = npcStoryActor(app, 301);
+        app.area = 1;
+        const bool puzzleExemption = !npcStoryActor(app, 425);
+        app.area = keepArea;
+
+        app.collisionData = keepCollision;
+        app.game = keepGame;
+        app.npcShown = keepShown;
+        app.flagTalked = keepTalked;
+        // An NPC whose row flags pass but which is hidden/parked must not load its model or GPU
+        // textures until it becomes visible or an event explicitly executes NpcMdlRead.
+        const bool hiddenNotRead = !npcNeedsModel(false, false, false);
+        const bool visibleLoads = npcNeedsModel(true, false, false);
+        const bool heldLoads = npcNeedsModel(false, true, false);
+        const bool scriptReadLoads = npcNeedsModel(false, false, true);
+        const int sceneProblems = !floorNear + !floorFar + !mark + !talked + !cleared +
+                                  !mainStoryActors + !areaEightStoryActors + !puzzleExemption +
+                                  !hiddenNotRead + !visibleLoads + !heldLoads + !scriptReadLoads;
+        std::printf("scene NPC: local floor %s/%s; FlagWindow %s/%s/%s; story setup %s/%s/%s; model-load gate hidden/visible/held/script %s/%s/%s/%s; %d problems\\n",
+                    floorNear ? "yes" : "NO", floorFar ? "yes" : "NO", mark ? "yes" : "NO",
+                    talked ? "yes" : "NO", cleared ? "yes" : "NO",
+                    mainStoryActors ? "yes" : "NO", areaEightStoryActors ? "yes" : "NO",
+                    puzzleExemption ? "yes" : "NO",
+                    hiddenNotRead ? "yes" : "NO", visibleLoads ? "yes" : "NO",
+                    heldLoads ? "yes" : "NO", scriptReadLoads ? "yes" : "NO", sceneProblems);
+        mapErrors += sceneProblems;
     }
     { // A controller, as the Vita's buttons: a virtual one - the stick walks the leader, △ opens the
       // Camp and closes it, ○ confirms, × goes back (and does nothing on the field), the D-pad
@@ -21115,6 +21342,9 @@ void bootTitle(App& app) {
     app.havePlayer = false;
     app.npcs.clear();
     app.npcDraws.clear();
+    app.npcHeld.clear();
+    app.flagTalked.clear();
+    app.examineLinger.clear();
     app.dialogue.clear();
     app.dialogueInfo.clear();
     app.choiceFlag = -1;
@@ -22642,16 +22872,22 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     for (const std::string& path : fontCandidates)
         if (fontProbe.load(path)) app->fontFiles.push_back(path);
     if (!app->fontFiles.empty()) {
-        selectFontFile(*app, fontFileName(app->fontFiles.front()));
-        SDL_Log("font: %s", app->font.path().c_str());
+        // This installation's Russian UI uses the supplied Spectral face. Do not let an
+        // unrelated alphabetically earlier font silently become the default.
+        auto preferred = std::find_if(app->fontFiles.begin(), app->fontFiles.end(), [](const std::string& path) {
+            return SDL_strcasecmp(fontFileName(path).c_str(), "Spectral-BoldItalic.ttf") == 0;
+        });
+        const std::string& initialFont = preferred != app->fontFiles.end() ? *preferred : app->fontFiles.front();
+        selectFontFile(*app, fontFileName(initialFont));
+        SDL_Log("font: selected %s (%s)", app->fontSelection.c_str(), app->font.path().c_str());
     } else {
         app->fontSelection.clear();
         app->fontIndex = -1;
         SDL_Log("font/: no usable .ttf/.otf/.ttc; using the built-in bitmap font");
     }
     // (the options menu is the engine's own, column-aligned for the 8x8 font)
-    for (cr::Hud* h : {&app->dialogueHud, &app->promptHud, &app->itemHud, &app->choiceHud, &app->nameHud,
-                       &app->pageHud, &app->battleHud})
+    for (cr::Hud* h : {&app->hud, &app->dialogueHud, &app->promptHud, &app->itemHud, &app->choiceHud,
+                       &app->nameHud, &app->pageHud, &app->battleHud})
         h->setFont(&app->font);
     for (cr::Hud& h : app->lineHud) h.setFont(&app->font);
     // --language n (or CR_LANGUAGE): 0 Japanese, 1 English, ... 7 Korean (cr::kLanguageName)
