@@ -4259,6 +4259,43 @@ void saveImportAnswer(App& app, bool yes) {
     }
 }
 
+std::string localizeAssetNote(const App& app, const std::string& note) {
+    if (app.uiLanguage == 0) return note;
+    if (note == "In use") return "Используется";
+    const std::string next = "Used from the next start: ";
+    if (note.rfind(next, 0) == 0) return "Будет использоваться после перезапуска: " + note.substr(next.size());
+    if (note.rfind("No Vita data (CRO/resources/cro.psarc)", 0) == 0)
+        return "В выбранной папке нет данных Vita (CRO/resources/cro.psarc).";
+    if (note.rfind("no main.", 0) == 0) return "Не найден файл данных Android: " + note;
+    if (note == "no APK beside it") return "Рядом не найден APK-файл.";
+    if (note.rfind("no APK beside it", 0) == 0) return "Не найден APK-файл: " + note;
+    return note;
+}
+
+std::string localizeSaveImportMessage(const App& app, std::string message) {
+    if (app.uiLanguage == 0) return message;
+    const std::pair<const char*, const char*> phrases[] = {
+        {"Choose the folder containing your decrypted Vita saves.", "Выберите папку с расшифрованными сохранениями Vita."},
+        {"Found ", "Найдено "}, {" save slot(s).", " ячеек сохранения."},
+        {"Existing saves will be backed up.", "Для существующих сохранений будет создана резервная копия."},
+        {"Invalid suspend skipped. ", "Повреждённое быстрое сохранение пропущено. "},
+        {"Import now?", "Импортировать сейчас?"},
+        {"Import failed: ", "Ошибка импорта: "},
+        {"Cannot open the folder picker: ", "Не удалось открыть выбор папки: "},
+        {"Imported ", "Импортировано "}, {"Previous saves backed up.", "Предыдущие сохранения сохранены в резервной копии."},
+        {"Load from the title.", "Загрузите сохранение с главного экрана."},
+        {"Import failed. Restore your previous saves from ", "Импорт не выполнен. Восстановите предыдущие сохранения из "}
+    };
+    for (const auto& p : phrases) {
+        size_t at = 0;
+        while ((at = message.find(p.first, at)) != std::string::npos) {
+            message.replace(at, SDL_strlen(p.first), p.second);
+            at += SDL_strlen(p.second);
+        }
+    }
+    return message;
+}
+
 std::vector<OptRow> optionRows(App& app, int page) {
     std::vector<OptRow> rows;
     auto gauge = [&](const std::string& label, int* v, int sound) {
@@ -4393,7 +4430,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
             });
             rows.back().enabled = !app.vitaOnly && !app.androidOnly;
             rows.back().hint = app.vitaOnly ? std::string(optionText(app, "Running from the Vita copy alone: ", "Игра запущена только из копии Vita: ")) + app.vitaRoot
-                               : !app.vitaNote.empty() ? app.vitaNote
+                               : !app.vitaNote.empty() ? localizeAssetNote(app, app.vitaNote)
                                : optionText(app, "Enter: select your Vita copy's PCSG00499 folder; Left / Right: none", "Enter: выберите папку PCSG00499 с копией Vita; влево / вправо: нет");
         }
         { // the Android copy to take assets from (a folder holding its main.*.obb and APK; Left / Right: none)
@@ -4414,7 +4451,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
             });
             rows.back().enabled = !app.vitaOnly && !app.androidOnly;
             rows.back().hint = app.androidOnly ? std::string(optionText(app, "Running from the Android release alone: ", "Игра запущена только из копии Android: ")) + app.android.path()
-                               : !app.androidNote.empty() ? app.androidNote
+                               : !app.androidNote.empty() ? localizeAssetNote(app, app.androidNote)
                                : optionText(app, "Enter: select the folder with your Android main.*.obb and APK; Left / Right: none", "Enter: выберите папку с main.*.obb и APK Android-копии; влево / вправо: нет");
         }
         const auto speed = [&](const char* label, int* x, const char* what) { // (Off, 2x .. 5x)
@@ -4806,6 +4843,7 @@ void drawOptions(App& app, float, float) {
         m.picture(12, 0, 220, 1);
         std::string message = app.saveImport.state == vitaimport::Session::Picking
             ? "Choose the folder containing your decrypted Vita saves." : app.saveImport.message;
+        message = localizeSaveImportMessage(app, std::move(message));
         std::replace(message.begin(), message.end(), '\n', ' ');
         const auto lines = wrapText(m, message, 455, 13, 8);
         for (size_t l = 0; l < lines.size(); ++l) m.text(lines[l], 24, 234 + 16 * float(l), false, 1, 13);
