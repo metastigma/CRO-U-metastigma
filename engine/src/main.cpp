@@ -4733,7 +4733,7 @@ void drawOptions(App& app, float, float) {
     { // (the port's: a darker panel under the page's name, the rows and the help line - readable
       // over any scene - and the help's lines)
         const float shade[4] = {0, 0, 0, 0.5f * a}, fade[4] = {0, 0, 0, 0.2f * a};
-        const float nameW = m.textWidth(kOptionPageName[app.optionsPage], 16);
+        const float nameW = m.textWidth(optionPageName(app, app.optionsPage), 16);
         m.quad(228, 10, nameW + 16, 24, shade, shade);
         m.quad(12, kOptRowTop - 8, 250, optRowY(shown) + 42 - kOptRowTop, shade, shade);
         m.quad(262, kOptRowTop - 8, 238, optRowY(shown) + 42 - kOptRowTop, shade, fade);
