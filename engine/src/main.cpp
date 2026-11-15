@@ -20535,14 +20535,26 @@ int runSelfTest(App& app) {
         app.game.setFlag(person.link[0], false);
         const bool cleared = !flagMarkUp(app, person);
 
+        const int keepArea = app.area;
+        app.area = 0;
+        const bool mainStoryActors = npcStoryActor(app, 425);
+        app.area = 8;
+        const bool areaEightStoryActors = npcStoryActor(app, 301);
+        app.area = 1;
+        const bool puzzleExemption = !npcStoryActor(app, 425);
+        app.area = keepArea;
+
         app.collisionData = keepCollision;
         app.game = keepGame;
         app.npcShown = keepShown;
         app.flagTalked = keepTalked;
-        const int sceneProblems = !floorNear + !floorFar + !mark + !talked + !cleared;
-        std::printf("scene NPC: local floor range %s/%s, FlagWindow mark/talk/clear %s/%s/%s; %d problems\n",
+        const int sceneProblems = !floorNear + !floorFar + !mark + !talked + !cleared +
+                                  !mainStoryActors + !areaEightStoryActors + !puzzleExemption;
+        std::printf("scene NPC: local floor range %s/%s, FlagWindow mark/talk/clear %s/%s/%s, story-actor setup %s/%s/%s; %d problems\\n",
                     floorNear ? "yes" : "NO", floorFar ? "yes" : "NO", mark ? "yes" : "NO",
-                    talked ? "yes" : "NO", cleared ? "yes" : "NO", sceneProblems);
+                    talked ? "yes" : "NO", cleared ? "yes" : "NO",
+                    mainStoryActors ? "yes" : "NO", areaEightStoryActors ? "yes" : "NO",
+                    puzzleExemption ? "yes" : "NO", sceneProblems);
         mapErrors += sceneProblems;
     }
     { // A controller, as the Vita's buttons: a virtual one - the stick walks the leader, △ opens the
