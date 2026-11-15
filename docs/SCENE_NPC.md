@@ -17,8 +17,10 @@ model by NPC id in both visible and held lists, but hidden models do not advance
 fade while they are outside the renderer's `mdl_put` path. A fade that lights a hidden model
 puts it back into the visible list; `Kill` hides it again. `Born` restores the same instance.
 
-Script-loaded models are registered when `loadNpc` reads them, including when their NPC hidden
-bit is set. Room changes and title teardown clear the held instances with the visible ones.
+Room setup snapshots the NPC row's show/hide flags until the next room load and starts story
+actors hidden (`400..449`, or `301..349` in area 8; area 1 is exempt). `Born` is what makes those
+actors visible. Script-loaded models are registered when `loadNpc` reads them, including when
+their NPC hidden bit is set. Room changes and title teardown clear held instances with visible ones.
 
 ### Script placement uses the local floor list
 
