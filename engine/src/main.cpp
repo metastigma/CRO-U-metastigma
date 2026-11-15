@@ -3430,7 +3430,10 @@ struct ViewerHost : cr::EventHost {
     }
     void loadNpc(int id) override {
         if (cr::FieldNpc* had = findNpc(app, id)) {
-            if (had->model >= 0) had->mdlRead = true;
+            if (had->model >= 0) {
+                had->mdlRead = true;
+                buildNpcDraws(app); // NpcMdlRead also registers an already-listed hidden actor
+            }
             return;
         }
         cr::NpcRow row;
