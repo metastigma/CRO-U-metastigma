@@ -231,10 +231,6 @@ public:
 
     Texture upload(const Image& img) override {
         Texture t;
-        if (img.width <= 0 || img.height <= 0 || img.rgba.size() < size_t(img.width) * img.height * 4) return t;
-
-        // Ignore stale errors from earlier draw calls: this check belongs to this upload only.
-        while (gl::GetError() != GL_NO_ERROR) {}
         t.width = img.width;
         t.height = img.height;
         t.alphaOnly = img.alphaOnly;
@@ -245,15 +241,6 @@ public:
         rec.mipmaps = img.mipmaps;
         rec.pixels.store(img.rgba);
         createTexture(rec, img.rgba);
-        const GLenum error = gl::GetError();
-        if (!rec.name || error != GL_NO_ERROR) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_RENDER, "OpenGL texture upload failed (%dx%d, error 0x%x)",
-                        img.width, img.height, unsigned(error));
-            if (rec.name) gl::DeleteTextures(1, &rec.name);
-            textures_.erase(t.id);
-            t = {};
-            return t;
-        }
         if (img.mipmaps) mipmapped_.insert(t.id);
         return t;
     }
