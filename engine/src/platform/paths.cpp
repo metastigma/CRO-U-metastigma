@@ -66,6 +66,9 @@ std::vector<std::string> gameFolders() {
 #ifdef SDL_PLATFORM_MACOS
     if (const size_t app = base.rfind(".app/"); app != std::string::npos) add(base.substr(0, base.rfind('/', app) + 1));
 #endif
+#ifdef SDL_PLATFORM_IOS
+    if (const char* documents = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS)) add(documents);
+#endif
     add(base);
     if (char* cwd = SDL_GetCurrentDirectory()) add(cwd), SDL_free(cwd);
     add(saveDir()); // (the profile folder: where the first start's setup copies the game when the game folder can't be written)
