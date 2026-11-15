@@ -4066,11 +4066,11 @@ int aaChoice(const App::Video& v) {
     return v.msaa >= 8 ? 3 : v.msaa >= 4 ? 2 : v.msaa >= 2 ? 1 : 0;
 }
 
-std::string aaName(const App::Video& v) {
+std::string aaName(const App& app, const App::Video& v) {
     if (v.upscaler == 1) return v.upscaleMode == 0 ? "FSR Native AA" : "FSR 3.1";
     if (v.upscaler == 2) return v.upscaleMode == 0 ? "DLAA" : "DLSS";
     if (v.upscaler == 3) return v.upscaleMode == 0 ? "MetalFX AA" : "MetalFX";
-    return v.msaa <= 1 ? std::string("Off") : std::to_string(v.msaa) + "x MSAA";
+    return v.msaa <= 1 ? std::string(optionText(app, "Off", "Выкл.")) : std::to_string(v.msaa) + "x MSAA";
 }
 
 void adjustVideo(App& app, int row, int dir) {
@@ -4609,7 +4609,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         rows.back().enabled = scalable;
         rows.back().hint = scalable ? optionText(app, "Renders the scene at this resolution, then scales it to the window.", "Сцена сначала рендерится в этом разрешении, затем масштабируется до размера окна.") : optionText(app, "Requires the Vulkan renderer.", "Требуется рендерер Vulkan.");
         const std::string na = v.upscaler && !why.empty() ? " n/a" : ""; // chosen, but can't run here
-        value(optionText(app, "Anti-aliasing", "Сглаживание"), scalable ? aaName(v) + na : optionText(app, "Off", "Выкл."), [&app](int dir) {
+        value(optionText(app, "Anti-aliasing", "Сглаживание"), scalable ? aaName(app, v) + na : optionText(app, "Off", "Выкл."), [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 8, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
@@ -4617,7 +4617,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
                            : v.upscaler ? optionText(app, "Temporal: frames with sub-pixel jitter are accumulated (MSAA is disabled while active).", "Временное сглаживание: накапливаются кадры со смещением субпиксельной выборки (на это время MSAA отключается).")
                                         : optionText(app, "MSAA, FSR Native AA or DLAA at full resolution.", "MSAA, FSR Native AA или DLAA в исходном разрешении.");
         unavailable(rows.back());
-        value(optionText(app, "Upscaler", "Масштабирование"), scalable ? kUpscalerName[v.upscaler] + na : optionText(app, "Off", "Выкл."), [&app](int dir) {
+        value(optionText(app, "Upscaler", "Масштабирование"), scalable ? (v.upscaler == 0 ? optionText(app, "Off", "Выкл.") : kUpscalerName[v.upscaler]) + na : optionText(app, "Off", "Выкл."), [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 9, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
