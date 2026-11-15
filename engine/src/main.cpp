@@ -22552,7 +22552,12 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     }();
     app->fontDir = beside + "font/";
 #ifdef SDL_PLATFORM_IOS
-    if (const auto folders = cr::gameFolders(); !folders.empty()) app->fontDir = folders.front() + "font/";
+    if (const auto folders = cr::gameFolders(); !folders.empty()) {
+        app->fontDir = folders.front() + "font/";
+        // Create writable app folders on every launch, not only on the no-game-data first start.
+        for (const char* f : {"ios", "android", "vita", "font"})
+            SDL_CreateDirectory((folders.front() + f).c_str());
+    }
 #endif
     auto isDir = [](const std::string& p) {
         SDL_PathInfo info;
