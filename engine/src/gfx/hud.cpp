@@ -76,8 +76,19 @@ bool Hud::update(Renderer& r, const std::vector<std::string>& lines, float scale
                                            int(std::lround(kPad * textScale * density)), img)
                         : rasterise(lines, img);
     if (!ok) return false;
+    // Do not discard the previous glyph texture or cache a failed upload. A later frame
+    // retries the upload after transient GPU allocation pressure has passed.
+    Texture next = r.upload(img);
+    if (!next.id) {
+        static bool warned = false;
+        if (!warned) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "HUD: text texture upload failed; will retry");
+            warned = true;
+        }
+        return false;
+    }
     r.destroy(tex_);
-    tex_ = r.upload(img);
+    tex_ = next;
     cached_ = lines;
     cachedScale_ = textScale;
     cachedDensity_ = density;
