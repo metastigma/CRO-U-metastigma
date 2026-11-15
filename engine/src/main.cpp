@@ -511,6 +511,11 @@ struct App {
     // CRO-U's own (Options, Game: Field Speed, Battle Speed): the field - while the player walks it,
     // nothing over it - and the battles run this many times as fast (1, or 2 .. 5)
     int fieldSpeed = 1, battleSpeed = 1;
+    // Options' Cheats: saved in settings.ini; disabled by default.
+    struct Cheats {
+        bool hp = false, mp = false, oz = false, firstStrike = false, noEncounters = false, oneHit = false, fullBreak = false;
+        int exp = 1; // 1, 2, 3, 5, 10
+    } cheats;
     int padHeld = -1;                      // the direction held for the menus' repeat (0 up 1 down 2 left 3 right)
     float padHeldFor = 0;
     crinput::HeldOver padHeldOver;         // (dead after a cancel or a session's end, until let go)
@@ -3676,7 +3681,7 @@ void loadMix(App& app) {
 
 void saveMix(const App& app) {
     if (!app.persist) return;
-    const std::string t = "master=" + std::to_string(app.mix.master) + "\nmusic=" + std::to_string(app.mix.music) +
+    std::string t = "master=" + std::to_string(app.mix.master) + "\nmusic=" + std::to_string(app.mix.music) +
                           "\neffects=" + std::to_string(app.mix.effects) + "\nvoice=" + std::to_string(app.mix.voice) + "\n";
     std::string list;
     for (int e : app.voiceEntries) list += (list.empty() ? "" : ",") + std::to_string(e);
@@ -3701,6 +3706,11 @@ void saveMix(const App& app) {
                               std::to_string(int(app.lockLandscapeFlipped)) + "\n" + "vita=" + app.vitaPath + "\n" + "android=" + app.androidPath + "\n" + "pad_confirm=" +
                               (app.padConfirmEast ? "east" : "south") + "\n" + "field_speed=" + std::to_string(app.fieldSpeed) +
                               "\nbattle_speed=" + std::to_string(app.battleSpeed) + "\n";
+    const App::Cheats& ch = app.cheats;
+    t += "cheats=" + std::to_string(int(ch.hp)) + "," + std::to_string(int(ch.mp)) + "," +
+         std::to_string(int(ch.oz)) + "," + std::to_string(int(ch.firstStrike)) + "," +
+         std::to_string(int(ch.noEncounters)) + "," + std::to_string(int(ch.oneHit)) + "," +
+         std::to_string(ch.exp) + "," + std::to_string(int(ch.fullBreak)) + "\n";
     const std::string all = t + "language=" + std::to_string(app.language) + "\nfont=" + app.fontSelection +
                              "\nfont_scale=" + std::to_string(app.fontScale) + "\nvoice_entries=" + list + "\n" + video;
     std::string error;
@@ -3774,6 +3784,15 @@ void loadVideo(App& app, const char* text) {
     app.lockLandscapeFlipped = keyValue(text, "\nlock_landscape_flipped=", app.lockLandscapeFlipped) != 0;
     if (const char* at = SDL_strstr(text, "\npad_confirm=")) app.padConfirmEast = SDL_strncmp(at + 13, "south", 5) != 0;
     app.fieldSpeed = std::clamp(keyValue(text, "\nfield_speed=", app.fieldSpeed), 1, 5);
+    if (const char* at = SDL_strstr(text, "\ncheats=")) {
+        int v[8] = {0, 0, 0, 0, 0, 0, 1, 0};
+        std::sscanf(at + 8, "%d,%d,%d,%d,%d,%d,%d,%d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]);
+        App::Cheats& ch = app.cheats;
+        ch.hp = v[0] != 0, ch.mp = v[1] != 0, ch.oz = v[2] != 0;
+        ch.firstStrike = v[3] != 0, ch.noEncounters = v[4] != 0, ch.oneHit = v[5] != 0;
+        ch.exp = v[6] == 2 || v[6] == 3 || v[6] == 5 || v[6] == 10 ? v[6] : 1;
+        ch.fullBreak = v[7] != 0;
+    }
     app.battleSpeed = std::clamp(keyValue(text, "\nbattle_speed=", app.battleSpeed), 1, 5);
 }
 
@@ -4075,9 +4094,9 @@ struct OptRow {
     bool enterSounds = false;     // act(0) plays a sound of its own (Sound Test), so none from the menu
 };
 
-constexpr int kOptionPages = 5;
+constexpr int kOptionPages = 6;
 constexpr int kOptionsBackRow = 99;
-const char* const kOptionPageName[kOptionPages] = {"Game", "Sound", "Display", "Detail", "Graphics"};
+const char* const kOptionPageName[kOptionPages] = {"Game", "Sound", "Display", "Detail", "Cheats", "Graphics"};
 // Layout, in menu units
 constexpr float kOptRowTop = 52, kOptRowPitch = 36, kOptCtrlX = 224, kOptCtrlScale = 0.85f;
 constexpr float kOptBackY = 344, kOptPageY = 350;
@@ -4362,6 +4381,33 @@ std::vector<OptRow> optionRows(App& app, int page) {
             if (app.video.sharpTextures != (i == 1)) adjustVideo(app, 17, 1);
         });
         rows.back().hint = "Sharp: the world's textures magnified by the nearest texel (square pixels up close)";
+        break;
+    }
+    case 4: { // Cheats (the port's own): the user's - "Infinite HP and MP. Infinite Maxed out Money, xp multipliers. always advantage"
+        App::Cheats& ch = app.cheats;
+        onOff("Infinite HP", &ch.hp, nullptr);
+        rows.back().hint = "The pair's HP never drops: the damage still shows, nobody falls";
+        onOff("Infinite MP", &ch.mp, nullptr);
+        rows.back().hint = "Genes cost no MP; the pair's MP stays full";
+        onOff("Max Oz", &ch.oz, nullptr);
+        rows.back().hint = "The Oz held at the most (9,999,999)";
+        static const int kExp[] = {1, 2, 3, 5, 10};
+        value("EXP Multiplier", std::to_string(ch.exp) + "x", [&app](int dir) {
+            int i = 0;
+            for (int k = 0; k < 5; ++k)
+                if (kExp[k] == app.cheats.exp) i = k;
+            app.cheats.exp = kExp[(i + (dir ? dir : 1) + 5) % 5];
+            saveMix(app);
+        });
+        rows.back().hint = "The EXP a won battle gives, multiplied";
+        onOff("Always First Strike", &ch.firstStrike, nullptr);
+        rows.back().hint = "Every random encounter starts with the party's first strike - never an ambush";
+        onOff("No Random Battles", &ch.noEncounters, nullptr);
+        rows.back().hint = "No random encounters on the field (the story's battles still come)";
+        onOff("One-Hit Kills", &ch.oneHit, nullptr);
+        rows.back().hint = "Any blow, gene or ability of the pair's that hurts an enemy fells it";
+        onOff("Full Break Gauge", &ch.fullBreak, nullptr);
+        rows.back().hint = "The Break gauge the pair's and full from the first turn - it never changes hands";
         break;
     }
     default: { // Graphics: what the Vulkan renderer adds
@@ -10956,7 +11002,7 @@ void stepEvents(App& app) {
 // are off (flag 4076, the pair's unencountflg); with skill 174 on either member every 10 units
 // banks 1 EXP for the pair (to 100000; one a step at most)
 void fieldWalked(App& app, float dist) {
-    if (!app.noEncounters && !fieldEncountersOff(app)) app.encounters.walked(dist);
+    if (!app.noEncounters && !fieldEncountersOff(app) && !app.cheats.noEncounters) app.encounters.walked(dist);
     const int pr = fieldRoute(app) * 2;
     if (!cr::hasSkill(app.game, pr, 174) && !cr::hasSkill(app.game, pr + 1, 174)) return;
     app.walkExpDistance += dist;
@@ -11166,6 +11212,7 @@ void updatePlayer(App& app, float dt, float camYaw) {
         const bool first = has(pr[0], 171) || has(pr[1], 171);
         const bool alert = has(pr[0], 172) || has(pr[1], 172);
         if (app.encounters.check(random, partyLevel(app), first, alert, start)) {
+            if (app.cheats.firstStrike) start.strike = 1;
             writeResume(app); // (fldencount_encount: the Progress Tracker at the fight's start)
             app.game.vars[58] = 999; // the usual battle music, victory tune 10
             app.game.vars[59] = 10;
@@ -12695,6 +12742,14 @@ void startBattle(App& app, const cr::BattleStart& start, int flags) {
     rules.scenario = std::clamp(app.game.scenario, 0, cr::kScenarios - 1);
     rules.escapeBlocked = flags != 0;
     rules.setupParty(app.game, app.itemTable, route);
+    rules.cheatHp = app.cheats.hp, rules.cheatMp = app.cheats.mp, rules.cheatOneHit = app.cheats.oneHit;
+    rules.cheatBreak = app.cheats.fullBreak;
+    if (rules.cheatBreak) rules.breakStarted = true, rules.breakTarget = rules.breakGauge = 8;
+    rules.expScale = app.cheats.exp;
+    for (int k = 0; k < 2; ++k) {
+        if (app.cheats.hp && rules.f[size_t(k)].present) rules.f[size_t(k)].hp = rules.f[size_t(k)].hpMax;
+        if (app.cheats.mp && rules.f[size_t(k)].present) rules.f[size_t(k)].mp = rules.f[size_t(k)].mpMax;
+    }
     // btl_enemy_init_lv: the scenario's level byte (the band the World Select chose)
     const int band = app.game.bands[size_t(std::clamp(app.game.scenario, 0, cr::kScenarios - 1))];
     rules.setupSpecial(app.game, app.itemTable, start.group, route); // the story battles' line-ups
@@ -12777,7 +12832,7 @@ void settleBattle(App& app) {
         if (rs.levels[k] > 0) rs.ups.push_back({k, rs.levels[k]});
     }
     rs.count = (most + 1) * 60;
-    rs.expTotal = b.rules.expGained * (b.rules.doubleExp ? 2 : 1);
+    rs.expTotal = b.rules.expGained * (b.rules.doubleExp ? 2 : 1) * std::max(1, b.rules.expScale);
     rs.ozTotal = b.rules.ozGained * (b.rules.doubleOz ? 2 : 1);
     rs.purseTo = app.game.oz;
     rs.shownPurse = float(std::max(0, rs.purseTo - (b.rules.outcome() == 2 ? rs.ozTotal : 0)));
@@ -23703,6 +23758,14 @@ SDL_AppResult SDL_AppIterate(void* state) {
     consumeInputCancel(*static_cast<App*>(state));
     static_cast<App*>(state)->sound.update();
     App& app = *static_cast<App*>(state);
+    // Options' Cheats outside battle: keep the party full and the purse at its cap.
+    if (app.cheats.oz) app.game.oz = 9999999;
+    if (app.cheats.hp || app.cheats.mp) {
+        for (cr::PartyMember& pm : app.game.party) {
+            if (app.cheats.hp) pm.hp = -1;
+            if (app.cheats.mp) pm.mp = -1;
+        }
+    }
     const float activeDt = app.clock.step();
     stepCampScroll(app, activeDt);
     padStep(app, activeDt);
