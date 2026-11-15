@@ -1682,10 +1682,15 @@ void readMdlRules(LoadedModel& lm, const std::string& name) {
 // NPC table models are read through read_mdl and shared by field actors and scripted cutscenes.
 LoadedModel& npcModel(App& app, const std::string& file) {
     auto it = app.npcModels.find(file);
+    if (it != app.npcModels.end() && it->second.meshes.empty()) {
+        unloadLoaded(app, it->second);
+        app.npcModels.erase(it);
+        it = app.npcModels.end();
+    }
     if (it == app.npcModels.end()) {
         LoadedModel lm;
         loadModelFile(app, file, lm, true);
-        readMdlRules(lm, file);
+        if (!lm.meshes.empty()) readMdlRules(lm, file);
         it = app.npcModels.emplace(file, std::move(lm)).first;
     }
     return it->second;
@@ -2269,54 +2274,12 @@ bool languageUsable(const App& app, int language) {
 
 // The user may have several regional faces in font/. Check actual Cyrillic glyph coverage instead
 // of silently drawing '?' from a font that loaded successfully but lacks the Russian alphabet.
-const std::string& cyrillicGlyphProbe() {
-    static const std::string sample =
-        "\xD0\x81\xD1\x91" // Ёё
-        "\xD0\x90\xD0\x91\xD0\x92\xD0\x93\xD0\x94\xD0\x95\xD0\x96\xD0\x97\xD0\x98\xD0\x99"
-        "\xD0\x9A\xD0\x9B\xD0\x9C\xD0\x9D\xD0\x9E\xD0\x9F\xD0\xA0\xD0\xA1\xD0\xA2\xD0\xA3"
-        "\xD0\xA4\xD0\xA5\xD0\xA6\xD0\xA7\xD0\xA8\xD0\xA9\xD0\xAA\xD0\xAB\xD0\xAC\xD0\xAD"
-        "\xD0\xAE\xD0\xAF"
-        "\xD0\xB0\xD0\xB1\xD0\xB2\xD0\xB3\xD0\xB4\xD0\xB5\xD0\xB6\xD0\xB7\xD0\xB8\xD0\xB9"
-        "\xD0\xBA\xD0\xBB\xD0\xBC\xD0\xBD\xD0\xBE\xD0\xBF\xD1\x80\xD1\x81\xD1\x82\xD1\x83"
-        "\xD1\x84\xD1\x85\xD1\x86\xD1\x87\xD1\x88\xD1\x89\xD1\x8A\xD1\x8B\xD1\x8C\xD1\x8D"
-        "\xD1\x8E\xD1\x8F"
-        "\xC2\xAB\xC2\xBB\xE2\x80\x94\xE2\x80\xA6";
-    return sample;
-}
-
-// The font face for the language: the collection's regional Han forms (Noto Sans CJK JP / SC /
-// TC / KR); Latin text uses the Japanese face like the Japanese release's system font.
+// Preserve the explicitly selected local font. The Russian build uses
+// font/Spectral-BoldItalic.ttf; language selection only changes regional faces in TTC collections.
 void applyLanguage(App& app) {
     if (!languageUsable(app, app.language)) app.language = 1;
     static const char* const kRegion[cr::kLanguages] = {"JP", "JP", "JP", "JP", "JP", "SC", "TC", "KR"};
-    const char* region = kRegion[app.language];
-    app.font.selectRegion(region);
-    if (app.font.loaded() && app.font.covers(cyrillicGlyphProbe())) return;
-
-    const std::string previous = app.font.path();
-    for (size_t i = 0; i < app.fontFiles.size(); ++i) {
-        const std::string& path = app.fontFiles[i];
-        if (path == previous) continue;
-        cr::Font candidate;
-        if (!candidate.load(path)) continue;
-        candidate.selectRegion(region);
-        if (!candidate.covers(cyrillicGlyphProbe())) continue;
-        if (!app.font.load(path)) continue;
-        app.font.selectRegion(region);
-        app.fontIndex = int(i);
-        const size_t slash = path.find_last_of("/\\");
-        app.fontSelection = slash == std::string::npos ? path : path.substr(slash + 1);
-        SDL_Log("font: selected %s because it contains the Russian Cyrillic glyphs",
-                app.fontSelection.c_str());
-        return;
-    }
-
-    if (app.font.loaded())
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "font: %s does not contain the Russian Cyrillic glyphs; missing characters render as '?'",
-                    previous.c_str());
-    else
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "font: no usable local face with Russian Cyrillic glyphs in %s; text falls back to ASCII",
-                    app.fontDir.c_str());
+    app.font.selectRegion(kRegion[app.language]);
 }
 
 std::string fontFileName(const std::string& path) {
@@ -2326,20 +2289,26 @@ std::string fontFileName(const std::string& path) {
 
 bool selectFontFile(App& app, const std::string& name) {
     for (size_t i = 0; i < app.fontFiles.size(); ++i) {
-        if (fontFileName(app.fontFiles[i]) != name) continue;
-        if (app.font.path() != app.fontFiles[i] && !app.font.load(app.fontFiles[i])) return false;
+        if (SDL_strcasecmp(fontFileName(app.fontFiles[i]).c_str(), name.c_str()) != 0) continue;
+        if ((app.font.path() != app.fontFiles[i] || !app.font.loaded()) && !app.font.load(app.fontFiles[i])) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "font: failed to load %s", app.fontFiles[i].c_str());
+            return false;
+        }
         app.fontIndex = int(i);
-        app.fontSelection = name;
+        app.fontSelection = fontFileName(app.fontFiles[i]);
         applyLanguage(app);
+        SDL_Log("font: selected %s (%s)", app.fontSelection.c_str(), app.font.path().c_str());
         return true;
     }
+    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "font: requested '%s' not found among %zu usable files in %s",
+                name.c_str(), app.fontFiles.size(), app.fontDir.c_str());
     return false;
 }
 
 void applyFontScale(App& app) {
     const float scale = float(std::clamp(app.fontScale, 80, 200)) / 100.0f;
-    for (cr::Hud* h : {&app.dialogueHud, &app.promptHud, &app.itemHud, &app.choiceHud, &app.nameHud,
-                       &app.pageHud, &app.battleHud}) h->setFontScale(scale);
+    for (cr::Hud* h : {&app.hud, &app.optionsHud, &app.dialogueHud, &app.promptHud, &app.itemHud,
+                       &app.choiceHud, &app.nameHud, &app.pageHud, &app.battleHud}) h->setFontScale(scale);
     for (cr::Hud& h : app.lineHud) h.setFontScale(scale);
 }
 
@@ -3810,7 +3779,12 @@ void loadMix(App& app) {
             at += 5;
             const char* end = at;
             while (*end && *end != '\r' && *end != '\n') ++end;
-            if (end > at) selectFontFile(app, std::string(at, end));
+            if (end > at) {
+                const std::string requested(at, end);
+                if (!selectFontFile(app, requested))
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "font: settings.ini font '%s' could not be selected",
+                                requested.c_str());
+            }
         }
         if (const char* at = SDL_strstr(text, "font_scale=")) app.fontScale = std::clamp(SDL_atoi(at + 11), 80, 200);
         applyLanguage(app);
@@ -22940,16 +22914,19 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     for (const std::string& path : fontCandidates)
         if (fontProbe.load(path)) app->fontFiles.push_back(path);
     if (!app->fontFiles.empty()) {
-        selectFontFile(*app, fontFileName(app->fontFiles.front()));
-        SDL_Log("font: %s", app->font.path().c_str());
+        auto preferred = std::find_if(app->fontFiles.begin(), app->fontFiles.end(), [](const std::string& path) {
+            return SDL_strcasecmp(fontFileName(path).c_str(), "Spectral-BoldItalic.ttf") == 0;
+        });
+        const std::string& initialFont = preferred != app->fontFiles.end() ? *preferred : app->fontFiles.front();
+        selectFontFile(*app, fontFileName(initialFont));
     } else {
         app->fontSelection.clear();
         app->fontIndex = -1;
         SDL_Log("font/: no usable .ttf/.otf/.ttc; using the built-in bitmap font");
     }
     // (the options menu is the engine's own, column-aligned for the 8x8 font)
-    for (cr::Hud* h : {&app->dialogueHud, &app->promptHud, &app->itemHud, &app->choiceHud, &app->nameHud,
-                       &app->pageHud, &app->battleHud})
+    for (cr::Hud* h : {&app->hud, &app->optionsHud, &app->dialogueHud, &app->promptHud, &app->itemHud,
+                       &app->choiceHud, &app->nameHud, &app->pageHud, &app->battleHud})
         h->setFont(&app->font);
     for (cr::Hud& h : app->lineHud) h.setFont(&app->font);
     // --language n (or CR_LANGUAGE): 0 Japanese, 1 English, ... 7 Korean (cr::kLanguageName)
@@ -23173,6 +23150,22 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
     if (!app->music.init(app->dataDir)) SDL_Log("music unavailable");
     vitaAudio(*app);
     loadMix(*app);
+    {
+        const std::string russianProbe =
+            "\\xD0\\x81\\xD1\\x91"
+            "\\xD0\\x90\\xD0\\x91\\xD0\\x92\\xD0\\x93\\xD0\\x94\\xD0\\x95\\xD0\\x96\\xD0\\x97\\xD0\\x98\\xD0\\x99"
+            "\\xD0\\x9A\\xD0\\x9B\\xD0\\x9C\\xD0\\x9D\\xD0\\x9E\\xD0\\x9F\\xD0\\xA0\\xD0\\xA1\\xD0\\xA2\\xD0\\xA3"
+            "\\xD0\\xA4\\xD0\\xA5\\xD0\\xA6\\xD0\\xA7\\xD0\\xA8\\xD0\\xA9\\xD0\\xAA\\xD0\\xAB\\xD0\\xAC\\xD0\\xAD"
+            "\\xD0\\xAE\\xD0\\xAF"
+            "\\xD0\\xB0\\xD0\\xB1\\xD0\\xB2\\xD0\\xB3\\xD0\\xB4\\xD0\\xB5\\xD0\\xB6\\xD0\\xB7\\xD0\\xB8\\xD0\\xB9"
+            "\\xD0\\xBA\\xD0\\xBB\\xD0\\xBC\\xD0\\xBD\\xD0\\xBE\\xD0\\xBF\\xD1\\x80\\xD1\\x81\\xD1\\x82\\xD1\\x83"
+            "\\xD1\\x84\\xD1\\x85\\xD1\\x86\\xD1\\x87\\xD1\\x88\\xD1\\x89\\xD1\\x8A\\xD1\\x8B\\xD1\\x8C\\xD1\\x8D"
+            "\\xD1\\x8E\\xD1\\x8F";
+        const bool cyrillic = app->font.loaded() && app->font.covers(russianProbe);
+        SDL_Log("font: final='%s', path='%s', loaded=%s, Russian glyph coverage=%s",
+                app->fontSelection.empty() ? "Bitmap" : app->fontSelection.c_str(),
+                app->font.path().c_str(), app->font.loaded() ? "yes" : "no", cyrillic ? "yes" : "NO");
+    }
     for (int i = 1; i < argc; ++i) // (over the stored setting; captures read it earlier)
         if (SDL_strcmp(argv[i], "--no-environment-effects") == 0) app->environmentEffects = false;
     videoArgs(*app, argc, argv); // the command line wins over settings.ini
