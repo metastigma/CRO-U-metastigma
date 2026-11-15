@@ -4266,7 +4266,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         r.kind = OptControl::Pair;
         r.words[0] = r.words[1] = -1;
         r.texts[0] = optionText(app, "On", "Вкл.");
-        r.texts[1] = optionText(app, optionText(app, "Off", "Выкл."), "Выкл.");
+        r.texts[1] = optionText(app, "Off", "Выкл.");
         r.selected = *flag ? 0 : 1;
         r.act = [&app, flag, after](int i) {
             *flag = i == 0;
@@ -4348,18 +4348,18 @@ std::vector<OptRow> optionRows(App& app, int page) {
             saveMix(app);
         });
         rows.back().enabled = app.font.loaded();
-        rows.back().hint = "TrueType font size: 80% to 200%, in 10% steps. Default: 125%.";
+        rows.back().hint = optionText(app, "TrueType font size: 80% to 200%, in 10% steps. Default: 125%.", "Размер шрифта TrueType: от 80% до 200%, шаг 10%. По умолчанию: 125%.");
         onOff(sysLabel(app, 58108, optionText(app, "Environment Effects", "Эффекты окружения")), &app.environmentEffects, nullptr);
         onOff(sysLabel(app, 58109, optionText(app, "Lock Screen Orientation", "Фиксировать ориентацию экрана")), &app.lockOrientation,
               [&app] { applyOrientation(app, app.lockOrientation); });
         onOff(optionText(app, "Control Hints", "Подсказки управления"), &app.showHud, nullptr);
-        rows.back().hint = "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut.";
-        value(optionText(app, "Import Vita Saves", "Импорт сохранений Vita"), "Choose Folder", [&app](int dir) {
+        rows.back().hint = optionText(app, "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut.", "Показывать подсказки управления и строку состояния. F3 переключает их отображение.");
+        value(optionText(app, "Import Vita Saves", "Импорт сохранений Vita"), optionText(app, "Choose Folder", "Выбрать папку"), [&app](int dir) {
             if (dir == 0 && app.optionsFromTitle) app.saveImport.begin("omega", app.window);
         });
         rows.back().enabled = app.optionsFromTitle;
-        rows.back().hint = app.optionsFromTitle ? "Choose your decrypted Vita save export. Existing saves will be backed up."
-                                               : "Import saves from the title screen's Options.";
+        rows.back().hint = app.optionsFromTitle ? optionText(app, "Choose your decrypted Vita save export. Existing saves will be backed up.", "Выберите папку с расшифрованными сохранениями Vita. Существующие сохранения будут сохранены в резервной копии.")
+                                               : optionText(app, "Import saves from the title screen's Options.", "Импорт сохранений доступен в настройках на главном экране.");
         { // the Vita copy to take assets from (a folder dialog; Left / Right: none)
             std::string shown = "None";
             if (!app.vitaPath.empty()) {
@@ -4368,18 +4368,18 @@ std::vector<OptRow> optionRows(App& app, int page) {
                 shown = p.substr(p.rfind('/') + 1);
                 if (shown.size() > 18) shown = shown.substr(0, 17) + "~";
             }
-            if (app.vitaOnly) shown = "The game's data";
-            else if (app.vitaPath != app.vitaLoaded) shown += " (next start)";
-            else if (!app.vitaPath.empty() && !app.vita.isOpen()) shown += " (not found)";
+            if (app.vitaOnly) shown = optionText(app, "The game's data", "Данные игры");
+            else if (app.vitaPath != app.vitaLoaded) shown += optionText(app, " (next start)", " (после перезапуска)");
+            else if (!app.vitaPath.empty() && !app.vita.isOpen()) shown += optionText(app, " (not found)", " (не найдено)");
             value(optionText(app, "Vita Assets", "Ресурсы Vita"), shown, [&app](int dir) {
                 if (app.vitaOnly) return; // (it is the whole game here)
                 if (dir == 0) chooseVitaFolder(app);
                 else if (!app.vitaPath.empty()) app.vitaPath.clear(), app.vitaNote.clear(), saveMix(app);
             });
             rows.back().enabled = !app.vitaOnly && !app.androidOnly;
-            rows.back().hint = app.vitaOnly ? "Running from the Vita copy alone: " + app.vitaRoot
+            rows.back().hint = app.vitaOnly ? std::string(optionText(app, "Running from the Vita copy alone: ", "Игра запущена только из копии Vita: ")) + app.vitaRoot
                                : !app.vitaNote.empty() ? app.vitaNote
-                               : "Enter: your Vita copy's PCSG00499 folder - its textures, voices, music and scripts; Left / Right: none";
+                               : optionText(app, "Enter: select your Vita copy's PCSG00499 folder; Left / Right: none", "Enter: выберите папку PCSG00499 с копией Vita; влево / вправо: нет");
         }
         { // the Android copy to take assets from (a folder holding its main.*.obb and APK; Left / Right: none)
             std::string shown = "None";
@@ -4389,19 +4389,18 @@ std::vector<OptRow> optionRows(App& app, int page) {
                 shown = p.substr(p.rfind('/') + 1);
                 if (shown.size() > 18) shown = shown.substr(0, 17) + "~";
             }
-            if (app.androidOnly) shown = "The game's data";
-            else if (app.androidPath != app.androidLoaded) shown += " (next start)";
-            else if (!app.androidPath.empty() && !app.android.isOpen()) shown += " (not found)";
+            if (app.androidOnly) shown = optionText(app, "The game's data", "Данные игры");
+            else if (app.androidPath != app.androidLoaded) shown += optionText(app, " (next start)", " (после перезапуска)");
+            else if (!app.androidPath.empty() && !app.android.isOpen()) shown += optionText(app, " (not found)", " (не найдено)");
             value(optionText(app, "Android Assets", "Ресурсы Android"), shown, [&app](int dir) {
                 if (app.androidOnly) return; // (it is the whole game here)
                 if (dir == 0) chooseAndroidFolder(app);
                 else if (!app.androidPath.empty()) app.androidPath.clear(), app.androidNote.clear(), saveMix(app);
             });
             rows.back().enabled = !app.vitaOnly && !app.androidOnly;
-            rows.back().hint = app.androidOnly ? "Running from the Android release alone: " + app.android.path()
+            rows.back().hint = app.androidOnly ? std::string(optionText(app, "Running from the Android release alone: ", "Игра запущена только из копии Android: ")) + app.android.path()
                                : !app.androidNote.empty() ? app.androidNote
-                               : "Enter: a folder with your Android copy's main.*.obb and its APK - its textures and the art "
-                                 "only it has; Left / Right: none";
+                               : optionText(app, "Enter: select the folder with your Android main.*.obb and APK; Left / Right: none", "Enter: выберите папку с main.*.obb и APK Android-копии; влево / вправо: нет");
         }
         const auto speed = [&](const char* label, int* x, const char* what) { // (Off, 2x .. 5x)
             value(label, *x > 1 ? std::to_string(*x) + "x" : std::string(optionText(app, "Off", "Выкл.")), [&app, x](int dir) {
@@ -4458,7 +4457,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         break;
     }
     case 2: { // Display
-        static const char* const kDisplay[] = {"Window", optionText(app, "Fullscreen", "Полный экран"), optionText(app, "Borderless", "Без рамки")};
+        const char* const kDisplay[] = {optionText(app, "Window", "Окно"), optionText(app, "Fullscreen", "Полный экран"), optionText(app, "Borderless", "Без рамки")};
         value(optionText(app, "Resolution", "Разрешение"), (v.display == 2 || (v.display == 1 && !v.resolutionExplicit)) ?
                                   optionText(app, "Desktop", "Как на рабочем столе") : std::to_string(v.width) + " x " + std::to_string(v.height),
               [&app](int dir) { adjustVideo(app, 0, dir ? dir : 1); });
@@ -4466,11 +4465,11 @@ std::vector<OptRow> optionRows(App& app, int page) {
         pair(optionText(app, "Aspect", "Соотношение сторон"), "4:3", optionText(app, "Wide", "Широкий"), v.widescreen ? 1 : 0, [&app](int i) {
             if (app.video.widescreen != (i == 1)) adjustVideo(app, 2, 1);
         });
-        static const char* const kLayout[] = {optionText(app, "Auto", "Авто"), "iPad", "iPhone", "Vita", "Android"};
+        const char* const kLayout[] = {optionText(app, "Auto", "Авто"), "iPad", "iPhone", "Vita", "Android"};
         value(optionText(app, "Layout", "Макет экрана"), kLayout[std::clamp(v.layout, 0, 4)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
         rows.back().hint = "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android "
                            "release's (16:9, its screens centred); Auto follows the data";
-        static const char* const kPaintings[] = {optionText(app, "Original", "Оригинал"), optionText(app, "Whole", "Полностью"), optionText(app, "Fill Width", "По ширине")};
+        const char* const kPaintings[] = {optionText(app, "Original", "Оригинал"), optionText(app, "Whole", "Полностью"), optionText(app, "Fill Width", "По ширине")};
         value(optionText(app, "Painted Rooms", "Фоны локаций"), kPaintings[std::clamp(v.paintings, 0, 2)], [&app](int dir) { adjustVideo(app, 3, dir ? dir : 1); });
         onOff(optionText(app, "VSync", "Вертикальная синхронизация"), &v.vsync, [&app] { applyVideo(app); });
         value(optionText(app, "Frame Rate", "Ограничение кадров"), v.frameLimit ? std::to_string(v.frameLimit) : std::string(optionText(app, "Unlimited", "Без ограничений")),
@@ -4502,7 +4501,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
             rows.back().hint = have ? "Replacement models (glTF) from models/hd, in place of the game's; from the next room on"
                                     : "None in models/hd yet: --export-models, edit in Blender, save as models/hd/<name>.glb";
         }
-        static const char* const kSmooth[] = {optionText(app, "Off", "Выкл."), "", optionText(app, "Smooth", "Сглаженная"), "Smoother"};
+        const char* const kSmooth[] = {optionText(app, "Off", "Выкл."), "", optionText(app, "Smooth", "Сглаженная"), optionText(app, "Smoother", "Усиленное сглаживание")};
         value(optionText(app, "Smooth Models", "Сглаживание моделей"), kSmooth[v.smoothModels], [&app](int dir) { adjustVideo(app, 13, dir ? dir : 1); });
         rows.back().hint = v.smoothModels ? "Rounder models (4x / 9x triangles), hard edges kept; from the next room on"
                                           : "Rounds the models' silhouettes - characters, monsters, props, stages (PN triangles)";
