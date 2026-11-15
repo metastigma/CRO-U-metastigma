@@ -14336,6 +14336,15 @@ void endRound(App& app) {
     for (int k = 0; k < 2; ++k) // the guard pose ends with the round
         if (App::Battle::Actor* a = battleActor(app, k); a && a->slot == btlui::kSlotGuard) playSlot(app, *a, btlui::kSlotIdle);
     for (int i = 0; i < 5; ++i) b.shownHp[i] = b.rules.f[size_t(i)].hp, b.shownMp[i] = b.rules.f[size_t(i)].mp;
+    // c101_t01's scenario-1 twin battle (group 0x2a3 / 675) is a scripted first-round
+    // ending even when the pair is defeated. End before the normal outcome switch so it
+    // never enters Lost; exit 1 follows the existing story/flee return path through
+    // endBattle(false), which resumes the suspended event script.
+    if (app.game.scenario == 1 && b.start.group == 0x2a3) {
+        app.game.setFlag(0xffe, true);
+        b.exit = 1;
+        return;
+    }
     switch (b.rules.outcome()) {
     case 2: // won: the victory pose and tune, then the results (btl_main 0x44b) - a story boss's
         // last word first (8000)
@@ -20832,7 +20841,46 @@ int runSelfTest(App& app) {
         app.runner.stop();
         app.runner.setGate(-1);
 
-        // 3. An event battle with its talk (Omega): j001_d05 script 203 - the scene, Battle 651 (stage 11),
+        // 3. Scenario 1's c101_t01 twin battle (group 675 / 0x2a3) ends after its
+        // first round even if the pair is down: it must bypass Lost and use exit 1.
+        app.game = cr::GameState();
+        cr::giveStartingItems(app.game, app.itemTable);
+        app.game.scenario = 1;
+        for (int f : {0xff1, 0xff2, 0xff3, 0xff4, 0xff5, 0xfa8, 0xfa9}) app.game.setFlag(f, true);
+        showMap(app, 0, 0, 10); // scenario 1
+        app.pendingEntry = App::Entry::None;
+        app.runner.stop();
+        app.runner.setGate(-1);
+        bool twinStarted = false, twinRouted = false, twinReturned = false;
+        startBattle(app, {675, 0, -1, 0}, 0);
+        twinStarted = b.active && b.start.group == 0x2a3;
+        if (twinStarted) {
+            b.eventBattle = true; // c101_t01 starts this as a suspended event battle
+            for (int f = 0; f < 6000 && b.active && !b.exit; ++f) {
+                if (b.phase == App::Battle::Command && !battletalk::on(app)) {
+                    b.rules.f[0].hp = 0;
+                    b.rules.f[1].hp = 0;
+                    endRound(app);
+                    twinRouted = b.exit == 1 && app.game.flag(0xffe) && b.phase != App::Battle::Lost;
+                    break;
+                }
+                stepBattle(app);
+            }
+            if (twinRouted) {
+                app.lastTicks = 0;
+                drawFrame(app, false); // exit 1 uses the same endBattle(false) route as StoryEnd
+                twinReturned = !b.active && !app.booting && !app.titleOpen && app.pendingEntry == App::Entry::None;
+            }
+        }
+        problems += !twinStarted + !twinRouted + !twinReturned;
+        std::printf("scenario 1 twin battle 675: %s, first-round scripted exit %s, return %s; %d problems\n",
+                    twinStarted ? "started" : "NOT STARTED", twinRouted ? "yes" : "NO", twinReturned ? "yes" : "NO",
+                    !twinStarted + !twinRouted + !twinReturned);
+        if (b.active) endBattle(app, false);
+        app.runner.stop();
+        app.runner.setGate(-1);
+
+        // 4. An event battle with its talk (Omega): j001_d05 script 203 - the scene, Battle 651 (stage 11),
         // then flag 1403 (0x57b) and on to area 9 map 169. Group 651 talks as round 3 ends
         // (chk_karaok_between) and can't fall below 1 HP before flag 0x57b (chk_karaok_dmg_hp)
         app.game = cr::GameState();
