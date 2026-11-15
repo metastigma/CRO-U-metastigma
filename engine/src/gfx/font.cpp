@@ -1,22 +1,42 @@
 #include "gfx/font.hpp"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
-#include <utility>
+#include <vector>
 
 #include "core/file.hpp"
 #include "core/text.hpp"
+#include "platform/paths.hpp"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
 #include "stb/stb_truetype.h"
+
+#ifdef SDL_PLATFORM_APPLE
+#include <CoreText/CoreText.h>
+#endif
 
 namespace cr {
 
 struct Font::Face {
     stbtt_fontinfo info;
 };
+
+namespace {
+// The face's glyph for `c`, with stand-ins for what iOS's font fallback would bring: the Korean
+// text's U+223C TILDE OPERATOR (563 times in 3.1.0) is in no Noto Sans CJK face - the fullwidth
+// tilde (or the wave dash) in its place
+int glyphIndex(const stbtt_fontinfo& info, uint32_t c) {
+    int g = stbtt_FindGlyphIndex(&info, int(c));
+    if (!g && c == 0x223C) g = stbtt_FindGlyphIndex(&info, 0xFF5E);
+    if (!g && c == 0x223C) g = stbtt_FindGlyphIndex(&info, 0x301C);
+    return g;
+}
+} // namespace
 
 Font::Font() = default;
 Font::~Font() = default;
@@ -50,6 +70,7 @@ bool Font::load(const std::string& path) {
         return false;
     }
     path_ = path;
+    boxAscent_ = boxDescent_ = 0;
     return true;
 }
 
@@ -78,11 +99,29 @@ bool Font::selectRegion(const char* region) {
     return false;
 }
 
+bool Font::selectPostScript(const char* name) {
+    if (!loaded() || !name) return false;
+    const unsigned char* d = data_.data();
+    const int n = std::max(1, stbtt_GetNumberOfFonts(d));
+    for (int i = 0; i < n; ++i) {
+        stbtt_fontinfo info;
+        if (!stbtt_InitFont(&info, d, stbtt_GetFontOffsetForIndex(d, i))) continue;
+        std::string ps;
+        int len = 0; // PostScript name (id 6): the Windows table's UTF-16BE, else the Mac table's Roman
+        if (const char* u = stbtt_GetFontNameString(&info, &len, STBTT_PLATFORM_ID_MICROSOFT, STBTT_MS_EID_UNICODE_BMP, STBTT_MS_LANG_ENGLISH, 6))
+            for (int k = 1; k < len; k += 2) ps += u[k];
+        else if (const char* m = stbtt_GetFontNameString(&info, &len, STBTT_PLATFORM_ID_MAC, STBTT_MAC_EID_ROMAN, STBTT_MAC_LANG_ENGLISH, 6))
+            ps.assign(m, size_t(len));
+        if (ps == name) return i == faceIndex_ || openFace(i);
+    }
+    return false;
+}
+
 bool Font::covers(const std::string& utf8) const {
     if (!loaded()) return false;
     for (size_t i = 0; i < utf8.size();) {
         const uint32_t c = nextUtf8(utf8, i);
-        if (c > 0x20 && c != 0x3000 && !stbtt_FindGlyphIndex(&face_->info, int(c))) return false;
+        if (c > 0x20 && c != 0x3000 && !glyphIndex(face_->info, c)) return false;
     }
     return true;
 }
@@ -93,6 +132,11 @@ bool Font::rasterise(const std::vector<std::string>& lines, float em, float line
     const float scale = stbtt_ScaleForMappingEmToPixels(&info, em);
     int ascent = 0, descent = 0, gap = 0;
     stbtt_GetFontVMetrics(&info, &ascent, &descent, &gap);
+    if (boxAscent_ != 0 || boxDescent_ != 0) { // (setLineBox: in the face's units)
+        const float upm = stbtt_ScaleForMappingEmToPixels(&info, 1) > 0 ? 1 / stbtt_ScaleForMappingEmToPixels(&info, 1) : 1000;
+        ascent = int(std::lround(boxAscent_ * upm)), descent = int(std::lround(boxDescent_ * upm));
+    }
+
     const float base0 = float(pad) + float(ascent) * scale;
 
     // Glyph indices per line ('?' for characters the face lacks), then the widest line
@@ -105,7 +149,7 @@ bool Font::rasterise(const std::vector<std::string>& lines, float em, float line
         for (size_t i = 0; i < lines[l].size();) {
             const uint32_t c = nextUtf8(lines[l], i);
             if (c < 0x20) continue; // (a message's marks, such as the centred line's \x01: not drawn)
-            int g = stbtt_FindGlyphIndex(&info, int(c));
+            int g = glyphIndex(info, c);
             if (!g && c > 0x20 && c != 0x3000) g = fallback;
             int adv = 0, lsb = 0;
             stbtt_GetGlyphHMetrics(&info, g, &adv, &lsb);
@@ -154,6 +198,130 @@ bool Font::rasterise(const std::vector<std::string>& lines, float em, float line
         }
     }
     return true;
+}
+
+namespace {
+struct OwnFile {
+    std::string path;
+    bool cjk = false;
+};
+// (looked at once: each file read to see what it holds)
+const std::vector<OwnFile>& ownFiles() {
+    static const std::vector<OwnFile> files = [] {
+        std::vector<OwnFile> out;
+        for (const std::string& folder : gameFolders()) {
+            const std::string dir = folder + "font/";
+            int count = 0;
+            char** names = SDL_GlobDirectory(dir.c_str(), "*", SDL_GLOB_CASEINSENSITIVE, &count);
+            std::vector<std::string> paths;
+            for (int k = 0; names && k < count; ++k) {
+                std::string n = names[k], low = n;
+                for (char& c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
+                const auto ends = [&](const char* e) { return low.size() > 4 && low.compare(low.size() - 4, 4, e) == 0; };
+                if (n[0] != '.' && (ends(".ttf") || ends(".otf") || ends(".ttc"))) paths.push_back(dir + n);
+            }
+            SDL_free(names);
+            if (paths.empty()) continue;
+            std::sort(paths.begin(), paths.end());
+            for (const std::string& path : paths) {
+                Font f;
+                if (!f.load(path)) {
+                    SDL_Log("font/: %s isn't a font this can read", path.c_str());
+                    continue;
+                }
+                out.push_back({path, f.covers("\xe3\x81\x82\xe6\xbc\xa2")}); // (あ漢)
+            }
+            break; // (the first game folder with font files)
+        }
+        return out;
+    }();
+    return files;
+}
+} // namespace
+
+std::string ownFont(bool cjk) {
+    for (const OwnFile& f : ownFiles())
+        if (!cjk || f.cjk) return f.path;
+    return {};
+}
+bool isOwnFont(const std::string& path) {
+    for (const OwnFile& f : ownFiles())
+        if (f.path == path) return true;
+    return false;
+}
+
+#ifdef SDL_PLATFORM_APPLE
+bool loadAppleFont(Font& font, const char* postScriptName) {
+    CFStringRef name = CFStringCreateWithCString(nullptr, postScriptName, kCFStringEncodingUTF8);
+    if (!name) return false;
+    std::string path, found;
+    if (CTFontDescriptorRef desc = CTFontDescriptorCreateWithNameAndSize(name, 0)) {
+        // (CoreText answers an unknown name with a stand-in: its own name checked)
+        if (CFStringRef got = static_cast<CFStringRef>(CTFontDescriptorCopyAttribute(desc, kCTFontNameAttribute))) {
+            char buf[256];
+            if (CFStringGetCString(got, buf, sizeof buf, kCFStringEncodingUTF8)) found = buf;
+            CFRelease(got);
+        }
+        if (CFURLRef url = static_cast<CFURLRef>(CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute))) {
+            char buf[1024];
+            if (CFURLGetFileSystemRepresentation(url, true, reinterpret_cast<UInt8*>(buf), sizeof buf)) path = buf;
+            CFRelease(url);
+        }
+        CFRelease(desc);
+    }
+    CFRelease(name);
+    if (path.empty() || found != postScriptName) return false;
+    if (font.loaded() && font.path() == path) return font.selectPostScript(postScriptName) || true;
+    if (!font.load(path)) return false;
+    font.selectPostScript(postScriptName); // (a collection's: that face)
+    return true;
+}
+#else
+bool loadAppleFont(Font&, const char*) { return false; }
+#endif
+
+bool loadSystemFont(Font& font) {
+    std::vector<std::string> candidates;
+    if (const char* env = SDL_getenv("CR_FONT")) {
+        if (SDL_strcmp(env, "none") == 0) return false; // the 8x8 font only
+        candidates.push_back(env);
+    }
+    if (const std::string own = ownFont(true); !own.empty()) candidates.push_back(own); // (font/: yours)
+    for (const char* p : {
+             // Linux (Noto CJK under several distributions' paths, then other CJK families)
+             "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+             "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+             "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
+             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+             "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc",
+             "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+             "/usr/share/fonts/TTF/VL-Gothic-Regular.ttf",
+             // macOS
+             "/System/Library/Fonts/Hiragino Sans GB.ttc",
+             "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+             "/System/Library/Fonts/PingFang.ttc",
+             "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+             // Windows
+             "C:/Windows/Fonts/YuGothM.ttc",
+             "C:/Windows/Fonts/msgothic.ttc",
+             "C:/Windows/Fonts/meiryo.ttc",
+             "C:/Windows/Fonts/msyh.ttc",
+             // Android
+             "/system/fonts/NotoSansCJK-Regular.ttc",
+             "/system/fonts/NotoSansSC-Regular.otf",
+         })
+        candidates.push_back(p);
+    for (const std::string& c : candidates)
+        if (font.load(c)) return true;
+#ifdef SDL_PLATFORM_IOS
+    // (iOS: none at the paths above - macOS's -: the system's own faces through CoreText; applyLanguage
+    // picks each language's)
+    if (!SDL_getenv("CR_FONT"))
+        for (const char* ps : {"HiraKakuProN-W6", "HiraginoSans-W6", "HiraKakuProN-W3"})
+            if (loadAppleFont(font, ps)) return true;
+#endif
+    return false;
 }
 
 } // namespace cr
