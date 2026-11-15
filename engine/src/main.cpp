@@ -2184,6 +2184,23 @@ bool languageUsable(const App& app, int language) {
 // TC / KR); Latin text uses the Japanese face like the Japanese release's system font.
 void applyLanguage(App& app) {
     if (!languageUsable(app, app.language)) app.language = 1;
+#ifdef SDL_PLATFORM_IOS
+    // iOS has no system fonts at macOS's fixed filesystem paths. Use the installed
+    // face by its PostScript name, unless the user selected a local font explicitly.
+    if (app.fontSelection.empty() && !SDL_getenv("CR_FONT")) {
+        static const char* const kIos[cr::kLanguages][2] = {
+            {"HiraKakuProN-W6", "HiraginoSans-W6"}, {"HiraKakuProN-W3", "HiraginoSans-W3"},
+            {"HiraKakuProN-W3", "HiraginoSans-W3"}, {"HiraKakuProN-W3", "HiraginoSans-W3"},
+            {"HiraKakuProN-W3", "HiraginoSans-W3"}, {"PingFangSC-Regular", "STHeitiSC-Light"},
+            {"PingFangTC-Regular", "STHeitiTC-Light"}, {"AppleSDGothicNeo-Regular", "AppleSDGothicNeo-Medium"}
+        };
+        const int language = std::clamp(app.language, 0, cr::kLanguages - 1);
+        if (cr::loadAppleFont(app.font, kIos[language][0]) || cr::loadAppleFont(app.font, kIos[language][1])) {
+            app.font.setLineBox(1.16f, -0.288f);
+            return;
+        }
+    }
+#endif
     static const char* const kRegion[cr::kLanguages] = {"JP", "JP", "JP", "JP", "JP", "SC", "TC", "KR"};
     app.font.selectRegion(kRegion[app.language]);
 }
