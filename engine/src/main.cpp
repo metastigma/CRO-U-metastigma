@@ -15649,6 +15649,7 @@ void drawMenuMask(App& app) {
     if (alpha <= 0) return;
     cr::Renderer& r = app.renderer;
     r.setOrigin(0);
+    r.setPictureLayer(true);
     const float a = float(alpha) / 255.0f, SW = r.screenW(), H = cr::Renderer::kLogicalH, x0 = r.uiX();
     switch (app.menuMask.type) {
     case 1: { const float q[8] = {0, 0, x0 + 427, 0, x0 + 747, H, 0, H}; r.fillQuad(q, 0, 0, 0, a); break; }
@@ -15661,6 +15662,7 @@ void drawMenuMask(App& app) {
         break;
     default: r.fillRect(0, 0, SW, H, 0, 0, 0, a); break;
     }
+    r.setPictureLayer(false);
 }
 
 void drawFrame(App& app, bool present = true) {
@@ -15779,6 +15781,7 @@ void drawFrame(App& app, bool present = true) {
             const float k = vw / viewSize, w = t.width * k, h = t.height * k;
             r.drawQuad(t, vx + (vw - w) / 2, vy + (vh - h) / 2, w, h);
         };
+        r.setPictureLayer(true); // field art, effects and its 3D view occupy the full screen, not the UI safe area
         drawSceneBack(app, false); // ScnEffectProc's z -1998 layers (the sky, the shaft, ...): behind the painting
         r.setOrigin(0);
         r.setLayer(3); // (the Vita's screen: fldread_prc's paintings and the view with them at full size)
@@ -15818,6 +15821,7 @@ void drawFrame(App& app, bool present = true) {
         if (app.foreground.id) drawLayer(app.foreground);
         r.setLayer(0);
         drawSceneEffects(app);
+        r.setPictureLayer(false);
         r.setOrigin(0);
     } else { // Models and Maps share the 3D path
         animateModel(app, dt);
