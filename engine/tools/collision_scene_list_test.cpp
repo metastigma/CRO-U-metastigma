@@ -32,8 +32,8 @@ std::vector<uint8_t> sceneStage(bool hasExtraOnlyList) {
     const size_t polyAt = header + vertices;
     put<float>(bytes, polyAt + 4, 1.0f); // upward normal
     put<int16_t>(bytes, polyAt + 12, 0);
-    put<int16_t>(bytes, polyAt + 14, 1);
-    put<int16_t>(bytes, polyAt + 16, 2);
+    put<int16_t>(bytes, polyAt + 14, 2);
+    put<int16_t>(bytes, polyAt + 16, 1); // winding agrees with the upward normal
     put<int16_t>(bytes, polyAt + 20, 3); // triangle
 
     put<int16_t>(bytes, nodeAt + 4, 0);  // floors
