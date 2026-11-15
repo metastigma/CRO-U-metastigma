@@ -25,7 +25,7 @@ repository; in the CI artifacts):
 
 | What | Licence |
 |---|---|
-| [SDL 3.4.20](https://github.com/libsdl-org/SDL) (linked in statically) | zlib |
+| [SDL 3.4.20](https://github.com/libsdl-org/SDL) on non-Windows; Windows pins `59ccf612c1ee00e3845947503ead7da3f46f6615` for the Vader controller driver fix (linked statically) | zlib |
 | [zlib 1.3.1](https://github.com/madler/zlib) (Windows, Android) | zlib |
 | [libarchive 3.7.7](https://github.com/libarchive/libarchive) (Windows, macOS: the setup reads a Vita dump's .rar, .7z, .zip, .vpk) | BSD-2-Clause |
 
