@@ -74,7 +74,7 @@ separately with an isolated `XDG_DATA_HOME`, since it writes test settings.
       equipment's seven slots (the Human Genes slot takes the characters' own plates); the shop
       (Omega's levels, stock and sell lists); the World Select (each scenario's worlds, bands -
       which set the scenario's level byte for enemies and treasure -, the skip question)
-- [ ] **Scripted defeats (scenario 0 group 650; scenario 1 group 675 / `0x2A3`):** [`docs/BATTLE_DEFEAT_FLOW.md`](BATTLE_DEFEAT_FLOW.md) documents the Agent's existing `Lost → exit 5 → endBattle(false)` continuation and the twin battle's first-round `exit 1 → endBattle(false)` route, with regression self-tests. CI and runtime validation are tracked separately; Piu-Piu's Oz eligibility and Vita's encrypted SELF remain open.
+- [ ] **Scripted defeats (scenario 0 group 650; scenario 1 group 675 / `0x2A3`):** [`docs/BATTLE_DEFEAT_FLOW.md`](BATTLE_DEFEAT_FLOW.md) documents both routes and regression self-tests. CI/self-test are the pre-merge checks; manual story verification is intentionally deferred until the user's planned translation review of `c101_t01`. Do not mark the episode runtime-verified before that review. Piu-Piu's Oz eligibility and Vita's encrypted SELF remain open.
 - [x] Omega's genes (plates 474..504, skills to 198, `_geneplate`), its 38-byte battle actions,
       the story battles' talks and HP floors (`chk_karaok_*`), the defeat warp, the encounter
       level, battle voices' speakers (3.1.0 / Vita), the talk window's parchment (`window_cutin`)
