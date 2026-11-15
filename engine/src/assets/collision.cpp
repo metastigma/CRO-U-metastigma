@@ -66,7 +66,7 @@ bool parseCollision(const std::vector<uint8_t>& f, Collision& out, std::string* 
     }
     const size_t end = fixedEnd + lists * 2;
     if (end > f.size() || f.size() - end >= 16) return fail("layout does not match file size");
-    bool listed = false;
+    bool listed = false, anyList = lists > 0;
     out.nodes.clear();
     if (out.treeType == 0) out.nodes.resize(size_t(nNodes));
     for (int i = 0, at = 0; i < nNodes; ++i) {
@@ -94,7 +94,10 @@ bool parseCollision(const std::vector<uint8_t>& f, Collision& out, std::string* 
     }
     if (!listed) // (no lists: by the normal, as before)
         for (auto& poly : out.polygons) poly.floor = poly.normal[1] > 0.7f, poly.wall = !poly.floor && poly.normal[1] > -0.7f;
-    if (out.nodes.empty() || !listed) { // (no KD tree: one leaf holding them all)
+    // A KD tree may have only +8/+10 lists (scene-stage squares). Keep those empty floor/wall
+    // lists: _get_floor reads the node's +4 floor list and must leave the scene record's Y unchanged.
+    // Rebuild a single leaf only when the file has no node lists at all, or no KD nodes.
+    if (out.nodes.empty() || !anyList) { // (no KD tree, or no lists: one leaf holding them all)
         out.nodes.assign(1, CollisionNode());
         for (int i = 0; i < nPolys; ++i) {
             if (out.polygons[size_t(i)].floor) out.nodes[0].floors.push_back(int16_t(i));
