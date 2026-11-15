@@ -13,14 +13,19 @@ licences, kept beside them in `engine/third_party/`:
 | `stb/` | stb_truetype and stb_vorbis 1.22 (commit 1ee679c; the Android release's Ogg Vorbis music) by Sean Barrett | MIT / public domain (in the files) |
 | `cgltf/` | cgltf 1.13 by Johannes Kuhlmann - reads the HD models (glTF 2.0) | MIT (in the file) |
 | `stb/stb_image.h`, `stb/stb_image_write.h` | stb_image 2.30 (PNG and JPEG only) and stb_image_write 1.16 by Sean Barrett - the HD models' pictures, read and written (`gltf_libs.c` builds them with cgltf) | public domain / MIT (in the files) |
-| `psvpfsparser/` | Vita3K's psvpfsparser, commit 05d43a06 (github.com/Vita3K/psvpfsparser; from motoharu-gosuto's psvpfstools), trimmed, with its own crypto in place of OpenSSL (`README.md` there) - the first start's setup decrypts a Vita NoNpDrm dump with it, as Vita3K's install does. The setup's SELF decryption follows Vita3K's `packages/sce_utils.cpp` and uses its retail app keys | GPL-2.0, as Vita3K (with it, builds of the port are GPL-2.0) |
+
+The Vita NoNpDrm PFS decrypter (`engine/src/assets/vita_pfs.cpp`) and its AES/SHA/HMAC
+implementation (`engine/src/crypto/`) are original clean-room code in this project. The SELF
+decryption in `engine/src/platform/setup.cpp` uses that same crypto implementation and follows
+Vita3K's published SELF format handling. The project no longer builds or links Vita3K's
+`psvpfsparser`.
 
 Built from source by CMake when the system has none (fetched at build time, not in the
 repository; in the CI artifacts):
 
 | What | Licence |
 |---|---|
-| [SDL 3.2.0](https://github.com/libsdl-org/SDL) (linked in statically) | zlib |
+| [SDL 3.4.20](https://github.com/libsdl-org/SDL) (linked in statically) | zlib |
 | [zlib 1.3.1](https://github.com/madler/zlib) (Windows, Android) | zlib |
 | [libarchive 3.7.7](https://github.com/libarchive/libarchive) (Windows, macOS: the setup reads a Vita dump's .rar, .7z, .zip, .vpk) | BSD-2-Clause |
 
