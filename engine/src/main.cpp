@@ -4361,7 +4361,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
         rows.back().hint = app.optionsFromTitle ? optionText(app, "Choose your decrypted Vita save export. Existing saves will be backed up.", "Выберите папку с расшифрованными сохранениями Vita. Существующие сохранения будут сохранены в резервной копии.")
                                                : optionText(app, "Import saves from the title screen's Options.", "Импорт сохранений доступен в настройках на главном экране.");
         { // the Vita copy to take assets from (a folder dialog; Left / Right: none)
-            std::string shown = "None";
+            std::string shown = optionText(app, "None", "Нет");
             if (!app.vitaPath.empty()) {
                 std::string p = app.vitaPath;
                 while (p.size() > 1 && p.back() == '/') p.pop_back();
@@ -4409,8 +4409,8 @@ std::vector<OptRow> optionRows(App& app, int page) {
             });
             rows.back().hint = what;
         };
-        speed(optionText(app, "Field Speed", "Скорость передвижения"), &app.fieldSpeed, "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are");
-        speed(optionText(app, "Battle Speed", "Скорость боя"), &app.battleSpeed, "The battles 2 .. 5 times as fast");
+        speed(optionText(app, "Field Speed", "Скорость передвижения"), &app.fieldSpeed, optionText(app, "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are", "Передвижение по локации в 2–5 раз быстрее; сцены, диалоги и меню идут в обычном темпе."));
+        speed(optionText(app, "Battle Speed", "Скорость боя"), &app.battleSpeed, optionText(app, "The battles 2 .. 5 times as fast", "Сражения проходят в 2–5 раз быстрее."));
         OptRow swap; // the controller's ○ (east) / × (south): Off as on the Vita, ○ confirms
         swap.label = "Swap \u25cb and \u00d7";
         swap.kind = OptControl::Pair;
