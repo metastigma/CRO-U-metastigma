@@ -11362,6 +11362,12 @@ void setActor(App& app, int id, cr::Vec3 p, const float* yaw, bool keepY) {
     else updateNpcJoints(app);
 }
 
+// A model is needed only while visible, already retained, or explicitly read by a script.
+// Do not preload every flag-eligible NPC: their meshes and DDS/other textures stay GPU-resident.
+bool npcNeedsModel(bool drawn, bool kept, bool mdlRead) {
+    return drawn || kept || mdlRead;
+}
+
 void buildNpcDraws(App& app) {
     std::vector<App::NpcDraw> old;
     old.swap(app.npcDraws);
@@ -11385,9 +11391,7 @@ void buildNpcDraws(App& app) {
             (n.pos[1] >= 900.0f || (n.id >= 400 && n.pos[0] == 0 && n.pos[1] == 0 && n.pos[2] == 0)) &&
             !app.placedNpcs.count(n.id))
             drawn = false;
-        const bool createFlags = (n.flagShow < 0 || app.game.flag(n.flagShow)) &&
-                                 (n.flagHide < 0 || !app.game.flag(n.flagHide));
-        if (!drawn && !kept && !n.mdlRead && !createFlags) continue;
+        if (!npcNeedsModel(drawn, kept != nullptr, n.mdlRead)) continue;
         LoadedModel& lm = npcModel(app, file);
         if (lm.meshes.empty()) continue;
         App::NpcDraw d;
@@ -20548,13 +20552,22 @@ int runSelfTest(App& app) {
         app.game = keepGame;
         app.npcShown = keepShown;
         app.flagTalked = keepTalked;
+        // An NPC whose row flags pass but which is hidden/parked must not load its model or GPU
+        // textures until it becomes visible or an event explicitly executes NpcMdlRead.
+        const bool hiddenNotRead = !npcNeedsModel(false, false, false);
+        const bool visibleLoads = npcNeedsModel(true, false, false);
+        const bool heldLoads = npcNeedsModel(false, true, false);
+        const bool scriptReadLoads = npcNeedsModel(false, false, true);
         const int sceneProblems = !floorNear + !floorFar + !mark + !talked + !cleared +
-                                  !mainStoryActors + !areaEightStoryActors + !puzzleExemption;
-        std::printf("scene NPC: local floor range %s/%s, FlagWindow mark/talk/clear %s/%s/%s, story-actor setup %s/%s/%s; %d problems\\n",
+                                  !mainStoryActors + !areaEightStoryActors + !puzzleExemption +
+                                  !hiddenNotRead + !visibleLoads + !heldLoads + !scriptReadLoads;
+        std::printf("scene NPC: local floor %s/%s; FlagWindow %s/%s/%s; story setup %s/%s/%s; model-load gate hidden/visible/held/script %s/%s/%s/%s; %d problems\\n",
                     floorNear ? "yes" : "NO", floorFar ? "yes" : "NO", mark ? "yes" : "NO",
                     talked ? "yes" : "NO", cleared ? "yes" : "NO",
                     mainStoryActors ? "yes" : "NO", areaEightStoryActors ? "yes" : "NO",
-                    puzzleExemption ? "yes" : "NO", sceneProblems);
+                    puzzleExemption ? "yes" : "NO",
+                    hiddenNotRead ? "yes" : "NO", visibleLoads ? "yes" : "NO",
+                    heldLoads ? "yes" : "NO", scriptReadLoads ? "yes" : "NO", sceneProblems);
         mapErrors += sceneProblems;
     }
     { // A controller, as the Vita's buttons: a virtual one - the stick walks the leader, △ opens the
