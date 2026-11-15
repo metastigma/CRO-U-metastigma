@@ -20507,7 +20507,7 @@ int runSelfTest(App& app) {
         sample.vertices = {-10, 0, -10, 10, 0, -10, 0, 0, 10};
         cr::CollisionPolygon floor;
         floor.normal[1] = 1;
-        floor.index[0] = 0; floor.index[1] = 1; floor.index[2] = 2;
+        floor.index[0] = 0; floor.index[1] = 2; floor.index[2] = 1; // agree with the +Y normal
         floor.count = 3; floor.floor = true;
         sample.polygons.push_back(floor);
         cr::CollisionNode node;
