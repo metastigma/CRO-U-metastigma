@@ -20873,7 +20873,7 @@ int runSelfTest(App& app) {
             }
         }
         problems += !twinStarted + !twinRouted + !twinReturned;
-        std::printf("scenario 1 twin battle 675: %s, first-round scripted exit %s, return %s; %d problems\\n",
+        std::printf("scenario 1 twin battle 675: %s, first-round scripted exit %s, return %s; %d problems\n",
                     twinStarted ? "started" : "NOT STARTED", twinRouted ? "yes" : "NO", twinReturned ? "yes" : "NO",
                     !twinStarted + !twinRouted + !twinReturned);
         if (b.active) endBattle(app, false);
