@@ -1567,15 +1567,31 @@ void loadModelFile(App& app, const std::string& name, LoadedModel& out, bool cha
     (void)character;
     if (!replaced && app.video.smoothModels >= 2) cr::smoothModel(m, app.video.smoothModels);
     for (const auto& img : m.textures) {
+        cr::Image hd;
+        const cr::Image* source = &img;
         if (app.video.hdTextures) {
-            cr::Image hd = img;
+            hd = img;
             applyHd(app, hd);
-            out.textures.push_back(app.renderer.upload(hd));
-        } else {
-            out.textures.push_back(app.renderer.upload(img));
+            source = &hd;
         }
+        cr::Texture texture = app.renderer.upload(*source);
+        if (!texture.id) {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "%s: GPU texture upload failed (%dx%d); model rejected",
+                         name.c_str(), source->width, source->height);
+            unloadLoaded(app, out);
+            return;
+        }
+        out.textures.push_back(texture);
     }
-    for (const auto& mesh : m.meshes) out.meshes.push_back(app.renderer.upload(mesh));
+    for (const auto& mesh : m.meshes) {
+        cr::GpuMesh gpu = app.renderer.upload(mesh);
+        if (!gpu.vao) {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "%s: GPU mesh upload failed; model rejected", name.c_str());
+            unloadLoaded(app, out);
+            return;
+        }
+        out.meshes.push_back(gpu);
+    }
     out.triangles = m.stats.triangles;
 
     // Appearances that name a package action (refGid: segment 1 colour, 6 / 8 texture motion) -
