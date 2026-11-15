@@ -269,6 +269,11 @@ std::vector<int> BattleRules::targets(const BattleActionDef& a, int user) const 
 }
 
 void BattleRules::breakEvent(int who, int event, int target) {
+    if (cheatBreak) {
+        breakStarted = true;
+        breakTarget = breakGauge = 8;
+        return;
+    }
     const bool party = who < 2;
     if (!breakStarted) { // the battle's first event: four for whoever caused it
         breakStarted = true;
@@ -783,7 +788,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             }
             --bag_[size_t(e.item)];
         }
-        if (e.kind == kCmdGene && e.actors[0] < 2 && !e.paid) { // the gene's MP: each member pays it in pair mode
+        if (e.kind == kCmdGene && e.actors[0] < 2 && !e.paid && !cheatMp) { // the gene's MP: each member pays it in pair mode
             const int cost = geneCost(*a, e.actors[0]);
             bool enough = true;
             for (int k : e.actors)
@@ -963,6 +968,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
                             self.amount = floored(k, self.amount);
                             if (self.amount > 0) breakEvent(e.actors[0], 2, t);
                             u.hp = std::max(0, u.hp - self.amount);
+                            if (cheatHp) u.hp = u.hpMax;
                             if (u.hp == 0 && u.status[kStatusEndure]) u.status[kStatusEndure] = 0, u.hp = 1;
                             if (u.hp == 0) { // btlcalc_chk_dead
                                 self.fell = true;
@@ -1068,6 +1074,8 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             Fighter& tf = f[size_t(t)];
             const int before = tf.hp;
             if (h.type == kHitKill) h.amount = tf.hp;
+            if (cheatOneHit && t >= 2 && h.amount > 0 && e.actors[0] >= 0 && e.actors[0] < 2)
+                h.amount = tf.hp;
             if (h.amount > 0 && tf.status[kStatusInvincible]) h.amount = 0, h.type = kHitNoEffect; // Is_invincible
             if (scenario == 0 && group == 693 && e.actors[0] < 2 && e.actors[1] < 0 && h.amount > 0) // btlcalc_dmg_hp: 0x2b5's
                 h.amount = 0, h.type = 0, nullHit = true;                                         // solo blows don't land (+0xa78)
@@ -1075,6 +1083,7 @@ bool BattleRules::nextTurn(const BattleActionTable& actions, BattleTurn& out) {
             if (calc == 0 && round > 3 && h.amount >= 1 && a->id == 18) lateAttack = true; // btlcalc_0404: +0xa50
             if (h.amount > 0) breakEvent(breakBy, 2, t);
             tf.hp = std::clamp(tf.hp - h.amount, 0, tf.hpMax);
+            if (cheatHp && t < 2) tf.hp = tf.hpMax;
             if (tf.hp == 0 && before > 0 && tf.status[kStatusEndure]) {
                 tf.status[kStatusEndure] = 0;
                 tf.hp = 1;
@@ -1226,6 +1235,8 @@ void BattleRules::endRound() {
         if (regenFull[size_t(i)]) d = x.hp - x.hpMax; // (group 0x293's, until flag 0x58c)
         if (d > 0) d = floored(i, d);
         x.hp = std::clamp(x.hp - d, 0, x.hpMax);
+        if (i < 2 && cheatHp) x.hp = x.hpMax;
+        if (i < 2 && cheatMp) x.mp = x.mpMax;
     }
 }
 
@@ -1317,7 +1328,7 @@ std::vector<int> BattleRules::applyRewards(GameState& gs) const {
         PartyMember& m = gs.party[size_t(x.character)];
         m.mp = x.skills[163 - 131] && outcome() != 3 ? -1 : x.mp; // 163: MP back to full
         if (won) {
-            const int gained = expGained * (doubleExp ? 2 : 1);
+            const int gained = expGained * (doubleExp ? 2 : 1) * std::max(1, expScale);
             m.exp += x.hp > 0 ? gained : gained / 2; // MbResultSet: a fallen member gets half
             const int before = m.level;
             while (m.level < kMaxLevel && m.exp >= expForLevel(m.level + 1)) ++m.level;
