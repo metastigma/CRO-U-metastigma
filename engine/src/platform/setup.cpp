@@ -2,6 +2,7 @@
 #define NOMINMAX // (archive.h brings <windows.h>: its min / max macros would take std::min)
 #endif
 #include "platform/setup.hpp"
+#include "platform/dialogs.hpp"
 #include "assets/vita_pfs.hpp"
 #include "crypto/crypto.hpp"
 
@@ -206,13 +207,13 @@ std::vector<std::string> pickFiles(const SDL_DialogFileFilter* filters, int n, b
         return out;
     }
     Answer a;
-    SDL_ShowOpenFileDialog(answered, &a, nullptr, filters, n, nullptr, many);
+    crShowOpenFileDialog(answered, &a, nullptr, filters, n, nullptr, many);
     return waitFor(a);
 }
 std::string pickFolder() {
     if (script().on) return answer("a folder");
     Answer a;
-    SDL_ShowOpenFolderDialog(answered, &a, nullptr, nullptr, false);
+    crShowOpenFolderDialog(answered, &a, nullptr, nullptr, false);
     const std::vector<std::string> p = waitFor(a);
     return p.empty() ? std::string() : p.front();
 }
