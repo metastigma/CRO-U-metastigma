@@ -1028,7 +1028,11 @@ SDL_EnumerationResult SDLCALL collectAssets(void* user, const char*, const char*
 
 SDL_EnumerationResult SDLCALL collectFontFiles(void* user, const char*, const char* fname) {
     App& app = *static_cast<App*>(user);
-    if (!endsWith(fname, ".ttf") && !endsWith(fname, ".otf") && !endsWith(fname, ".ttc"))
+    const size_t len = SDL_strlen(fname);
+    if (len < 4) return SDL_ENUM_CONTINUE;
+    const char* ext = fname + len - 4;
+    if (SDL_strcasecmp(ext, ".ttf") != 0 && SDL_strcasecmp(ext, ".otf") != 0 &&
+        SDL_strcasecmp(ext, ".ttc") != 0)
         return SDL_ENUM_CONTINUE;
     SDL_PathInfo info{};
     const std::string path = app.fontDir + fname;
@@ -2041,6 +2045,10 @@ void enterMap(App& app) {
     app.puzzleStartPending = app.puzzle.stage >= 0;
     app.npcDraws.clear(); // npc_setup reads the room's models again: no fade carried over from the last room
     app.npcHeld.clear();
+    // NPC model packages own GPU meshes and embedded/HD textures. Script-loaded hidden actors
+    // also enter this cache; release the previous room's cache before loading this room's actors.
+    for (auto& [file, model] : app.npcModels) unloadLoaded(app, model);
+    app.npcModels.clear();
     buildNpcDraws(app);
     buildWalkCollision(app);
     cr::Mesh mesh;
@@ -2243,12 +2251,56 @@ bool languageUsable(const App& app, int language) {
     return (language >= 1 && language <= 4) || app.font.loaded();
 }
 
+// The user may have several regional faces in font/. Check actual Cyrillic glyph coverage instead
+// of silently drawing '?' from a font that loaded successfully but lacks the Russian alphabet.
+const std::string& cyrillicGlyphProbe() {
+    static const std::string sample =
+        "\xD0\x81\xD1\x91" // Ёё
+        "\xD0\x90\xD0\x91\xD0\x92\xD0\x93\xD0\x94\xD0\x95\xD0\x96\xD0\x97\xD0\x98\xD0\x99"
+        "\xD0\x9A\xD0\x9B\xD0\x9C\xD0\x9D\xD0\x9E\xD0\x9F\xD0\xA0\xD0\xA1\xD0\xA2\xD0\xA3"
+        "\xD0\xA4\xD0\xA5\xD0\xA6\xD0\xA7\xD0\xA8\xD0\xA9\xD0\xAA\xD0\xAB\xD0\xAC\xD0\xAD"
+        "\xD0\xAE\xD0\xAF"
+        "\xD0\xB0\xD0\xB1\xD0\xB2\xD0\xB3\xD0\xB4\xD0\xB5\xD0\xB6\xD0\xB7\xD0\xB8\xD0\xB9"
+        "\xD0\xBA\xD0\xBB\xD0\xBC\xD0\xBD\xD0\xBE\xD0\xBF\xD1\x80\xD1\x81\xD1\x82\xD1\x83"
+        "\xD1\x84\xD1\x85\xD1\x86\xD1\x87\xD1\x88\xD1\x89\xD1\x8A\xD1\x8B\xD1\x8C\xD1\x8D"
+        "\xD1\x8E\xD1\x8F"
+        "\xC2\xAB\xC2\xBB\xE2\x80\x94\xE2\x80\xA6";
+    return sample;
+}
+
 // The font face for the language: the collection's regional Han forms (Noto Sans CJK JP / SC /
 // TC / KR); Latin text uses the Japanese face like the Japanese release's system font.
 void applyLanguage(App& app) {
     if (!languageUsable(app, app.language)) app.language = 1;
     static const char* const kRegion[cr::kLanguages] = {"JP", "JP", "JP", "JP", "JP", "SC", "TC", "KR"};
-    app.font.selectRegion(kRegion[app.language]);
+    const char* region = kRegion[app.language];
+    app.font.selectRegion(region);
+    if (app.font.loaded() && app.font.covers(cyrillicGlyphProbe())) return;
+
+    const std::string previous = app.font.path();
+    for (size_t i = 0; i < app.fontFiles.size(); ++i) {
+        const std::string& path = app.fontFiles[i];
+        if (path == previous) continue;
+        cr::Font candidate;
+        if (!candidate.load(path)) continue;
+        candidate.selectRegion(region);
+        if (!candidate.covers(cyrillicGlyphProbe())) continue;
+        if (!app.font.load(path)) continue;
+        app.font.selectRegion(region);
+        app.fontIndex = int(i);
+        const size_t slash = path.find_last_of("/\\");
+        app.fontSelection = slash == std::string::npos ? path : path.substr(slash + 1);
+        SDL_Log("font: selected %s because it contains the Russian Cyrillic glyphs",
+                app.fontSelection.c_str());
+        return;
+    }
+
+    if (app.font.loaded())
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "font: %s does not contain the Russian Cyrillic glyphs; missing characters render as '?'",
+                    previous.c_str());
+    else
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "font: no usable local face with Russian Cyrillic glyphs in %s; text falls back to ASCII",
+                    app.fontDir.c_str());
 }
 
 std::string fontFileName(const std::string& path) {
