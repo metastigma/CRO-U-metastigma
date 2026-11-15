@@ -28,7 +28,7 @@ if(NOT SDL3_FOUND)
     else()
         FetchContent_Declare(SDL3
             GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-            GIT_TAG release-3.4.20  # stable SDL3 with upstream controller hot-plug fixes
+            GIT_TAG release-3.2.0
             GIT_SHALLOW TRUE)
     endif()
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
