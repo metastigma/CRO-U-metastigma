@@ -4270,9 +4270,13 @@ std::string localizeAssetNote(const App& app, const std::string& note) {
     if (note.rfind(next, 0) == 0) return "Будет использоваться после перезапуска: " + note.substr(next.size());
     if (note.rfind("No Vita data (CRO/resources/cro.psarc)", 0) == 0)
         return "В выбранной папке нет данных Vita (CRO/resources/cro.psarc).";
-    if (note.rfind("no main.", 0) == 0) return "Не найден файл данных Android: " + note;
+    if (note.rfind("no main.", 0) == 0) {
+        const size_t in = note.find(" in ");
+        return in == std::string::npos ? "Не найден файл данных Android." : "В папке не найден файл данных Android: " + note.substr(in + 4);
+    }
+    const size_t apk = note.find(": no APK beside it");
+    if (apk != std::string::npos) return "Для файла " + note.substr(0, apk) + " рядом не найден APK-файл.";
     if (note == "no APK beside it") return "Рядом не найден APK-файл.";
-    if (note.rfind("no APK beside it", 0) == 0) return "Не найден APK-файл: " + note;
     return note;
 }
 
