@@ -20526,7 +20526,7 @@ int runSelfTest(App& app) {
         std::printf("scene NPC: local floor range %s/%s, FlagWindow mark/talk/clear %s/%s/%s; %d problems\n",
                     floorNear ? "yes" : "NO", floorFar ? "yes" : "NO", mark ? "yes" : "NO",
                     talked ? "yes" : "NO", cleared ? "yes" : "NO", sceneProblems);
-        problems += sceneProblems;
+        mapErrors += sceneProblems;
     }
     { // A controller, as the Vita's buttons: a virtual one - the stick walks the leader, △ opens the
       // Camp and closes it, ○ confirms, × goes back (and does nothing on the field), the D-pad
