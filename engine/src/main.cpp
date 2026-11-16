@@ -334,6 +334,7 @@ struct App {
     // x right and y up; ScrollAutoCtl's slide (FrmAdjCam / FrmPanCam) from -> to over `frames`
     struct FieldScroll {
         float offX = 0, offY = 0;
+        bool snap = true;                  // first follow after field entry is immediate
         // The scroll the scripts set (GetScroll / SetScroll's): not held to the painting - only what is
         // shown is (offX / offY) - so FrmPanCam there and back again over its edge comes back where it was
         float curX = 0, curY = 0;
@@ -3030,9 +3031,19 @@ void drawSceneEffects(App& app, bool battle = false) {
 bool paintedField(const App& app) {
     return app.mode == Mode::Maps && app.showBackground && app.background.id && app.haveStageCam;
 }
-bool scrollingField(const App& app) { return paintedField(app) && app.video.paintings == 0; }
+bool scrollingField(const App& app) { return paintedField(app); }
 float fieldViewW(const App& app) { return 2.0f * float(app.stageCam.viewWidth > 0 ? app.stageCam.viewWidth : 1024); }
 float fieldViewH(const App& app) { return 2.0f * float(app.stageCam.viewHeight > 0 ? app.stageCam.viewHeight : 1024); }
+// Painted Rooms: Fill zooms the view until the camera rect covers the screen.
+float fieldFillZoom(const App& app) {
+    if (app.video.paintings != 1 || !app.haveStageCam) return 1.0f;
+    const float sw = app.renderer.screenW(), h = cr::Renderer::kLogicalH;
+    const int* rect = app.stageCam.rect;
+    const bool haveRect = rect[2] > 0 && rect[3] > 0;
+    const float rw = haveRect ? 2.0f * float(rect[2]) : fieldViewW(app);
+    const float rh = haveRect ? 2.0f * float(rect[3]) : fieldViewH(app);
+    return std::max(1.0f, std::max(sw / std::max(rw, 1.0f), h / std::max(rh, 1.0f)));
+}
 
 cr::Mat4 stageViewProjection(const App& app) {
     const cr::StageCamera& sc = app.stageCam;
@@ -3056,38 +3067,40 @@ bool fieldViewPoint(const App& app, const cr::Vec3& p, float& vx, float& vy) {
 // screen's half from its edges; a rect narrower than the screen stays centred); the offset
 // moves `rate` of the way there
 void scrollFieldTo(App& app, float vx, float vy, float rate) {
-    const float V = fieldViewW(app), Vh = fieldViewH(app);
+    const float viewW = fieldViewW(app), viewH = fieldViewH(app);
+    const float fillZoom = fieldFillZoom(app);
     cr::Renderer& r = app.renderer;
-    // The painted field is drawn on layer 3. On phone/Vita layouts that layer is scaled
-    // differently from the 2D UI layer, so clamp the camera to the actual painted viewport.
     const int keepLayer = r.layer();
     r.setLayer(3);
-    const float k = r.phoneLayout() ? r.layoutScale() : 1.0f;
-    float cx = r.screenW() / 2, cy = cr::Renderer::kLogicalH / 2.0f;
+    const float layoutScale = r.phoneLayout() ? r.layoutScale() : 1.0f;
+    float cx = r.screenW() / 2.0f, cy = cr::Renderer::kLogicalH / 2.0f;
     r.layoutToScreen(cx, cy);
-    const float shiftY = (cy - cr::Renderer::kLogicalH / 2.0f) / k;
+    const float shiftY = (cy - cr::Renderer::kLogicalH / 2.0f) / layoutScale;
     r.setLayer(keepLayer);
-    const float SW = r.screenW() / k, H = cr::Renderer::kLogicalH / k;
-    const int* rc = app.stageCam.rect;
-    const bool haveRect = rc[2] > 0 && rc[3] > 0;
-    const float rx = haveRect ? 2.0f * float(rc[0]) : 0, ry = haveRect ? 2.0f * float(rc[1]) : 0;
-    const float rw = haveRect ? 2.0f * float(rc[2]) : V, rh = haveRect ? 2.0f * float(rc[3]) : Vh;
-    auto axis = [](float v, float lo, float len, float screen) {
-        return len <= screen ? lo + len / 2 : std::clamp(v, lo + screen / 2, lo + len - screen / 2);
+    const float screenW = r.screenW() / (fillZoom * layoutScale);
+    const float screenH = cr::Renderer::kLogicalH / (fillZoom * layoutScale);
+    const int* rect = app.stageCam.rect;
+    const bool haveRect = rect[2] > 0 && rect[3] > 0;
+    const float rx = haveRect ? 2.0f * float(rect[0]) : 0.0f;
+    const float ry = haveRect ? 2.0f * float(rect[1]) : 0.0f;
+    const float rw = haveRect ? 2.0f * float(rect[2]) : viewW;
+    const float rh = haveRect ? 2.0f * float(rect[3]) : viewH;
+    auto axis = [](float value, float low, float length, float screen) {
+        return length <= screen ? low + length / 2.0f : std::clamp(value, low + screen / 2.0f, low + length - screen / 2.0f);
     };
-    const float tx = V / 2 - axis(vx, rx, rw, SW);
-    const float ty = axis(vy - shiftY, ry, rh, H) + shiftY - Vh / 2;
-    app.scroll.offX += (tx - app.scroll.offX) * rate;
-    app.scroll.offY += (ty - app.scroll.offY) * rate;
+    const float targetX = viewW / 2.0f - axis(vx, rx, rw, screenW);
+    const float targetY = axis(vy - shiftY, ry, rh, screenH) + shiftY - viewH / 2.0f;
+    app.scroll.offX += (targetX - app.scroll.offX) * rate;
+    app.scroll.offY += (targetY - app.scroll.offY) * rate;
 }
 
-// FieldCamera::setScrollPlayer, every frame while the camera follows the player
-void followPlayerScroll(App& app) {
+void followPlayerScroll(App& app, float rate) {
     if (!scrollingField(app) || app.cam.free || !app.havePlayer) return;
     app.scroll.scripted = false;
+    if (app.scroll.snap) rate = 1.0f, app.scroll.snap = false;
     const cr::Vec3 head = shownWalker(app).pos + cr::Vec3{0, 7.0f + float(app.stageCam.lookHeight), 0};
     float vx, vy;
-    if (fieldViewPoint(app, head, vx, vy)) scrollFieldTo(app, vx, vy, 1.0f);
+    if (fieldViewPoint(app, head, vx, vy)) scrollFieldTo(app, vx, vy, rate);
     if (SDL_getenv("CR_SCROLL_DEBUG"))
         std::printf("scroll: head view (%.0f, %.0f) of %.0f x %.0f, rect %d %d %d %d -> offset (%.0f, %.0f)\n", vx, vy,
                     fieldViewW(app), fieldViewH(app), app.stageCam.rect[0], app.stageCam.rect[1], app.stageCam.rect[2],
@@ -15940,13 +15953,14 @@ void drawFrame(App& app, bool present = true) {
         // The stage view on screen (vx, vy, vw, vh)
         float vx, vy, vw, vh;
         if (scrollingField(app)) {
-            followPlayerScroll(app);
-            vw = fieldViewW(app);
-            vh = fieldViewH(app);
+            followPlayerScroll(app, 0.3f);
+            const float fillZoom = fieldFillZoom(app);
+            vw = fieldViewW(app) * fillZoom;
+            vh = fieldViewH(app) * fillZoom;
             float sx, sy;
             shownScroll(app, sx, sy);
-            vx = (SW - vw) / 2 + sx;
-            vy = (H - vh) / 2 - sy;
+            vx = (SW - vw) / 2 + sx * fillZoom;
+            vy = (H - vh) / 2 - sy * fillZoom;
         } else {
             vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
             vx = (SW - vw) / 2;
@@ -20103,7 +20117,7 @@ int runSelfTest(App& app) {
         int followed = 0;
         for (const cr::Vec3 p : {cr::Vec3{120.4f, 20.0f, 69.5f}, cr::Vec3{100, 20, 60}, cr::Vec3{80, 20, 50}}) {
             app.walker.pos = p;
-            followPlayerScroll(app);
+            followPlayerScroll(app, 1.0f);
             float hx, hy, x, y;
             fieldViewPoint(app, p + cr::Vec3{0, 7, 0}, hx, hy);
             view(x, y);
@@ -20139,7 +20153,7 @@ int runSelfTest(App& app) {
         problems += !inside() || x + hx < 0 || x + hx > SW;
         // CameraPlayer: following again
         host.freeCamera(false);
-        followPlayerScroll(app);
+        followPlayerScroll(app, 1.0f);
         problems += !inside();
         app.lastTicks = 0;
         drawFrame(app, false);
@@ -22178,7 +22192,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             lastWhere = where;
         }
         animateNpcs(app, 1.0f / kFramesPerSecond);
-        followPlayerScroll(app); // (drawFrame's, every frame the game shows: a capture draws only its last)
+        followPlayerScroll(app, 1.0f); // (drawFrame's, every frame the game shows: a capture draws only its last)
         if (f % 45 == 44 && f + 1 < app.captureFrames && !SDL_getenv("CR_CAPTURE_NOTAP")) { // (CR_CAPTURE_NOTAP: no taps)
             if (app.choiceFlag >= 0) answerChoice(app, true);
             else if (app.worldChoiceOpen) answerWorldChoice(app, 0);
