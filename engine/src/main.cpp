@@ -16185,7 +16185,6 @@ void drawFrame(App& app, bool present = true) {
             else drawPrompt(app, mvp, vx, vy, vw, vh);
         }
         r.setOrigin(0); // foreground shares the background's stage-space origin
-        r.setOrigin(0); // foreground shares the background's stage-space origin
         if (app.foreground.id && !hidden) drawLayer(app.foreground);
         r.setLayer(0);
         drawSceneEffects(app);
@@ -21719,8 +21718,6 @@ void bootTitle(App& app) {
     app.fadeBackGrey = app.fadeBackFrom = app.fadeBackTo = 0;
     app.fadeBackT = app.fadeBackFrames = 0;
     app.fieldHidden = false;
-    app.msgWin = App::MsgWin();
-    app.leaderMotion = -1, app.leaderLoopFrom = 0;
     app.msgWin = App::MsgWin();
     app.leaderMotion = -1, app.leaderLoopFrom = 0;
     app.crystalCam = App::CrystalCam();
