@@ -273,7 +273,8 @@ struct App {
     std::set<std::string> hdRefused;       // invalid replacement files: log once
     std::string modelsDir;                 // replacement models: models/hd/ in the game folder, or CR_HD_MODELS
     int hdModelsLoaded = 0;                // since startup
-    int language = 1;                      // text language (cr::kLanguageName): English by default
+    int language = 1;                      // game text language (0 Japanese .. 7 Korean)
+    int uiLanguage = 1;                    // built-in Options language: 0 English, 1 Russian
     cr::Font font;                         // selected face from the local font/ folder
     std::string fontDir, fontSelection;
     std::vector<std::string> fontFiles;
@@ -3744,6 +3745,7 @@ void loadMix(App& app) {
         for (int i = 0; i < 4; ++i)
             if (const char* at = SDL_strstr(text, keys[i])) *fields[i] = std::clamp(SDL_atoi(at + SDL_strlen(keys[i])), 0, 100);
         if (const char* at = SDL_strstr(text, "language=")) app.language = std::clamp(SDL_atoi(at + 9), 0, cr::kLanguages - 1);
+        if (const char* at = SDL_strstr(text, "ui_language=")) app.uiLanguage = std::clamp(SDL_atoi(at + 12), 0, 1);
         if (const char* at = SDL_strstr(text, "font=")) {
             at += 5;
             const char* end = at;
@@ -3803,7 +3805,8 @@ void saveMix(const App& app) {
          std::to_string(int(ch.oz)) + "," + std::to_string(int(ch.firstStrike)) + "," +
          std::to_string(int(ch.noEncounters)) + "," + std::to_string(int(ch.oneHit)) + "," +
          std::to_string(ch.exp) + "," + std::to_string(int(ch.fullBreak)) + "\n";
-    const std::string all = t + "language=" + std::to_string(app.language) + "\nfont=" + app.fontSelection +
+    const std::string all = t + "language=" + std::to_string(app.language) + "\nui_language=" + std::to_string(app.uiLanguage) +
+                             "\nfont=" + app.fontSelection +
                              "\nfont_scale=" + std::to_string(app.fontScale) + "\nvoice_entries=" + list + "\n" + video;
     std::string error;
     if (!crstorage::replaceFile(settingsPath(), all, &error)) SDL_Log("settings: %s", error.c_str());
@@ -3825,6 +3828,14 @@ struct UpscaleMode {
 constexpr UpscaleMode kUpscaleModes[] = {
     {"Native AA", 1.0f}, {"Quality", 1.5f}, {"Balanced", 1.7f}, {"Performance", 2.0f}, {"Ultra Perf.", 3.0f}};
 constexpr const char* kUpscalerName[] = {"Off", "FSR 3.1", "DLSS", "MetalFX"};
+
+std::string optionUpscaleModeName(const App& app, int mode) {
+    static const char* const russian[] = {
+        "Нативное сглаживание", "Качество", "Баланс", "Производительность", "Ультрапроизводительность"
+    };
+    const int i = std::clamp(mode, 0, int(sizeof kUpscaleModes / sizeof kUpscaleModes[0]) - 1);
+    return app.uiLanguage == 1 ? russian[i] : kUpscaleModes[i].name;
+}
 constexpr cr::Upscaler kUpscaler[] = {cr::Upscaler::Off, cr::Upscaler::Fsr3, cr::Upscaler::Dlss, cr::Upscaler::MetalFx};
 #ifdef __APPLE__
 constexpr int kUpscalers = 4; // (MetalFX: Apple's own)
@@ -4055,11 +4066,13 @@ int aaChoice(const App::Video& v) {
     return v.msaa >= 8 ? 3 : v.msaa >= 4 ? 2 : v.msaa >= 2 ? 1 : 0;
 }
 
-std::string aaName(const App::Video& v) {
+const char* optionText(const App& app, const char* english, const char* russian);
+
+std::string aaName(const App& app, const App::Video& v) {
     if (v.upscaler == 1) return v.upscaleMode == 0 ? "FSR Native AA" : "FSR 3.1";
     if (v.upscaler == 2) return v.upscaleMode == 0 ? "DLAA" : "DLSS";
     if (v.upscaler == 3) return v.upscaleMode == 0 ? "MetalFX AA" : "MetalFX";
-    return v.msaa <= 1 ? std::string("Off") : std::to_string(v.msaa) + "x MSAA";
+    return v.msaa <= 1 ? std::string(optionText(app, "Off", "Выкл.")) : std::to_string(v.msaa) + "x MSAA";
 }
 
 void adjustVideo(App& app, int row, int dir) {
@@ -4188,7 +4201,47 @@ struct OptRow {
 
 constexpr int kOptionPages = 6;
 constexpr int kOptionsBackRow = 99;
-const char* const kOptionPageName[kOptionPages] = {"Game", "Sound", "Display", "Detail", "Cheats", "Graphics"};
+const char* optionText(const App& app, const char* english, const char* russian) {
+    return app.uiLanguage == 1 ? russian : english;
+}
+
+std::string localizeUpscalerProblem(const App& app, const std::string& reason) {
+    if (app.uiLanguage == 0) return reason;
+    if (reason == "this GPU lacks what temporal upscaling needs")
+        return "Видеокарта не поддерживает необходимые функции временного масштабирования.";
+    if (reason == "this GPU can't run FSR 3.1")
+        return "Эта видеокарта не поддерживает FSR 3.1.";
+    if (reason == "needs MoltenVK's VK_EXT_metal_objects")
+        return "Требуется VK_EXT_metal_objects из MoltenVK.";
+    if (reason == "MetalFX is Apple's: macOS only")
+        return "MetalFX — технология Apple, доступная только в macOS.";
+    if (reason == "no renderer")
+        return "Рендерер не инициализирован.";
+    if (reason == "built without the DLSS SDK")
+        return "Сборка выполнена без SDK DLSS.";
+    if (reason == "NVIDIA NGX is not available")
+        return "NVIDIA NGX недоступна.";
+    return "Эта функция недоступна в текущей конфигурации: " + reason;
+}
+
+const char* optionPageName(const App& app, int page) {
+    static const char* const english[kOptionPages] = {"Game", "Sound", "Display", "Detail", "Cheats", "Graphics"};
+    static const char* const russian[kOptionPages] = {"Игра", "Звук", "Экран", "Детализация", "Читы", "Графика"};
+    const int i = std::clamp(page, 0, kOptionPages - 1);
+    return optionText(app, english[i], russian[i]);
+}
+
+const char* optionLanguageName(const App& app, int language) {
+    static const char* const english[cr::kLanguages] = {
+        "Japanese", "English", "French", "German", "Spanish", "Chinese (simplified)", "Chinese (traditional)", "Korean"
+    };
+    static const char* const russian[cr::kLanguages] = {
+        "Японский", "Английский", "Французский", "Немецкий", "Испанский",
+        "Китайский (упрощённый)", "Китайский (традиционный)", "Корейский"
+    };
+    const int i = std::clamp(language, 0, cr::kLanguages - 1);
+    return optionText(app, english[i], russian[i]);
+}
 // Layout, in menu units
 constexpr float kOptRowTop = 52, kOptRowPitch = 36, kOptCtrlX = 224, kOptCtrlScale = 0.85f;
 constexpr float kOptBackY = 344, kOptPageY = 350;
@@ -4212,6 +4265,47 @@ void saveImportAnswer(App& app, bool yes) {
     }
 }
 
+std::string localizeAssetNote(const App& app, const std::string& note) {
+    if (app.uiLanguage == 0) return note;
+    if (note == "In use") return "Используется";
+    const std::string next = "Used from the next start: ";
+    if (note.rfind(next, 0) == 0) return "Будет использоваться после перезапуска: " + note.substr(next.size());
+    if (note.rfind("No Vita data (CRO/resources/cro.psarc)", 0) == 0)
+        return "В выбранной папке нет данных Vita (CRO/resources/cro.psarc).";
+    if (note.rfind("no main.", 0) == 0) {
+        const size_t in = note.find(" in ");
+        return in == std::string::npos ? "Не найден файл данных Android." : "В папке не найден файл данных Android: " + note.substr(in + 4);
+    }
+    const size_t apk = note.find(": no APK beside it");
+    if (apk != std::string::npos) return "Для файла " + note.substr(0, apk) + " рядом не найден APK-файл.";
+    if (note == "no APK beside it") return "Рядом не найден APK-файл.";
+    return note;
+}
+
+std::string localizeSaveImportMessage(const App& app, std::string message) {
+    if (app.uiLanguage == 0) return message;
+    const std::pair<const char*, const char*> phrases[] = {
+        {"Choose the folder containing your decrypted Vita saves.", "Выберите папку с расшифрованными сохранениями Vita."},
+        {"Found ", "Найдено "}, {" save slot(s).", " ячеек сохранения."},
+        {"Existing saves will be backed up.", "Для существующих сохранений будет создана резервная копия."},
+        {"Invalid suspend skipped. ", "Повреждённое быстрое сохранение пропущено. "},
+        {"Import now?", "Импортировать сейчас?"},
+        {"Import failed: ", "Ошибка импорта: "},
+        {"Cannot open the folder picker: ", "Не удалось открыть выбор папки: "},
+        {"Imported ", "Импортировано "}, {"Previous saves backed up.", "Предыдущие сохранения сохранены в резервной копии."},
+        {"Load from the title.", "Загрузите сохранение с главного экрана."},
+        {"Import failed. Restore your previous saves from ", "Импорт не выполнен. Восстановите предыдущие сохранения из "}
+    };
+    for (const auto& p : phrases) {
+        size_t at = 0;
+        while ((at = message.find(p.first, at)) != std::string::npos) {
+            message.replace(at, SDL_strlen(p.first), p.second);
+            at += SDL_strlen(p.second);
+        }
+    }
+    return message;
+}
+
 std::vector<OptRow> optionRows(App& app, int page) {
     std::vector<OptRow> rows;
     auto gauge = [&](const std::string& label, int* v, int sound) {
@@ -4232,8 +4326,9 @@ std::vector<OptRow> optionRows(App& app, int page) {
         OptRow r;
         r.label = label;
         r.kind = OptControl::Pair;
-        r.words[0] = 33; // On
-        r.words[1] = 34; // Off
+        r.words[0] = r.words[1] = -1;
+        r.texts[0] = optionText(app, "On", "Вкл.");
+        r.texts[1] = optionText(app, "Off", "Выкл.");
         r.selected = *flag ? 0 : 1;
         r.act = [&app, flag, after](int i) {
             *flag = i == 0;
@@ -4263,11 +4358,22 @@ std::vector<OptRow> optionRows(App& app, int page) {
     App::Video& v = app.video;
     switch (page) {
     case 0: { // Game
+        OptRow uiLang;
+        uiLang.label = optionText(app, "Interface Language", "Язык интерфейса");
+        uiLang.kind = OptControl::Pair;
+        uiLang.texts[0] = optionText(app, "English", "Английский");
+        uiLang.texts[1] = optionText(app, "Russian", "Русский");
+        uiLang.selected = app.uiLanguage;
+        uiLang.act = [&app](int i) { app.uiLanguage = std::clamp(i, 0, 1); saveMix(app); };
+        rows.push_back(uiLang);
+        rows.back().hint = optionText(app, "Language of this built-in menu and its descriptions.", "Язык встроенного меню и описаний настроек и читов.");
+
         OptRow lang;
-        lang.label = sysLabel(app, 58082, "Language");
+        lang.label = optionText(app, "Game Language", "Язык игры");
         lang.kind = OptControl::Pair;
-        lang.words[0] = 37; // Japanese
-        lang.words[1] = 38; // English
+        lang.words[0] = lang.words[1] = -1;
+        lang.texts[0] = optionText(app, "Japanese", "Японский");
+        lang.texts[1] = optionText(app, "English", "Английский");
         lang.selected = app.language == 0 ? 0 : app.language == 1 ? 1 : -1;
         lang.act = [&app](int i) {
             if (!languageUsable(app, i)) return;
@@ -4276,7 +4382,7 @@ std::vector<OptRow> optionRows(App& app, int page) {
             saveMix(app);
         };
         rows.push_back(lang);
-        value("Text Language", cr::kLanguageName[app.language], [&app](int dir) {
+        value(optionText(app, "Game Text Language", "Язык игровых текстов"), optionLanguageName(app, app.language), [&app](int dir) {
             for (int k = 1; k <= cr::kLanguages; ++k) {
                 const int l = ((app.language + (dir ? dir : 1) * k) % cr::kLanguages + cr::kLanguages) % cr::kLanguages;
                 if (languageUsable(app, l)) {
@@ -4287,16 +4393,16 @@ std::vector<OptRow> optionRows(App& app, int page) {
             applyLanguage(app);
             saveMix(app);
         });
-        value("Font", app.fontSelection.empty() ? "Bitmap" : app.fontSelection, [&app](int dir) {
+        value(optionText(app, "Font", "Шрифт"), app.fontSelection.empty() ? optionText(app, "Bitmap", "Встроенный") : app.fontSelection, [&app](int dir) {
             if (app.fontFiles.empty()) return;
             const int next = wrap(app.fontIndex + (dir ? dir : 1), app.fontFiles.size());
             if (selectFontFile(app, fontFileName(app.fontFiles[size_t(next)]))) saveMix(app);
         });
         rows.back().enabled = !app.fontFiles.empty();
         rows.back().hint = app.fontFiles.empty()
-                               ? "No local fonts found. Put .ttf, .otf or .ttc files in font/ beside the game."
-                               : "Left / Right: choose a font file from font/ beside the game. The choice is saved.";
-        value("Text Size", std::to_string(app.fontScale) + "%", [&app](int dir) {
+                               ? optionText(app, "No local fonts found. Put .ttf, .otf or .ttc files in font/ beside the game.", "Шрифты не найдены. Поместите файлы .ttf, .otf или .ttc в папку font/ рядом с игрой.")
+                               : optionText(app, "Left / Right: choose a font file from font/ beside the game. The choice is saved.", "Влево / Вправо: выбрать файл шрифта из папки font/ рядом с игрой. Выбор сохраняется.");
+        value(optionText(app, "Text Size", "Размер текста"), std::to_string(app.fontScale) + "%", [&app](int dir) {
             const int next = std::clamp(app.fontScale + (dir ? dir : 1) * 10, 80, 200);
             if (next == app.fontScale) return;
             app.fontScale = next;
@@ -4304,94 +4410,94 @@ std::vector<OptRow> optionRows(App& app, int page) {
             saveMix(app);
         });
         rows.back().enabled = app.font.loaded();
-        rows.back().hint = "TrueType font size: 80% to 200%, in 10% steps. Default: 125%.";
-        onOff(sysLabel(app, 58108, "Environment Effects"), &app.environmentEffects, nullptr);
-        onOff(sysLabel(app, 58109, "Lock Screen Orientation"), &app.lockOrientation,
+        rows.back().hint = optionText(app, "TrueType font size: 80% to 200%, in 10% steps. Default: 125%.", "Размер шрифта TrueType: от 80% до 200%, шаг 10%. По умолчанию: 125%.");
+        onOff(optionText(app, "Environment Effects", "Эффекты окружения"), &app.environmentEffects, nullptr);
+        onOff(optionText(app, "Lock Screen Orientation", "Фиксировать ориентацию экрана"), &app.lockOrientation,
               [&app] { applyOrientation(app, app.lockOrientation); });
-        onOff("Control Hints", &app.showHud, nullptr);
-        rows.back().hint = "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut.";
-        value("Import Vita Saves", "Choose Folder", [&app](int dir) {
+        onOff(optionText(app, "Control Hints", "Подсказки управления"), &app.showHud, nullptr);
+        rows.back().hint = optionText(app, "Show the control hints and status overlay. Off hides the WASD help; F3 is a shortcut.", "Показывать подсказки управления и строку состояния. F3 переключает их отображение.");
+        value(optionText(app, "Import Vita Saves", "Импорт сохранений Vita"), optionText(app, "Choose Folder", "Выбрать папку"), [&app](int dir) {
             if (dir == 0 && app.optionsFromTitle) app.saveImport.begin("omega", app.window);
         });
         rows.back().enabled = app.optionsFromTitle;
-        rows.back().hint = app.optionsFromTitle ? "Choose your decrypted Vita save export. Existing saves will be backed up."
-                                               : "Import saves from the title screen's Options.";
+        rows.back().hint = app.optionsFromTitle ? optionText(app, "Choose your decrypted Vita save export. Existing saves will be backed up.", "Выберите папку с расшифрованными сохранениями Vita. Существующие сохранения будут сохранены в резервной копии.")
+                                               : optionText(app, "Import saves from the title screen's Options.", "Импорт сохранений доступен в настройках на главном экране.");
         { // the Vita copy to take assets from (a folder dialog; Left / Right: none)
-            std::string shown = "None";
+            std::string shown = optionText(app, "None", "Нет");
             if (!app.vitaPath.empty()) {
                 std::string p = app.vitaPath;
                 while (p.size() > 1 && p.back() == '/') p.pop_back();
                 shown = p.substr(p.rfind('/') + 1);
                 if (shown.size() > 18) shown = shown.substr(0, 17) + "~";
             }
-            if (app.vitaOnly) shown = "The game's data";
-            else if (app.vitaPath != app.vitaLoaded) shown += " (next start)";
-            else if (!app.vitaPath.empty() && !app.vita.isOpen()) shown += " (not found)";
-            value("Vita Assets", shown, [&app](int dir) {
+            if (app.vitaOnly) shown = optionText(app, "The game's data", "Данные игры");
+            else if (app.vitaPath != app.vitaLoaded) shown += optionText(app, " (next start)", " (после перезапуска)");
+            else if (!app.vitaPath.empty() && !app.vita.isOpen()) shown += optionText(app, " (not found)", " (не найдено)");
+            value(optionText(app, "Vita Assets", "Ресурсы Vita"), shown, [&app](int dir) {
                 if (app.vitaOnly) return; // (it is the whole game here)
                 if (dir == 0) chooseVitaFolder(app);
                 else if (!app.vitaPath.empty()) app.vitaPath.clear(), app.vitaNote.clear(), saveMix(app);
             });
             rows.back().enabled = !app.vitaOnly && !app.androidOnly;
-            rows.back().hint = app.vitaOnly ? "Running from the Vita copy alone: " + app.vitaRoot
-                               : !app.vitaNote.empty() ? app.vitaNote
-                               : "Enter: your Vita copy's PCSG00499 folder - its textures, voices, music and scripts; Left / Right: none";
+            rows.back().hint = app.vitaOnly ? std::string(optionText(app, "Running from the Vita copy alone: ", "Игра запущена только из копии Vita: ")) + app.vitaRoot
+                               : !app.vitaNote.empty() ? localizeAssetNote(app, app.vitaNote)
+                               : optionText(app, "Enter: select your Vita copy's PCSG00499 folder; Left / Right: none", "Enter: выберите папку PCSG00499 с копией Vita; влево / вправо: нет");
         }
         { // the Android copy to take assets from (a folder holding its main.*.obb and APK; Left / Right: none)
-            std::string shown = "None";
+            std::string shown = optionText(app, "None", "Нет");
             if (!app.androidPath.empty()) {
                 std::string p = app.androidPath;
                 while (p.size() > 1 && p.back() == '/') p.pop_back();
                 shown = p.substr(p.rfind('/') + 1);
                 if (shown.size() > 18) shown = shown.substr(0, 17) + "~";
             }
-            if (app.androidOnly) shown = "The game's data";
-            else if (app.androidPath != app.androidLoaded) shown += " (next start)";
-            else if (!app.androidPath.empty() && !app.android.isOpen()) shown += " (not found)";
-            value("Android Assets", shown, [&app](int dir) {
+            if (app.androidOnly) shown = optionText(app, "The game's data", "Данные игры");
+            else if (app.androidPath != app.androidLoaded) shown += optionText(app, " (next start)", " (после перезапуска)");
+            else if (!app.androidPath.empty() && !app.android.isOpen()) shown += optionText(app, " (not found)", " (не найдено)");
+            value(optionText(app, "Android Assets", "Ресурсы Android"), shown, [&app](int dir) {
                 if (app.androidOnly) return; // (it is the whole game here)
                 if (dir == 0) chooseAndroidFolder(app);
                 else if (!app.androidPath.empty()) app.androidPath.clear(), app.androidNote.clear(), saveMix(app);
             });
             rows.back().enabled = !app.vitaOnly && !app.androidOnly;
-            rows.back().hint = app.androidOnly ? "Running from the Android release alone: " + app.android.path()
-                               : !app.androidNote.empty() ? app.androidNote
-                               : "Enter: a folder with your Android copy's main.*.obb and its APK - its textures and the art "
-                                 "only it has; Left / Right: none";
+            rows.back().hint = app.androidOnly ? std::string(optionText(app, "Running from the Android release alone: ", "Игра запущена только из копии Android: ")) + app.android.path()
+                               : !app.androidNote.empty() ? localizeAssetNote(app, app.androidNote)
+                               : optionText(app, "Enter: select the folder with your Android main.*.obb and APK; Left / Right: none", "Enter: выберите папку с main.*.obb и APK Android-копии; влево / вправо: нет");
         }
         const auto speed = [&](const char* label, int* x, const char* what) { // (Off, 2x .. 5x)
-            value(label, *x > 1 ? std::to_string(*x) + "x" : std::string("Off"), [&app, x](int dir) {
+            value(label, *x > 1 ? std::to_string(*x) + "x" : std::string(optionText(app, "Off", "Выкл.")), [&app, x](int dir) {
                 *x = (*x - 1 + (dir ? dir : 1) + 5) % 5 + 1;
                 saveMix(app);
             });
             rows.back().hint = what;
         };
-        speed("Field Speed", &app.fieldSpeed, "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are");
-        speed("Battle Speed", &app.battleSpeed, "The battles 2 .. 5 times as fast");
+        speed(optionText(app, "Field Speed", "Скорость передвижения"), &app.fieldSpeed, optionText(app, "Walking the field 2 .. 5 times as fast - the scenes, talk and menus as they are", "Передвижение по локации в 2–5 раз быстрее; сцены, диалоги и меню идут в обычном темпе."));
+        speed(optionText(app, "Battle Speed", "Скорость боя"), &app.battleSpeed, optionText(app, "The battles 2 .. 5 times as fast", "Сражения проходят в 2–5 раз быстрее."));
         OptRow swap; // the controller's ○ (east) / × (south): Off as on the Vita, ○ confirms
-        swap.label = "Swap \u25cb and \u00d7";
+        swap.label = optionText(app, "Swap \u25cb and \u00d7", "Поменять местами \u25cb и \u00d7");
         swap.kind = OptControl::Pair;
-        swap.words[0] = 33; // On
-        swap.words[1] = 34; // Off
+        swap.words[0] = swap.words[1] = -1;
+        swap.texts[0] = optionText(app, "On", "Вкл.");
+        swap.texts[1] = optionText(app, "Off", "Выкл.");
         swap.selected = app.padConfirmEast ? 1 : 0;
         swap.act = [&app](int i) {
             app.padConfirmEast = i == 1;
             saveMix(app);
         };
-        swap.hint = std::string(app.pad ? std::string("Controller: ") + SDL_GetGamepadName(app.pad) + ". " : "With a controller: ") +
-                    (app.padConfirmEast ? "\u25cb (the right button) confirms, \u00d7 (the bottom one) goes back - as on the Vita"
-                                        : "\u00d7 (the bottom button) confirms, \u25cb (the right one) goes back");
+        swap.hint = std::string(app.pad ? std::string(optionText(app, "Controller: ", "Геймпад: ")) + SDL_GetGamepadName(app.pad) + ". " : optionText(app, "With a controller: ", "При использовании геймпада: ")) +
+                    (app.padConfirmEast ? optionText(app, "\u25cb (the right button) confirms, \u00d7 (the bottom one) goes back - as on the Vita", "\u25cb (правая кнопка) подтверждает, \u00d7 (нижняя) возвращает назад — как на Vita")
+                                        : optionText(app, "\u00d7 (the bottom button) confirms, \u25cb (the right one) goes back", "\u00d7 (нижняя кнопка) подтверждает, \u25cb (правая) возвращает назад"));
         rows.push_back(swap);
         OptRow manual; // the topics and their pages (MuScrList + MsgUty)
-        manual.label = sysLabel(app, 58081, "Instruction Manual");
+        manual.label = optionText(app, "Instruction Manual", "Руководство");
         manual.act = [&app](int) { openManual(app, 0); };
         rows.push_back(manual);
         OptRow title;
         if (app.optionsFromTitle) { // ModeOptionMenu(1): erasing the save data, asked twice
-            title.label = sysLabel(app, 58122, "Reset Data");
+            title.label = optionText(app, "Reset Data", "Сбросить данные");
             title.act = [&app](int) { app.resetAsk = 1, app.resetConfirm = 1; };
         } else {
-            title.label = sysLabel(app, 58123, "Return to Title");
+            title.label = optionText(app, "Return to Title", "На главный экран");
             title.enabled = app.mode == Mode::Maps && !app.booting;
             title.act = [&app](int) { bootTitle(app); };
         }
@@ -4399,13 +4505,13 @@ std::vector<OptRow> optionRows(App& app, int page) {
         break;
     }
     case 1: { // Sound
-        gauge("Master Volume", &app.mix.master, int(se::kVolume));
-        gauge(sysLabel(app, 58085, "BGM"), &app.mix.music, -1);
-        gauge(sysLabel(app, 58086, "Sound Effects"), &app.mix.effects, int(se::kVolume));
-        gauge("Voice Volume", &app.mix.voice, -1);
+        gauge(optionText(app, "Master Volume", "Общая громкость"), &app.mix.master, int(se::kVolume));
+        gauge(optionText(app, "BGM", "Музыка"), &app.mix.music, -1);
+        gauge(optionText(app, "Sound Effects", "Звуковые эффекты"), &app.mix.effects, int(se::kVolume));
+        gauge(optionText(app, "Voice Volume", "Громкость голосов"), &app.mix.voice, -1);
         char test[32];
         SDL_snprintf(test, sizeof test, "%03d", app.soundTestEntry);
-        value("Sound Test", test, [&app](int dir) {
+        value(optionText(app, "Sound Test", "Проверка звука"), test, [&app](int dir) {
             const int n = std::max(1, app.sound.entries());
             if (dir == 0) app.sound.play(uint32_t(app.soundTestEntry));
             else app.soundTestEntry = ((app.soundTestEntry + dir) % n + n) % n;
@@ -4414,121 +4520,120 @@ std::vector<OptRow> optionRows(App& app, int page) {
         break;
     }
     case 2: { // Display
-        static const char* const kDisplay[] = {"Window", "Fullscreen", "Borderless"};
-        value("Resolution", (v.display == 2 || (v.display == 1 && !v.resolutionExplicit)) ?
-                                  "Desktop" : std::to_string(v.width) + " x " + std::to_string(v.height),
+        const char* const kDisplay[] = {optionText(app, "Window", "Окно"), optionText(app, "Fullscreen", "Полный экран"), optionText(app, "Borderless", "Без рамки")};
+        value(optionText(app, "Resolution", "Разрешение"), (v.display == 2 || (v.display == 1 && !v.resolutionExplicit)) ?
+                                  optionText(app, "Desktop", "Как на рабочем столе") : std::to_string(v.width) + " x " + std::to_string(v.height),
               [&app](int dir) { adjustVideo(app, 0, dir ? dir : 1); });
-        value("Display", kDisplay[v.display], [&app](int dir) { adjustVideo(app, 1, dir ? dir : 1); });
-        pair("Aspect", "4:3", "Wide", v.widescreen ? 1 : 0, [&app](int i) {
+        value(optionText(app, "Display", "Режим окна"), kDisplay[v.display], [&app](int dir) { adjustVideo(app, 1, dir ? dir : 1); });
+        pair(optionText(app, "Aspect", "Соотношение сторон"), "4:3", optionText(app, "Wide", "Широкий"), v.widescreen ? 1 : 0, [&app](int i) {
             if (app.video.widescreen != (i == 1)) adjustVideo(app, 2, 1);
         });
-        static const char* const kLayout[] = {"Auto", "iPad", "iPhone", "Vita", "Android"};
-        value("Layout", kLayout[std::clamp(v.layout, 0, 4)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
-        rows.back().hint = "The screens' layout: the iPad release's (4:3), the iPhone's (3:2), the Vita's or the Android "
-                           "release's (16:9, its screens centred); Auto follows the data";
-        static const char* const kPaintings[] = {"Original", "Whole", "Fill Width"};
-        value("Painted Rooms", kPaintings[std::clamp(v.paintings, 0, 2)], [&app](int dir) { adjustVideo(app, 3, dir ? dir : 1); });
-        onOff("VSync", &v.vsync, [&app] { applyVideo(app); });
-        value("Frame Rate", v.frameLimit ? std::to_string(v.frameLimit) : std::string("Unlimited"),
+        const char* const kLayout[] = {optionText(app, "Auto", "Авто"), "iPad", "iPhone", "Vita", "Android"};
+        value(optionText(app, "Layout", "Макет экрана"), kLayout[std::clamp(v.layout, 0, 4)], [&app](int dir) { adjustVideo(app, 14, dir ? dir : 1); });
+        rows.back().hint = optionText(app, "Screen layout: iPad (4:3), iPhone (3:2), Vita or Android (16:9, centred); Auto follows the selected game data.", "Макет экрана: iPad (4:3), iPhone (3:2), Vita или Android (16:9, изображение по центру). «Авто» выбирает макет по используемым данным игры.");
+        const char* const kPaintings[] = {optionText(app, "Original", "Оригинал"), optionText(app, "Whole", "Полностью"), optionText(app, "Fill Width", "По ширине")};
+        value(optionText(app, "Painted Rooms", "Фоны локаций"), kPaintings[std::clamp(v.paintings, 0, 2)], [&app](int dir) { adjustVideo(app, 3, dir ? dir : 1); });
+        onOff(optionText(app, "VSync", "Вертикальная синхронизация"), &v.vsync, [&app] { applyVideo(app); });
+        value(optionText(app, "Frame Rate", "Ограничение кадров"), v.frameLimit ? std::to_string(v.frameLimit) : std::string(optionText(app, "Unlimited", "Без ограничений")),
               [&app](int dir) { adjustVideo(app, 15, dir ? dir : 1); });
-        rows.back().hint = "Frames drawn a second at most; the game runs at its own 20 a second, shown moving between them";
+        rows.back().hint = optionText(app, "Maximum frames drawn per second. Game logic still updates at its original 20 updates per second.", "Максимальная частота отображения кадров. Логика игры по-прежнему обновляется с исходной частотой 20 раз в секунду.");
         OptRow restore;
-        restore.label = "Original Presentation";
-        restore.hint = "Every display and graphics option back to the original's";
+        restore.label = optionText(app, "Original Presentation", "Исходный вид");
+        restore.hint = optionText(app, "Restore all display and graphics options to their original values.", "Вернуть все параметры экрана и графики к исходным значениям.");
         restore.act = [&app](int) { adjustVideo(app, 7, 0); };
         rows.push_back(restore);
         break;
     }
     case 3: { // Detail: the textures and the models
-        onOff("HD Textures", &v.hdTextures, nullptr);
+        onOff(optionText(app, "HD Textures", "Текстуры HD"), &v.hdTextures, nullptr);
         rows.back().act = [&app](int i) {
             if (app.video.hdTextures != (i == 0)) adjustVideo(app, 12, 1);
         };
         {
             const bool have = !app.hdDir.empty() && SDL_GetPathInfo(app.hdDir.c_str(), nullptr);
-            rows.back().hint = have ? "waifu2x / Real-ESRGAN upscales from textures/hd (tools/hd_textures.py); from the next room on"
-                                    : "None in textures/hd yet: --export-textures, then tools/hd_textures.py";
+            rows.back().hint = have ? optionText(app, "Uses upscaled replacements from textures/hd (waifu2x / Real-ESRGAN, tools/hd_textures.py). Changes apply from the next room.", "Использует увеличенные текстуры из textures/hd (waifu2x / Real-ESRGAN, tools/hd_textures.py). Изменения применяются со следующей локации.")
+                                    : optionText(app, "No replacements in textures/hd yet. Run --export-textures, then tools/hd_textures.py.", "В textures/hd пока нет замен. Выполните --export-textures, затем обработайте текстуры через tools/hd_textures.py.");
         }
-        onOff("HD Models", &v.hdModels, nullptr);
+        onOff(optionText(app, "HD Models", "Модели HD"), &v.hdModels, nullptr);
         rows.back().act = [&app](int i) {
             if (app.video.hdModels != (i == 0)) adjustVideo(app, 18, 1);
         };
         {
             const bool have = !app.modelsDir.empty() && SDL_GetPathInfo(app.modelsDir.c_str(), nullptr);
-            rows.back().hint = have ? "Replacement models (glTF) from models/hd, in place of the game's; from the next room on"
-                                    : "None in models/hd yet: --export-models, edit in Blender, save as models/hd/<name>.glb";
+            rows.back().hint = have ? optionText(app, "glTF models in models/hd replace the original models. Changes apply from the next room.", "Модели glTF из models/hd заменяют оригинальные. Изменения применяются со следующей локации.")
+                                    : optionText(app, "No models in models/hd yet. Run --export-models, edit in Blender, then save as models/hd/<name>.glb.", "В models/hd пока нет моделей. Выполните --export-models, отредактируйте модели в Blender и сохраните их как models/hd/<name>.glb.");
         }
-        static const char* const kSmooth[] = {"Off", "", "Smooth", "Smoother"};
-        value("Smooth Models", kSmooth[v.smoothModels], [&app](int dir) { adjustVideo(app, 13, dir ? dir : 1); });
-        rows.back().hint = v.smoothModels ? "Rounder models (4x / 9x triangles), hard edges kept; from the next room on"
-                                          : "Rounds the models' silhouettes - characters, monsters, props, stages (PN triangles)";
+        const char* const kSmooth[] = {optionText(app, "Off", "Выкл."), "", optionText(app, "Smooth", "Сглаженная"), optionText(app, "Smoother", "Усиленное сглаживание")};
+        value(optionText(app, "Smooth Models", "Сглаживание моделей"), kSmooth[v.smoothModels], [&app](int dir) { adjustVideo(app, 13, dir ? dir : 1); });
+        rows.back().hint = v.smoothModels ? optionText(app, "Rounds model geometry (4x / 9x triangles) while preserving hard edges. Applies from the next room.", "Сглаживает геометрию моделей (в 4 или 9 раз больше треугольников), сохраняя жёсткие грани. Применяется со следующей локации.")
+                                          : optionText(app, "Rounds the silhouettes of characters, monsters, props and stages using PN triangles.", "Скругляет силуэты персонажей, монстров, предметов и локаций с помощью PN-треугольников.");
         {
             const int most = std::max(app.renderer.maxAnisotropy(), 1);
-            value("Anisotropic Filtering", v.anisotropy > 1 && most > 1 ? std::to_string(std::min(v.anisotropy, most)) + "x" : std::string("Off"),
+            value(optionText(app, "Anisotropic Filtering", "Анизотропная фильтрация"), v.anisotropy > 1 && most > 1 ? std::to_string(std::min(v.anisotropy, most)) + "x" : std::string(optionText(app, "Off", "Выкл.")),
                   [&app](int dir) { adjustVideo(app, 16, dir ? dir : 1); });
             rows.back().enabled = most > 1;
-            rows.back().hint = most > 1 ? "Textures stay sharp on floors and walls seen at an angle" : "Not on this GPU";
+            rows.back().hint = most > 1 ? optionText(app, "Keeps floor and wall textures sharp when viewed at an angle.", "Сохраняет чёткость текстур пола и стен при взгляде под углом.") : optionText(app, "Not supported by this GPU.", "Не поддерживается этой видеокартой.");
         }
-        pair("Texture Filtering", "Smooth", "Sharp", v.sharpTextures ? 1 : 0, [&app](int i) {
+        pair(optionText(app, "Texture Filtering", "Фильтрация текстур"), optionText(app, "Smooth", "Сглаженная"), optionText(app, "Sharp", "Чёткая"), v.sharpTextures ? 1 : 0, [&app](int i) {
             if (app.video.sharpTextures != (i == 1)) adjustVideo(app, 17, 1);
         });
-        rows.back().hint = "Sharp: the world's textures magnified by the nearest texel (square pixels up close)";
+        rows.back().hint = optionText(app, "Sharp: magnified textures use the nearest texel, keeping pixels crisp.", "Режим «Чёткая»: при увеличении выбирается ближайший тексель, поэтому пиксели остаются чёткими.");
         break;
     }
     case 4: { // Cheats (the port's own): the user's - "Infinite HP and MP. Infinite Maxed out Money, xp multipliers. always advantage"
         App::Cheats& ch = app.cheats;
-        onOff("Infinite HP", &ch.hp, nullptr);
-        rows.back().hint = "The pair's HP never drops: the damage still shows, nobody falls";
-        onOff("Infinite MP", &ch.mp, nullptr);
-        rows.back().hint = "Genes cost no MP; the pair's MP stays full";
-        onOff("Max Oz", &ch.oz, nullptr);
-        rows.back().hint = "The Oz held at the most (9,999,999)";
+        onOff(optionText(app, "Infinite HP", "Бесконечное здоровье"), &ch.hp, nullptr);
+        rows.back().hint = optionText(app, "The pair's HP never drops: the damage still shows, nobody falls", "Здоровье пары не уменьшается: урон отображается, но никто из персонажей не выбывает.");
+        onOff(optionText(app, "Infinite MP", "Бесконечная магия"), &ch.mp, nullptr);
+        rows.back().hint = optionText(app, "Genes cost no MP; the pair's MP stays full", "Гены не расходуют MP: запас магии пары всегда полный.");
+        onOff(optionText(app, "Max Oz", "Максимум оз"), &ch.oz, nullptr);
+        rows.back().hint = optionText(app, "The Oz held at the most (9,999,999)", "Количество оз поддерживается на максимуме (9 999 999).");
         static const int kExp[] = {1, 2, 3, 5, 10};
-        value("EXP Multiplier", std::to_string(ch.exp) + "x", [&app](int dir) {
+        value(optionText(app, "EXP Multiplier", "Множитель опыта"), std::to_string(ch.exp) + "x", [&app](int dir) {
             int i = 0;
             for (int k = 0; k < 5; ++k)
                 if (kExp[k] == app.cheats.exp) i = k;
             app.cheats.exp = kExp[(i + (dir ? dir : 1) + 5) % 5];
             saveMix(app);
         });
-        rows.back().hint = "The EXP a won battle gives, multiplied";
-        onOff("Always First Strike", &ch.firstStrike, nullptr);
-        rows.back().hint = "Every random encounter starts with the party's first strike - never an ambush";
-        onOff("No Random Battles", &ch.noEncounters, nullptr);
-        rows.back().hint = "No random encounters on the field (the story's battles still come)";
-        onOff("One-Hit Kills", &ch.oneHit, nullptr);
-        rows.back().hint = "Any blow, gene or ability of the pair's that hurts an enemy fells it";
-        onOff("Full Break Gauge", &ch.fullBreak, nullptr);
-        rows.back().hint = "The Break gauge the pair's and full from the first turn - it never changes hands";
+        rows.back().hint = optionText(app, "The EXP a won battle gives, multiplied", "Умножает количество опыта, получаемого за победу в бою.");
+        onOff(optionText(app, "Always First Strike", "Всегда первый удар"), &ch.firstStrike, nullptr);
+        rows.back().hint = optionText(app, "Every random encounter starts with the party's first strike - never an ambush", "В случайных боях группа всегда атакует первой и не попадает в засаду.");
+        onOff(optionText(app, "No Random Battles", "Без случайных боёв"), &ch.noEncounters, nullptr);
+        rows.back().hint = optionText(app, "No random encounters on the field (the story's battles still come)", "Отключает случайные бои на локациях; сюжетные сражения продолжаются.");
+        onOff(optionText(app, "One-Hit Kills", "Убийство с одного удара"), &ch.oneHit, nullptr);
+        rows.back().hint = optionText(app, "Any blow, gene or ability of the pair's that hurts an enemy fells it", "Любая успешная атака, ген или умение персонажей побеждает врага одним ударом.");
+        onOff(optionText(app, "Full Break Gauge", "Полная шкала прорыва"), &ch.fullBreak, nullptr);
+        rows.back().hint = optionText(app, "The Break gauge the pair's and full from the first turn - it never changes hands", "Шкала прорыва пары заполнена с первого хода и не переходит к противнику.");
         break;
     }
     default: { // Graphics: what the Vulkan renderer adds
         const bool scalable = app.renderer.scalable();
         const std::string why = app.renderer.upscalerProblem(kUpscaler[std::clamp(v.upscaler, 0, kUpscalers - 1)]);
         auto unavailable = [&](OptRow& r) {
-            if (v.upscaler && !why.empty()) r.hint = std::string(kUpscalerName[v.upscaler]) + " is off here: " + why;
+            if (v.upscaler && !why.empty()) r.hint = std::string(kUpscalerName[v.upscaler]) + optionText(app, " is unavailable here: ", " недоступен в этой конфигурации: ") + localizeUpscalerProblem(app, why);
         };
-        value("Render Scale", scalable ? std::to_string(v.renderScale) + "%" : "100%", [&app](int dir) {
+        value(optionText(app, "Render Scale", "Масштаб рендеринга"), scalable ? std::to_string(v.renderScale) + "%" : "100%", [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 4, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
-        rows.back().hint = scalable ? "The frame at this size, then scaled to the window" : "Needs the Vulkan renderer";
+        rows.back().hint = scalable ? optionText(app, "Renders the scene at this resolution, then scales it to the window.", "Сцена сначала рендерится в этом разрешении, затем масштабируется до размера окна.") : optionText(app, "Requires the Vulkan renderer.", "Требуется рендерер Vulkan.");
         const std::string na = v.upscaler && !why.empty() ? " n/a" : ""; // chosen, but can't run here
-        value("Anti-aliasing", scalable ? aaName(v) + na : "Off", [&app](int dir) {
+        value(optionText(app, "Anti-aliasing", "Сглаживание"), scalable ? aaName(app, v) + na : optionText(app, "Off", "Выкл."), [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 8, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
-        rows.back().hint = !scalable ? "Needs the Vulkan renderer"
-                           : v.upscaler ? "Temporal: jittered frames accumulated (MSAA is off meanwhile)"
-                                        : "MSAA, or FSR Native AA / DLAA at full resolution";
+        rows.back().hint = !scalable ? optionText(app, "Requires the Vulkan renderer.", "Требуется рендерер Vulkan.")
+                           : v.upscaler ? optionText(app, "Temporal: frames with sub-pixel jitter are accumulated (MSAA is disabled while active).", "Временное сглаживание: накапливаются кадры со смещением субпиксельной выборки (на это время MSAA отключается).")
+                                        : optionText(app, "MSAA, FSR Native AA or DLAA at full resolution.", "MSAA, FSR Native AA или DLAA в исходном разрешении.");
         unavailable(rows.back());
-        value("Upscaler", scalable ? kUpscalerName[v.upscaler] + na : "Off", [&app](int dir) {
+        value(optionText(app, "Upscaler", "Масштабирование"), scalable ? (v.upscaler == 0 ? optionText(app, "Off", "Выкл.") : kUpscalerName[v.upscaler]) + na : optionText(app, "Off", "Выкл."), [&app](int dir) {
             if (app.renderer.scalable()) adjustVideo(app, 9, dir ? dir : 1);
         });
         rows.back().enabled = scalable;
-        rows.back().hint = "The scene renders smaller and is reconstructed; the menus stay sharp";
+        rows.back().hint = optionText(app, "The scene is rendered at a lower resolution and reconstructed; the menus remain sharp.", "Сцена рендерится в меньшем разрешении и восстанавливается до полного; меню остаются чёткими.");
         unavailable(rows.back());
-        value("Upscale Mode", v.upscaler == 2 && v.upscaleMode == 0 ? "DLAA" : kUpscaleModes[v.upscaleMode].name,
+        value(optionText(app, "Upscale Mode", "Режим масштабирования"), v.upscaler == 2 && v.upscaleMode == 0 ? "DLAA" : optionUpscaleModeName(app, v.upscaleMode),
               [&app](int dir) {
                   if (app.video.upscaler) adjustVideo(app, 10, dir ? dir : 1);
               });
@@ -4536,14 +4641,14 @@ std::vector<OptRow> optionRows(App& app, int page) {
         {
             const float ratio = kUpscaleModes[v.upscaleMode].ratio;
             char h[96];
-            SDL_snprintf(h, sizeof h, "The scene at %d%% of the frame per side", int(100.0f / ratio + 0.5f));
+            SDL_snprintf(h, sizeof h, optionText(app, "Scene resolution: %d%% of the output frame on each axis.", "Разрешение сцены: %d%% от итогового кадра по каждой оси."), int(100.0f / ratio + 0.5f));
             rows.back().hint = h;
         }
-        value("Sharpness", std::to_string(v.sharpness) + "%", [&app](int dir) {
+        value(optionText(app, "Sharpness", "Резкость"), std::to_string(v.sharpness) + "%", [&app](int dir) {
             if (app.video.upscaler == 1) adjustVideo(app, 11, dir ? dir : 1);
         });
         rows.back().enabled = scalable && v.upscaler == 1;
-        rows.back().hint = "FSR's sharpening pass (RCAS); DLSS has none";
+        rows.back().hint = optionText(app, "FSR sharpening pass (RCAS); DLSS does not use this setting.", "Этап повышения резкости FSR (RCAS); в DLSS этот параметр не используется.");
         break;
     }
     }
@@ -4689,12 +4794,12 @@ void drawOptions(App& app, float, float) {
     { // (the port's: a darker panel under the page's name, the rows and the help line - readable
       // over any scene - and the help's lines)
         const float shade[4] = {0, 0, 0, 0.5f * a}, fade[4] = {0, 0, 0, 0.2f * a};
-        const float nameW = m.textWidth(kOptionPageName[app.optionsPage], 16);
+        const float nameW = m.textWidth(optionPageName(app, app.optionsPage), 16);
         m.quad(228, 10, nameW + 16, 24, shade, shade);
         m.quad(12, kOptRowTop - 8, 250, optRowY(shown) + 42 - kOptRowTop, shade, shade);
         m.quad(262, kOptRowTop - 8, 238, optRowY(shown) + 42 - kOptRowTop, shade, fade);
     }
-    m.text(kOptionPageName[app.optionsPage], 236, 14, false, a, 16);
+    m.text(optionPageName(app, app.optionsPage), 236, 14, false, a, 16);
     for (int i = app.optionsScroll; i < n && i < app.optionsScroll + kOptVisible; ++i) {
         const OptRow& row = rows[size_t(i)];
         const float y = optRowY(i - app.optionsScroll), mid = y + 12;
@@ -4740,7 +4845,7 @@ void drawOptions(App& app, float, float) {
         for (size_t l = 0; l < lines.size(); ++l) m.text(lines[l], 20, optRowY(shown) + 2 + 13 * float(l), false, a, 11);
     }
     if (app.showHud) // (our key hints: off in a Release build, F3)
-        m.text("Up/Down  Left/Right  Enter  Q/E or PgUp/PgDn: page  Esc: back", 20, 372, false, a * 0.8f, 9);
+        m.text(optionText(app, "Up/Down  Left/Right  Enter  Q/E or PgUp/PgDn: page  Esc: back", "Вверх/Вниз — выбор  Влево/Вправо — изменить  Enter — выбрать  Q/E или PgUp/PgDn — страницы  Esc — назад"), 20, 372, false, a * 0.8f, 9);
     if (app.saveImport.active()) {
         r.setOrigin(0);
         r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH, 0, 0, 0, 0.75f);
@@ -4748,6 +4853,7 @@ void drawOptions(App& app, float, float) {
         m.picture(12, 0, 220, 1);
         std::string message = app.saveImport.state == vitaimport::Session::Picking
             ? "Choose the folder containing your decrypted Vita saves." : app.saveImport.message;
+        message = localizeSaveImportMessage(app, std::move(message));
         std::replace(message.begin(), message.end(), '\n', ' ');
         const auto lines = wrapText(m, message, 455, 13, 8);
         for (size_t l = 0; l < lines.size(); ++l) m.text(lines[l], 24, 234 + 16 * float(l), false, 1, 13);
