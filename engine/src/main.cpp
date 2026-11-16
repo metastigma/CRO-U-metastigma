@@ -4066,6 +4066,8 @@ int aaChoice(const App::Video& v) {
     return v.msaa >= 8 ? 3 : v.msaa >= 4 ? 2 : v.msaa >= 2 ? 1 : 0;
 }
 
+const char* optionText(const App& app, const char* english, const char* russian);
+
 std::string aaName(const App& app, const App::Video& v) {
     if (v.upscaler == 1) return v.upscaleMode == 0 ? "FSR Native AA" : "FSR 3.1";
     if (v.upscaler == 2) return v.upscaleMode == 0 ? "DLAA" : "DLSS";
