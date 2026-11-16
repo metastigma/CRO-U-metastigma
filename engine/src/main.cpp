@@ -385,6 +385,8 @@ struct App {
     crinput::HeldAction skipSources;       // independently held X / □ / pointer sources
     bool skipScene = false;                // derived from skipSources; fast-forward while any source is held
     int msgStyle = 2, msgLines = 2;        // the script's last Open: the message window's style and lines
+    struct MsgWin { int state = 0, t = 0; float alpha = 1; } msgWin;
+    bool frontFadeDrawn = false;
     int msgColour = -1;                    // the page's message's 0x16 colour (MessageInfo::colour), -1 none
     double playSeconds = 0;                // TOTAL PLAYTIME: time on the field and in battles
     // The save / load screen (__menuu_SaveLoad*): from the Camp menu (save) or the title's Start
@@ -871,6 +873,7 @@ struct App {
     bool treasureReroll = false;           // gac +0x364 bit 0x40000000: set by the World Select's choice
     bool showPlayer = true;                // P: the party leader walking on the field
     int playerChar = 0;                    // the leader's record (game.leaders[scenario]): its field model
+    int leaderMotion = -1, leaderLoopFrom = 0; // a script's Anim 0: leader's action while the field is held
     bool treasureBoxesHidden = false;      // Uty_TBox(0)
     bool messageSkip = false;              // Uty_Chg_MsgSkip
     int puzzleTeleports = 0;               // Uty_puzzle_teleport_cnt
@@ -2351,8 +2354,26 @@ bool pageTyped(const App& app) {
 
 // PrcMsg a frame: the next character (0x1a pauses it); a page ending the message with 0x14
 // closes by itself once out
+void stepMsgWin(App::MsgWin& w) {
+    switch (w.state) {
+    case 1: w.t = 4, w.state = 2; break;
+    case 2:
+        --w.t;
+        w.alpha = float(4 - w.t) / 4.0f;
+        if (w.t <= 0) w.state = 3, w.alpha = 1;
+        break;
+    case 4: w.t = 0, w.state = 5; break;
+    case 5:
+        w.alpha = float(4 - w.t) / 4.0f;
+        if (++w.t > 4) w.state = 6, w.alpha = 0;
+        break;
+    default: break;
+    }
+}
+void stepMsgWin(App& app) { stepMsgWin(app.msgWin); }
+
 void stepTyping(App& app) {
-    if (app.dialogue.empty()) return;
+    if (app.dialogue.empty() || app.msgWin.state == 1 || app.msgWin.state == 2) return;
     const cr::MessageInfo* info = pageInfo(app);
     const int total = pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]);
     if (!app.typeOn) app.dialogueTyped = total;
@@ -3205,6 +3226,10 @@ struct ViewerHost : cr::EventHost {
     bool tapped() override { const bool t = app.tapPending; app.tapPending = false; return t; }
     void showItemWindow(int item) override { app.game.setFlag(0, false); openItemWindow(app, item); }
     void playAnim(int id, int slot, int loopFrom, int loopTo) override {
+        if (id == 0) { // __EvtAnim npc 0 calls mdl_set_act_motion_loop on the leader (gac +0x1338)
+            app.leaderMotion = slot, app.leaderLoopFrom = loopFrom;
+            return;
+        }
         int action = slot; // a slot LoadAct filled, else the model's own action of that number
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
             if (auto it = a->second.find(slot); it != a->second.end()) action = it->second;
@@ -3680,8 +3705,18 @@ struct ViewerHost : cr::EventHost {
         ++app.tutoCalls;
     }
     void exclamationMark() override { app.exclamation = true; ++app.exclamationCalls; }
-    void openWindow(int style, int lines) override { app.msgStyle = style, app.msgLines = lines, app.heldPage = false; }
-    void closeWindow() override { app.heldPage = false; } // Close: a page that ended itself goes with its window
+    void openWindow(int style, int lines) override {
+        app.msgStyle = style, app.msgLines = lines, app.heldPage = false;
+        app.msgWin.state = style & 0x10 ? 3 : 1, app.msgWin.t = 0, app.msgWin.alpha = style & 0x10 ? 1.0f : 0.0f;
+        stepMsgWin(app); // PrcWin runs after PrcEvnt in the original's frame
+    }
+    void closeWindow() override {
+        app.heldPage = false;
+        app.msgWin.state = app.msgStyle & 0x110 ? 6 : 4, app.msgWin.t = 0;
+        if (app.msgWin.state == 6) app.msgWin.alpha = 0;
+        stepMsgWin(app);
+    }
+    bool windowClosed() override { return app.msgWin.state == 0 || app.msgWin.state == 6; }
     bool logoSeen() override { return app.logoSeen; }
     void setLogoSeen() override { app.logoSeen = true; }
     void padArt() override { app.padArt = true; }
@@ -3804,7 +3839,8 @@ struct ViewerHost : cr::EventHost {
 
 extern const float kWinMessagePanel[4];
 extern const float kWinSmallPanel[4];
-void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h);
+void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h, float alpha = 1.0f);
+void drawFrontFade(App& app);
 
 // Mixer: master scales the three channels; settings.ini is beside the desktop executable
 void applyMix(App& app) {
@@ -10083,6 +10119,21 @@ float screenFadeAlpha(const App& app) {
     const float t = std::min(1.0f, float(app.fadeT) / float(app.fadeFrames));
     return app.fadeFrom + (app.fadeTo - app.fadeFrom) * t;
 }
+void drawFrontFade(App& app) {
+    if (app.frontFadeDrawn) return;
+    app.frontFadeDrawn = true;
+    const float alpha = screenFadeAlpha(app);
+    if (alpha <= 0.001f) return;
+    cr::Renderer& r = app.renderer;
+    const int keepLayer = r.layer();
+    r.setOrigin(0);
+    r.setLayer(0);
+    r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH,
+                app.fadeGrey, app.fadeGrey, app.fadeGrey, alpha);
+    r.setOrigin(r.uiX());
+    r.setLayer(keepLayer);
+}
+
 float screenFadeBackAlpha(const App& app) {
     if (app.fadeBackFrames <= 0) return 0;
     const float t = std::min(1.0f, float(app.fadeBackT) / float(app.fadeBackFrames));
@@ -11175,6 +11226,7 @@ void stepEvents(App& app) {
     stepTexDisp(app);
     stepVitaLogo(app);
     stepTutoTex(app);
+    stepMsgWin(app);
     if (app.fadeT < app.fadeFrames) ++app.fadeT;
     if (app.fadeBackT < app.fadeBackFrames) ++app.fadeBackT;
     bool unlit = false;
@@ -11520,12 +11572,14 @@ void updatePlayer(App& app, float dt, float camYaw) {
     // block is held, slot 3 looped from frame 2 (Psychokinesis::onCheckTouch's
     // mdl_set_act_motion_loop(leader, 3, 2, 2))
     const bool hold = app.puzzle.pkState != 0 && app.player.actions.size() > 3;
-    const int want = hold ? 3 : std::min(int(app.walker.gait), int(app.player.actions.size()) - 1);
+    if (!fieldSceneRunning(app)) app.leaderMotion = -1; // FieldPCCtrl::operate resumes the stick's gait
+    const bool scripted = !hold && app.leaderMotion >= 0 && app.leaderMotion < int(app.player.actions.size());
+    const int want = hold ? 3 : scripted ? app.leaderMotion : std::min(int(app.walker.gait), int(app.player.actions.size()) - 1);
     if (want != app.player.action) {
         setPlayerAction(app.player, want);
         app.footPrev = 0;
     }
-    app.player.loopFrom = hold ? 2 : -1;
+    app.player.loopFrom = hold ? 2 : scripted && app.leaderLoopFrom > 0 ? app.leaderLoopFrom : -1;
     animate(app, app.player, dt);
     playFootsteps(app);
 }
@@ -11980,6 +12034,7 @@ constexpr float kMsgScale = 4.0f;
 // drawfont_text's name (its -8): about three quarters of the lines' size, as the reference shows it
 constexpr float kNameScale = 3.1f;
 void drawMessageLines(App& app, const std::vector<std::string>& page, float x, float y, float scale, bool centreAll) {
+    drawFrontFade(app); // the original's front fade is over portraits/window and under text
     cr::Renderer& r = app.renderer;
     bool any = centreAll;
     for (const std::string& l : page) any |= !l.empty() && l[0] == '\x01';
@@ -12038,6 +12093,9 @@ bool drawAndroidMessagePanel(App& app, float x, float y, float w, float h, float
 void drawMessageBox(App& app, const std::vector<std::string>& page, const std::string& speaker, bool next,
                     const std::string& pageNo) {
     cr::Renderer& r = app.renderer;
+    const int ws = app.msgWin.state;
+    const bool windowFading = ws == 1 || ws == 2 || ws == 4 || ws == 5;
+    const float windowAlpha = windowFading ? app.msgWin.alpha : 1.0f;
     auto ink = [&] { // a message's 0x16 colour over the window's own
         if (app.msgColour == 1) app.dialogueHud.setTint(0, 0, 0);
         else if (app.msgColour == 0) app.dialogueHud.setTint(1, 1, 1);
@@ -12071,7 +12129,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         if (style & 0x80 || style & 0x210) { // no window: the text alone (0x10: outlined in black)
             outline = (style & 0x10) != 0;
         } else if (style & 0x20) { // a black band across the bottom (tex2d y 252..352), the name on its edge
-            r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, 1);
+            r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, windowAlpha);
             if (!speaker.empty()) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
                 const float nx = 2.0f * 16 + 32, ny = 2.0f * 236 + 64 - 11; // (the larger box's offset)
                 app.nameHud.setTint(0, 0, 0); // (an outline, so it reads over a bright scene too)
@@ -12083,15 +12141,15 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             const float a = 0.75f, y1 = wy + 16, y2 = wy + 192;
             for (int k = 0; k < 8; ++k) { // the 2D path has no per-vertex colour: the edges in strips
                 const float t = (float(k) + 0.5f) / 8.0f;
-                r.fillRect(left, wy + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * t);
-                r.fillRect(left, y2 + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * (1 - t));
+                r.fillRect(left, wy + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * t * windowAlpha);
+                r.fillRect(left, y2 + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * (1 - t) * windowAlpha);
             }
-            r.fillRect(left, y1, width, y2 - y1, 0, 0, 0, a);
+            r.fillRect(left, y1, width, y2 - y1, 0, 0, 0, a * windowAlpha);
             if (app.language == 1) tx = 2.0f * 8 + 32;
         } else if (style & 0x40) { // the grey panel (960 x 192 at its rect)
-            drawWinPiece(app, kWinMessagePanel, 32, wy, 960, 192);
+            drawWinPiece(app, kWinMessagePanel, 32, wy, 960, 192, windowAlpha);
             if (!speaker.empty()) {
-                drawWinPiece(app, kWinSmallPanel, 32, wy - 36, 300, 40);
+                drawWinPiece(app, kWinSmallPanel, 32, wy - 36, 300, 40, windowAlpha);
                 app.nameHud.setTint(1, 1, 1);
                 app.nameHud.drawAt(r, {speaker}, 62, wy - 34, 1.9f, 0, 0, 0.0f);
             }
@@ -12114,8 +12172,8 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         // PutMsg's "next" mark: tex2d x 452, at y 328 - beside a tutorial's band 84 below its
         // top; none on the grey panel
         const float markY = style & 8 ? 2.0f * (rect[0] + 84) + 64 : H - 44;
-        if (next && !(style & 0x40) && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, markY, 46, 22);
-        if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50);
+        if (next && !(style & 0x40) && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, markY, 46, 22, windowAlpha);
+        if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50, windowAlpha);
         return;
     }
     (void)portraits;
@@ -12134,7 +12192,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         if (!((app.androidWindow || r.androidScreen()) &&
               drawAndroidMessagePanel(app, (W - stripW) / 2, stripY, stripW, stripBottom - stripY,
                                       32, 2.0f * (pr[0] + 16) + 64))) {
-            drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256);
+            drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256, windowAlpha);
         }
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
@@ -12147,7 +12205,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         // y + 32) - the screen's bottom 288; PutMsg: the name at tex2d (24, 222), the lines at x 36
         // from y + text y + 18, the "next" mark at y 328
         const short* pr = kRect[app.msgLines == 1];
-        app.renderer.drawQuadUV(app.cutinTex, left, 2.0f * (pr[0] + 32 - 32) + 128, width, 288, 0, 112, 512, 144);
+        app.renderer.drawQuadUV(app.cutinTex, left, 2.0f * (pr[0] + 32 - 32) + 128, width, 288, 0, 112, 512, 144, 1, 1, 1, windowAlpha);
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 222 + 64 - 25, kNameScale, 0, 0, 0.0f);
@@ -12156,7 +12214,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         textX = 2.0f * 36 + 32;
         textY = 2.0f * (pr[0] + pr[1] + 18) + 64;
     } else if (true) { // the parchment (style 2, and the default)
-        drawWinPiece(app, kWinParchment, left, H - 280, width, 280);
+        drawWinPiece(app, kWinParchment, left, H - 280, width, 280, windowAlpha);
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, left + 44, H - 285, kNameScale, 0, 0, 0.0f); // on the streak (piece y 14..52)
@@ -12164,9 +12222,9 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         app.dialogueHud.setTint(0.12f, 0.10f, 0.08f); // ink
         textY = H - 196;
     } else {
-        drawWinPiece(app, kWinMessagePanel, left, H - 170, width, 170);
+        drawWinPiece(app, kWinMessagePanel, left, H - 170, width, 170, windowAlpha);
         if (!speaker.empty()) {
-            drawWinPiece(app, kWinSmallPanel, left, H - 206, 300 - left, 40);
+            drawWinPiece(app, kWinSmallPanel, left, H - 206, 300 - left, 40, windowAlpha);
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, left + 30, H - 204, 1.9f, 0, 0, 0.0f);
         }
@@ -12179,12 +12237,12 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         app.pageHud.setTint(0.12f, 0.10f, 0.08f);
         app.pageHud.drawAt(r, {pageNo}, right - 140, H - 48, 1.5f, 0, 0, 0.0f);
     }
-    if (next && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, H - 44, 46, 22);
-    if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50); // a scene is playing
+    if (next && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, H - 44, 46, 22, windowAlpha);
+    if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50, windowAlpha); // a scene is playing
 }
 
-void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h) {
-    app.renderer.drawQuadUV(app.windowTex, x, y, w, h, piece[0], piece[1], piece[2], piece[3]);
+void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h, float alpha) {
+    app.renderer.drawQuadUV(app.windowTex, x, y, w, h, piece[0], piece[1], piece[2], piece[3], 1, 1, 1, alpha);
 }
 
 // ---- Battles (btl_main) ----
@@ -16194,15 +16252,17 @@ void drawFrame(App& app, bool present = true) {
         lines.push_back("Left/Right texture  Tab models");
     r.endScene(); // the scene is complete: upscaled to the frame (when on); the UI over it at full size
     if (app.mode == Mode::Maps) {
-        const float ab = screenFadeBackAlpha(app); // Screen op 58: back channel, behind 2D dialogue/UI
+        const float ab = screenFadeBackAlpha(app); // Screen op 58: back channel, behind portraits and dialogue
         if (ab > 0.001f) r.fillRect(0, 0, SW, H, app.fadeBackGrey, app.fadeBackGrey, app.fadeBackGrey, ab);
-        const float a = screenFadeAlpha(app); // Screen op 16: front channel
-        if (a > 0.001f) r.fillRect(0, 0, SW, H, app.fadeGrey, app.fadeGrey, app.fadeGrey, a);
         for (app.menuMask.clock += dt; app.menuMask.clock >= 1.0f / kFramesPerSecond; app.menuMask.clock -= 1.0f / kFramesPerSecond)
             stepMenuMask(app);
         drawMenuMask(app);
     }
+    app.frontFadeDrawn = false;
     r.setOrigin(r.uiX()); // the game's 2D from here on: its 1024 x 768 layout, centred
+    const bool messageNow = app.mode == Mode::Maps && (!app.dialogue.empty() ||
+        (app.choiceFlag >= 0 && !app.lastPage.empty()) ||
+        (app.choiceFlag < 0 && (app.heldPage || (app.msgWin.state >= 1 && app.msgWin.state <= 5))));
     if (app.mode == Mode::Maps) {
         if (!app.dialogue.empty()) { // 0x1c: 1 = the left speaks, 2 = the right; the other side dims
             const size_t pi = std::min(app.dialoguePage, app.dialogue.size() - 1);
@@ -16244,6 +16304,7 @@ void drawFrame(App& app, bool present = true) {
             }
         r.setLayer(0);
         if (app.itemWindowOpen) drawItemWindow(app);
+        if (!messageNow && !(app.mode == Mode::Maps && app.battle.active)) drawFrontFade(app);
     }
     if (fieldMenuWanted(app)) { // the corner button and its bar
         for (app.fieldMenu.clock += dt; app.fieldMenu.clock >= 1.0f / kFramesPerSecond; app.fieldMenu.clock -= 1.0f / kFramesPerSecond)
@@ -16268,7 +16329,10 @@ void drawFrame(App& app, bool present = true) {
         const bool phone = app.renderer.phoneLayout(); // 2.2.0: (448, 288), the iPhone screen's corner
         app.menu.piece((phone ? 448 : 464) + 16, (phone ? 288 : 320) + 32, 820 + 24.0f * float(app.nowLoading.frame % 8), 96, 24, 24, 1);
     }
-    if (app.mode == Mode::Maps && app.battle.active) drawBattleHud(app, W, H);
+    if (app.mode == Mode::Maps && app.battle.active) {
+        drawBattleHud(app, W, H);
+        if (!messageNow) drawFrontFade(app);
+    }
     if (app.mode == Mode::Maps && app.titleOpen && !app.optionsOpen && !app.saveScreen.open && !app.resumePrompt &&
         !app.charSelectOpen && !app.scc.open && !app.collection.open && !app.manualOpen)
         drawTitleMenu(app);
@@ -16329,7 +16393,10 @@ void drawFrame(App& app, bool present = true) {
                        app.dialogue.size() > 1 ? std::to_string(app.dialoguePage + 1) + "/" + std::to_string(app.dialogue.size())
                                                : std::string());
         app.textLimit = 1 << 30;
+    } else if (app.mode == Mode::Maps && !app.heldPage && app.choiceFlag < 0 && app.msgWin.state >= 1 && app.msgWin.state <= 5) {
+        drawMessageBox(app, {}, "", false, ""); // the window alone while its original fade runs
     }
+    drawFrontFade(app); // also handles a window with no text; idempotent with drawMessageLines
     // The menus over everything else (Options draws above them)
     if (app.charSelectOpen) {
         ++app.charSelectAnim;
@@ -21652,6 +21719,10 @@ void bootTitle(App& app) {
     app.fadeBackGrey = app.fadeBackFrom = app.fadeBackTo = 0;
     app.fadeBackT = app.fadeBackFrames = 0;
     app.fieldHidden = false;
+    app.msgWin = App::MsgWin();
+    app.leaderMotion = -1, app.leaderLoopFrom = 0;
+    app.msgWin = App::MsgWin();
+    app.leaderMotion = -1, app.leaderLoopFrom = 0;
     app.crystalCam = App::CrystalCam();
     unloadModel(app);
     if (app.battle.active) endBattle(app, false);

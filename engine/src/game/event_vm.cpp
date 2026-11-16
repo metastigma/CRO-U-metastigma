@@ -28,7 +28,7 @@ struct EventRunner::Vm {
     const std::vector<uint8_t>& d;
     GameState& gs;
     int eventNo, area, map;
-    enum class Wait { None, Frames, Fade, Message, Npc, Choice, Logo } wait = Wait::None;
+    enum class Wait { None, Frames, Fade, Message, Window, Npc, Choice, Logo } wait = Wait::None;
     int waitFrames = 0, waitNpc = -1;
     bool waitBackFade = false;
     FieldNpc self;             // NPC whose script runs: flag(-1) / flag(-2) name its flags
@@ -286,6 +286,10 @@ bool EventRunner::step(EventHost* host) {
             vm.wait = Vm::Wait::Frames, vm.waitFrames = 1;
             return true;
         case Vm::Wait::Message: if (host->messageOpen()) return true; break;
+        case Vm::Wait::Window:
+            if (!host->windowClosed()) return true;
+            vm.wait = Vm::Wait::Frames, vm.waitFrames = 1;
+            return true;
         case Vm::Wait::Npc: if (host->animBusy(vm.waitNpc)) return true; break;
         case Vm::Wait::Choice: if (host->choiceOpen()) return true; break;
         case Vm::Wait::Logo: if (host->vitaLogoBusy()) return true; break;
@@ -478,12 +482,14 @@ bool EventRunner::step(EventHost* host) {
             return yield(Vm::Wait::None);
         }
         // Presentation and object opcodes: skip their operands (sizes from the handlers)
-        case 3: case 4: { // Open: u8 the window's style (__EvtOpen: its rect and look), u16 its lines
+        case 3: case 4: { // Open: the window starts, one frame for PrcWin
             const int style = vm.u8(), lines = vm.u16();
-            if (host) host->openWindow(style, lines);
+            if (host) { host->openWindow(style, lines); vm.waitFrames = 1; return yield(Vm::Wait::Frames); }
             break;
         }
-        case 5: case 6: if (host) host->closeWindow(); break; // Close
+        case 5: case 6: // Close: the 5-frame fade then one more original frame
+            if (host) { host->closeWindow(); return yield(Vm::Wait::Window); }
+            break;
         case 7: case 8: { // Msg
             const int id = vm.u16();
             res.messages.push_back(id);

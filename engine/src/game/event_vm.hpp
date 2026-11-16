@@ -88,6 +88,7 @@ public:
     // one-line place)
     virtual void openWindow(int /*style*/, int /*lines*/) {}
     virtual void closeWindow() {}
+    virtual bool windowClosed() { return true; }
     virtual void toggleFieldHidden() {}                   // Screen with frames < 0 toggles field drawing
     virtual bool messageOpen() { return false; }         // the script waits while true
     virtual bool tapped() { return false; }              // action key pressed this frame (touch_up_chk)
