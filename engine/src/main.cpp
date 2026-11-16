@@ -3122,6 +3122,32 @@ void stepFieldScroll(App& app) {
 }
 
 // The scripts' shots on a painted field: jump (frames 0) or slide to offset (x, y)
+void stepMove(App& app, App::Move& move) {
+    ++move.t;
+    const float t = float(move.t) / float(move.frames);
+    const cr::Vec3 p{move.from.x + (move.to.x - move.from.x) * t,
+                     move.from.y + (move.to.y - move.from.y) * t,
+                     move.from.z + (move.to.z - move.from.z) * t};
+    const float yaw = move.yawFrom + (move.yawTo - move.yawFrom) * t;
+    setActor(app, move.npc, p, move.turn ? &yaw : nullptr, move.mode == 2);
+}
+void stepRescale(App& app, App::Rescale& scale) {
+    ++scale.t;
+    const float t = float(scale.t) / float(scale.frames);
+    if (cr::FieldNpc* n = findNpc(app, scale.npc)) {
+        for (int k = 0; k < 3; ++k) n->axes[k] = scale.from[k] + (scale.to[k] - scale.from[k]) * t;
+        for (auto& d : app.npcDraws) if (d.id == scale.npc) d.world = npcWorld(*n);
+    }
+}
+void stepScriptCam(App& app) {
+    if (app.cam.t >= app.cam.frames) return;
+    App::ScriptCam& c = app.cam;
+    ++c.t;
+    const float t = float(c.t) / float(c.frames);
+    c.eye = c.eyeFrom + (c.eyeTo - c.eyeFrom) * t;
+    c.target = c.tgtFrom + (c.tgtTo - c.target) * t;
+}
+
 void scriptFieldScroll(App& app, float x, float y, int frames) {
     App::FieldScroll& fs = app.scroll;
     if (frames <= 0) {
@@ -3139,6 +3165,7 @@ void scriptFieldScroll(App& app, float x, float y, int frames) {
     fs.t = 0;
     fs.frames = frames;
     fs.sliding = true;
+    stepFieldScroll(app); // first interpolation step belongs to the command frame
 }
 
 void openStaffRoll(App& app, int mode);
@@ -3235,6 +3262,8 @@ struct ViewerHost : cr::EventHost {
         r.npc = id, r.frames = frames;
         for (int k = 0; k < 3; ++k) r.from[k] = n->axes[0] >= 0 ? n->axes[k] : n->scale, r.to[k] = s[k];
         app.rescales.push_back(r);
+        stepRescale(app, app.rescales.back());
+        if (app.rescales.back().t >= app.rescales.back().frames) app.rescales.pop_back();
     }
     // Autoadj (npc_autoctl_set / prty_autoctl_set): a straight move to (x, its y, z) at `speed` a frame -
     // dist / speed frames, truncated (FPToFixed) - facing kept
@@ -3394,6 +3423,9 @@ struct ViewerHost : cr::EventHost {
         if (facing == Facing::Travel && std::fabs(m.to.x - m.from.x) + std::fabs(m.to.z - m.from.z) > 1e-4f) {
             const float yaw = std::atan2(m.to.x - m.from.x, m.to.z - m.from.z);
             setActor(app, id, m.from, &yaw, true);
+        } else if (facing == Facing::Snap) {
+            const float yaw = yawDeg * kDeg;
+            setActor(app, id, m.from, &yaw, true);
         } else if (facing == Facing::Yaw) {
             m.turn = true;
             m.yawFrom = yawNow;
@@ -3404,6 +3436,8 @@ struct ViewerHost : cr::EventHost {
         app.rescales.erase(std::remove_if(app.rescales.begin(), app.rescales.end(), [&](const App::Rescale& o) { return o.npc == id; }),
                            app.rescales.end());
         app.moves.push_back(m);
+        stepMove(app, app.moves.back());
+        if (app.moves.back().t >= app.moves.back().frames) app.moves.pop_back();
     }
     void tex2d(int slot, uint16_t f, int image, const int16_t (*extra)[3]) override {
         if (SDL_getenv("CR_TEXDISP_DEBUG")) std::printf("tex2d: slot %d flags %04x image %d\n", slot, f, image);
@@ -3510,7 +3544,7 @@ struct ViewerHost : cr::EventHost {
         app.npcWarps.push_back(false);
         buildNpcDraws(app); // retain a model read by a script even when its hidden bit is set
     }
-    void freeCamera(bool on) override { app.cam.free = on; if (!on) app.cam.set = false; }
+    void freeCamera(bool on) override { app.cam.free = on; if (!on) app.cam.t = app.cam.frames = 0; }
     void setCamera(const float* eye, const float* target, int frames) override {
         if (scrollingField(app)) { // a painted field: FrmAdjCam slides the painting to the shot's (x, y);
             // FrmSetCam on the field (flag word bit 64) takes the 3D path, which starts with SetScroll(0, 0)
@@ -3531,6 +3565,7 @@ struct ViewerHost : cr::EventHost {
         if (frames <= 0 || !c.set) { c.eye = e; c.target = t; c.frames = c.t = 0; }
         else { c.eyeFrom = c.eye; c.tgtFrom = c.target; c.eyeTo = e; c.tgtTo = t; c.frames = frames; c.t = 0; }
         c.set = true;
+        stepScriptCam(app);
     }
     void panCamera(const float* d, int frames) override {
         if (scrollingField(app)) { // FrmPanCam's 2D path: twice the deltas on the iPad
@@ -3553,6 +3588,7 @@ struct ViewerHost : cr::EventHost {
         c.eyeFrom = c.eye; c.tgtFrom = c.target;
         c.eyeTo = c.eye + dv; c.tgtTo = c.target + dv;
         c.frames = std::max(frames, 1); c.t = 0;
+        stepScriptCam(app);
     }
     void sceneEffectSet(int set) override { loadSceneEffectSet(app, set); }
     void quake(int amp, int from, int to, int frames) override { // EvtQuake: < 0 frames starts one held, else EndQuake
@@ -11115,39 +11151,20 @@ void stepEvents(App& app) {
     puzzle::step(app);
     puzzle::stepCrystalCam(app);
     puzzle::stepBanner(app);
-    // Script moves (npc_autoctl_prc): straight lines, y on the floor unless mode 2
+    // A script command has already taken its first step; continue on later event frames.
     for (size_t i = 0; i < app.moves.size();) {
-        App::Move& m = app.moves[i];
-        ++m.t;
-        const float t = float(m.t) / float(m.frames);
-        const cr::Vec3 p{m.from.x + (m.to.x - m.from.x) * t, m.from.y + (m.to.y - m.from.y) * t,
-                         m.from.z + (m.to.z - m.from.z) * t};
-        const float yaw = m.yawFrom + (m.yawTo - m.yawFrom) * t;
-        setActor(app, m.npc, p, m.turn ? &yaw : nullptr, m.mode == 2);
-        if (m.t >= m.frames) app.moves.erase(app.moves.begin() + long(i));
+        stepMove(app, app.moves[i]);
+        if (app.moves[i].t >= app.moves[i].frames) app.moves.erase(app.moves.begin() + long(i));
         else ++i;
     }
-    for (size_t i = 0; i < app.rescales.size();) { // (npc_autoctl_prc mode 3: the scale in a straight line)
-        App::Rescale& r = app.rescales[i];
-        ++r.t;
-        const float t = float(r.t) / float(r.frames);
-        if (cr::FieldNpc* n = findNpc(app, r.npc)) {
-            for (int k = 0; k < 3; ++k) n->axes[k] = r.from[k] + (r.to[k] - r.from[k]) * t;
-            for (auto& d : app.npcDraws)
-                if (d.id == r.npc) d.world = npcWorld(*n);
-        }
-        if (r.t >= r.frames) app.rescales.erase(app.rescales.begin() + long(i));
+    for (size_t i = 0; i < app.rescales.size();) {
+        stepRescale(app, app.rescales[i]);
+        if (app.rescales[i].t >= app.rescales[i].frames) app.rescales.erase(app.rescales.begin() + long(i));
         else ++i;
     }
     stepFieldScroll(app);
     stepSceneEffects(app);
-    if (app.cam.t < app.cam.frames) { // camera moves are straight lines
-        App::ScriptCam& c = app.cam;
-        ++c.t;
-        const float t = float(c.t) / float(c.frames);
-        c.eye = c.eyeFrom + (c.eyeTo - c.eyeFrom) * t;
-        c.target = c.tgtFrom + (c.tgtTo - c.tgtFrom) * t;
-    }
+    stepScriptCam(app);
     for (App::Portrait& p : app.portraits) // Tex2d slides and fades (tex2d_img_prc)
     {
         if (p.t < p.frames) {
@@ -15784,17 +15801,40 @@ void drawCheckerboard(cr::Renderer& r) {
 // centred on the 1024 x 768 screen, moved by the quake) with aspect viewW / viewH in whole
 // numbers and the stage's FOV: a 1024 view is a 2048 x 2048 frame of which the screen shows the
 // middle. That frustum, mapped onto the whole screen (wider screens see past its sides)
+void fieldDepthRange(const App& app, const cr::Vec3& eye, const cr::Vec3& target, float& zNear, float& zFar) {
+    const int map = app.mapNumber;
+    auto in = [map](std::initializer_list<int> l) { return std::find(l.begin(), l.end(), map) != l.end(); };
+    float off = 10;
+    if (eye.y > 200) off = eye.y / 10;
+    else {
+        const cr::Vec3 d = eye - target;
+        const float dist = std::sqrt(cr::dot(d, d));
+        if (dist > 100 && std::fabs(eye.y - target.y) > 25 && !in({46, 130, 86, 87})) off = dist / 10;
+    }
+    if (in({19, 28, 65, 97, 102, 138})) off = 0;
+    if (in({13, 29, 47, 66, 71, 91, 152, 174, 185, 191, 197, 208, 214})) off = 0;
+    if (in({15, 22, 34})) off = eye.y * 0.5f;
+    if (map == 83) off = 100;
+    const bool wide = app.game.flag(0x1003);
+    zNear = 1 + (wide ? 0 : off);
+    zFar = wide ? 7000.0f : map == 83 ? 4000.0f : 2000.0f;
+    if (zNear >= zFar * 0.5f) zNear = zFar * 0.5f;
+}
+
 cr::Mat4 scriptCameraView(const App& app, const cr::Vec3& eye, const cr::Vec3& target) {
     const cr::StageCamera& sc = app.stageCam;
     const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
-    const float w = fieldViewW(app), h = fieldViewH(app);
+    const float fillZoom = fieldFillZoom(app);
+    const float w = fieldViewW(app) * fillZoom, h = fieldViewH(app) * fillZoom;
     const float qx = std::trunc(app.fieldQuake.off[0]), qy = std::trunc(app.fieldQuake.off[1]);
     const float rx = app.renderer.uiX() + (cr::Renderer::kLogicalW - w) / 2 + qx, ry = (H - h) / 2 + qy;
     cr::Mat4 toScreen;
     toScreen.m[0] = w / SW, toScreen.m[5] = h / H;
     toScreen.m[12] = (2 * rx + w) / SW - 1, toScreen.m[13] = 1 - (2 * ry + h) / H;
     const float whole = float(std::max(1, sc.viewWidth / std::max(1, sc.viewHeight)));
-    return toScreen * cr::Mat4::perspective(sc.fovDegrees * 3.14159265f / 180.0f, whole, 1.0f, 4000.0f) *
+    float zNear, zFar;
+    fieldDepthRange(app, eye, target, zNear, zFar);
+    return toScreen * cr::Mat4::perspective(sc.fovDegrees * 3.14159265f / 180.0f, whole, zNear, zFar) *
            cr::Mat4::lookAt(eye, target, {0, 1, 0});
 }
 
@@ -15930,7 +15970,7 @@ void drawFrame(App& app, bool present = true) {
         // screen's height (wider screens get bars at the sides) or its width (top and bottom cut).
         r.fillRect(0, 0, SW, H, 0, 0, 0, 1);
         // A room without a painting is fully 3D: there a script's free camera films the whole screen
-        const bool scriptCam = app.cam.free && app.cam.set && !app.background.id;
+        const bool scriptCam = app.cam.set && !app.background.id;
         cr::Vec3 eye, tgt;
         cr::Mat4 mvp;
         const bool have3D = app.haveStageCam || scriptCam;
@@ -15942,10 +15982,12 @@ void drawFrame(App& app, bool present = true) {
             tgt = scriptCam ? camTarget : cr::Vec3{sc.target[0], sc.target[1], sc.target[2]};
             const float aspect = scriptCam ? SW / H : sc.viewHeight > 0 ? float(sc.viewWidth) / float(sc.viewHeight) : 1.0f;
             const float fov = app.haveStageCam ? sc.fovDegrees : 60.0f;
-            mvp = cr::Mat4::perspective(fov * 3.14159265f / 180.0f, aspect, scriptCam ? 1.0f : 10.0f, 4000.0f) *
+            float zNear = 1.0f, zFar = 4000.0f;
+            fieldDepthRange(app, eye, tgt, zNear, zFar);
+            mvp = cr::Mat4::perspective(fov * 3.14159265f / 180.0f, aspect, zNear, zFar) *
                   cr::Mat4::lookAt(eye, tgt, {0, 1, 0});
             if (scriptCam && app.haveStageCam && sc.viewWidth > 0 && sc.viewHeight > 0) mvp = scriptCameraView(app, eye, tgt);
-            r.setCamera(scriptCam ? 1.0f : 10.0f, 4000.0f, fov * 3.14159265f / 180.0f);
+            r.setCamera(zNear, zFar, fov * 3.14159265f / 180.0f);
             animateModel(app, dt);
             animateNpcs(app, dt);
             updatePlayer(app, dt, std::atan2(eye.x - tgt.x, eye.z - tgt.z));
@@ -16014,6 +16056,7 @@ void drawFrame(App& app, bool present = true) {
             if (scriptCam) drawPrompt(app, mvp, 0, 0, SW, H);
             else drawPrompt(app, mvp, vx, vy, vw, vh);
         }
+        r.setOrigin(0); // foreground shares the background's stage-space origin
         if (app.foreground.id) drawLayer(app.foreground);
         r.setLayer(0);
         drawSceneEffects(app);
