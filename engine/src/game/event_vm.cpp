@@ -523,8 +523,13 @@ bool EventRunner::step(EventHost* host) {
             float v[6];
             if (!host || !vm.scene(s) || !vm.actor(s, vm.record(s, frame), n, v)) break;
             if (op == 52) {
-                host->moveNpc(n, v, v[4], last == 1 && s.words == 6 ? EventHost::Facing::Yaw : EventHost::Facing::Keep,
-                              frames, last == 2 ? 2 : last == 1 ? 1 : 0);
+                // Mode 0 snaps to the record angle, mode 2 moves in Y without turning;
+                // script modes 10 / 20 turn to the record angle over the move.
+                const bool hasAngles = s.words == 6;
+                if (last == 2) host->moveNpc(n, v, v[4], EventHost::Facing::Keep, frames, 2);
+                else host->moveNpc(n, v, hasAngles ? v[4] : 0.0f,
+                                   !hasAngles ? EventHost::Facing::Keep : last == 0 ? EventHost::Facing::Snap : EventHost::Facing::Yaw,
+                                   frames, 0);
             } else {
                 float yaw; const auto f = facingFor(last, yaw);
                 host->moveNpc(n, v, yaw, f, frames, 0);
@@ -681,11 +686,11 @@ bool EventRunner::step(EventHost* host) {
             if (host) host->fadeNpc(n == 0 ? 0 : vm.resolve(n), from / 255.0f, to / 255.0f, frames);
             break;
         }
-        case 49: { // Anim2: u16 npc, u16 slot, s16 loop from, s16 loop to, then 4 bytes
+        case 49: { // Anim2: npc, slot, loop from/to, start frame, blend frames
             const int n = vm.resolve(vm.u16()), slot = vm.u16();
             const int from = int16_t(vm.u16()), to = int16_t(vm.u16());
-            vm.skip(4);
-            if (host) host->playAnim(n, slot, from, to);
+            const int start = int16_t(vm.u16()), blend = int16_t(vm.u16());
+            if (host) host->playAnim2(n, slot, from, to, start, blend);
             break;
         }
         case 60: { // Joint (Omega: the table's 61 entries put it here, AAAA after it)

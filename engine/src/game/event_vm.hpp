@@ -94,6 +94,8 @@ public:
     // Anim npc, slot, a, b (mdl_set_act_motion_loop): play the action in `slot`, then loop frames
     // a..b; a = -1 plays it once and holds the end, a = b = 0 loops it whole
     virtual void playAnim(int /*npc*/, int /*slot*/, int /*loopFrom*/ = 0, int /*loopTo*/ = 0) {}
+    // Anim2 restarts at a specific frame and blends the previous pose under it for the given frame count.
+    virtual void playAnim2(int /*npc*/, int /*slot*/, int /*loopFrom*/, int /*loopTo*/, int /*start*/, int /*blend*/) {}
     // LoadAct npc, action, slot (read_act_set): kActionFile[action] into the actor's slot; UnloadAct frees it
     virtual void loadAction(int /*npc*/, int /*action*/, int /*slot*/) {}
     virtual void unloadAction(int /*npc*/, int /*slot*/) {}
@@ -113,7 +115,7 @@ public:
     // Cutscene staging (EvtFrmSetc / FrmSetc2 / FrmAdjc / FrmAdjc2 / SetDir); npc 0 is the party
     // leader. Positions are world units; the y is snapped to the floor unless `mode` is 2.
     // Facing: Yaw turns to `yawDegrees`, Keep leaves it, Travel faces the way it moves.
-    enum class Facing { Yaw, Keep, Travel };
+    enum class Facing { Yaw, Keep, Travel, Snap };
     virtual void placeNpc(int /*npc*/, const float* /*pos*/, float /*yawDegrees*/, Facing /*facing*/) {}
     // Moves in a straight line over `frames` (npc_autoctl_set_fream); mode 0 position, 1 position
     // and turn, 2 position including y. Wait 0xFFFD waits for it (animBusy).

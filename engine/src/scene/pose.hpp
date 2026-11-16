@@ -24,6 +24,26 @@ void blendLocalPoses(const std::vector<NodePose>& from, const std::vector<NodePo
                      std::vector<NodePose>& out);
 void computeWorldFromLocalPoses(const Skeleton& skel, const std::vector<NodePose>& poses, std::vector<Mat4>& world);
 
+// The original's _mdl_set_act_motion_loop cross-fade and Anim2's explicit restart/blend.
+struct MotionBlend {
+    static constexpr float kFrames = 2;
+    int lastAction = -1;
+    float lastTime = 0;
+    int from = -1;
+    float fromTime = 0;
+    float since = kFrames;
+    float length = kFrames;
+    float holdTime = 0;
+    bool changed = false;
+    bool step(int action, float& time, float frames, const std::vector<Action>& actions);
+    void restart(int action, float start, float frames, const std::vector<Action>& actions);
+    const Action* under(const std::vector<Action>& actions) const;
+    float weight() const;
+    void reset();
+};
+void computeBlendedWorld(const Skeleton& skel, const Action* from, float fromTime, const Action* to, float toTime,
+                         float toWeight, std::vector<Mat4>& world);
+
 // World matrices of every skeleton node for `action` at `time` (frames).
 // A null action gives the rest pose; an action animates its first segments' nodes.
 void computeWorld(const Skeleton& skel, const Action* action, float time, std::vector<Mat4>& world);
