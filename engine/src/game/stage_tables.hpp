@@ -26,6 +26,10 @@ extern const char* const kNpcModelFile[kNumNpcModels]; // NPC table model index 
 // Tex2d / read_img_set image number -> texture base name: chk_hd_name loads <base>_ipad.mct on an
 // iPad when there is one, else <base>_hd.mct, else the name itself
 extern const char* const kTex2dImage[kNumTex2dImages];
+// _stgalphaname: stage-record +0x40 -> the room's alpha/occlusion model; -1 means none.
+constexpr int kNumStageAlphaModels = 32;
+extern const char* const kStageAlphaModel[kNumStageAlphaModels];
+
 extern const char* const kActionFile[kNumActionFiles];  // LoadAct action number -> .mca file
 // Battles: encounter stage number -> stage model; monster model number -> battle model package
 extern const char* const kBattleStageFile[kNumBattleStages];
