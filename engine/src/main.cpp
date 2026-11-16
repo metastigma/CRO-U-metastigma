@@ -122,7 +122,8 @@ struct Effect {
     bool loop = false;
     float scale = 1, yaw = 0;
     float pitch = 0, roll = 0; // FrmPlayEff2: the record's X and Z angles (radians)
-    bool faceCamera = false;   // Omega sets mdl +0xfc7 only for effects started while a battle is active
+    bool faceCamera = false;
+    bool keepDepthWrite = false; // FrmPlayEff2 preserves the material's depth-write setting
     int handle = 0;  // for stopping it
     int key = 0;     // FrmPlayEff's (effect + 1) x (actor + 1)
 };
@@ -769,6 +770,7 @@ struct App {
         float alpha = 1, alphaFrom = 1, alphaTo = 1; // NpcFade / mdl_fadein / mdl_fadeout
         int fadeFrames = 0, fadeLeft = 0;
         bool faded = false;  // mdl_set_alpha: alpha-blended for good, even when the fade ends at 255
+        cr::MotionBlend blend; // action transition state for Anim / Anim2
         bool lit = false;    // a fade temporarily puts a hidden model back into mdl_put
     };
     std::vector<NpcDraw> npcDraws;         // this map's visible NPCs
@@ -3204,10 +3206,28 @@ struct ViewerHost : cr::EventHost {
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
             if (auto it = a->second.find(slot); it != a->second.end()) action = it->second;
         for (auto* d : npc(id)) {
-            if (d->action != action) { d->action = action; d->time = 0; } // the same action keeps running
+            if (d->action != action) {
+                const LoadedModel& lm = app.npcModels[d->model];
+                d->action = action, d->time = 0;
+                d->blend.restart(action, 0.0f, cr::MotionBlend::kFrames, lm.actions);
+            }
             d->once = loopFrom < 0;
             d->loopFrom = loopFrom;
             d->loopTo = loopTo;
+        }
+    }
+    void playAnim2(int id, int slot, int loopFrom, int loopTo, int start, int blend) override {
+        int action = slot;
+        if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
+            if (auto it = a->second.find(slot); it != a->second.end()) action = it->second;
+        for (auto* d : npc(id)) {
+            const LoadedModel& lm = app.npcModels[d->model];
+            d->action = action;
+            d->time = float(std::max(start, 0));
+            d->once = loopFrom < 0;
+            d->loopFrom = loopFrom;
+            d->loopTo = loopTo;
+            d->blend.restart(action, d->time, float(std::max(blend, 0)), lm.actions);
         }
     }
     void loadAction(int id, int action, int slot) override {
@@ -3666,21 +3686,26 @@ struct ViewerHost : cr::EventHost {
         ++app.frameEffectCalls;
         cr::Vec3 p;
         if (SDL_getenv("CR_OP_TRACE"))
-            std::printf("  frame effect %d actor %d%s scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\n", effect, actor, v ? "" : " (no record)", scale,
-                        angled ? " angled" : "", v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f, v ? v[3] : 0.0f, v ? v[4] : 0.0f,
-                        v ? v[5] : 0.0f);
-        float yaw = 0, pitch = 0, roll = 0;
-        if (!actorPos(app, actor, p)) { // not an NPC: where the scene's record has it
+            std::printf("  frame effect %d actor %d%s scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\\n",
+                        effect, actor, v ? "" : " (no record)", scale, angled ? " angled" : "",
+                        v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f,
+                        v ? v[3] : 0.0f, v ? v[4] : 0.0f, v ? v[5] : 0.0f);
+        float pitch = 0, yaw = 0, roll = 0;
+        bool withAngles = false, atRecord = false;
+        if (!actorPos(app, actor, p)) {
+            atRecord = true;
             if (!v) return;
             p = {v[0], v[1], v[2]};
-            // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too (the field's effects
-            // don't turn to the camera in Omega: drawEffects)
-            if (angled) yaw = v[4] * kDeg, pitch = v[3] * kDeg, roll = v[5] * kDeg;
+            if (angled) pitch = v[3] * kDeg, yaw = v[4] * kDeg, roll = v[5] * kDeg, withAngles = true;
         }
-        const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, yaw);
+        const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, 0.0f);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.pitch = pitch, fx.yaw = yaw, fx.roll = roll, fx.faceCamera = app.battle.active;
+                if (fx.handle == h) {
+                    fx.pitch = pitch, fx.yaw = yaw, fx.roll = roll;
+                    fx.faceCamera = app.battle.active || (atRecord && !angled);
+                    fx.keepDepthWrite = withAngles;
+                }
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
@@ -11745,6 +11770,7 @@ void animateNpcs(App& app, float dt) {
         }
         if (d.action < 0 || d.action >= int(lm.actions.size())) continue;
         const float dur = lm.actions[d.action].duration;
+        if (d.blend.step(d.action, d.time, dt * kFramesPerSecond, lm.actions)) continue;
         d.time += dt * kFramesPerSecond;
         if (const char* tr = SDL_getenv("CR_NPC_TRACE"); tr && (SDL_atoi(tr) < 0 || d.id == SDL_atoi(tr))) // (debugging: an NPC's animation clock; -1 every one)
             std::printf("npc %d action %d time %.3f dur %.1f once %d loop %d..%d\n", d.id, d.action, d.time, dur, int(d.once), d.loopFrom, d.loopTo);
@@ -11764,6 +11790,23 @@ void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::M
 const cr::Action* effectMaterialAction(const LoadedModel& lm, const cr::Material* mt);
 bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2], int unit = 0);
 const cr::Texture* secondUnit(const LoadedModel& lm, size_t mesh, const cr::Material* mt, float time, float uv2[4]);
+
+// A cutscene NPC pose blends the previous action under the current one while MotionBlend is active.
+void poseLocal(const cr::Skeleton& skeleton, const std::vector<cr::Action>& actions, const cr::Action* action, float time,
+               const cr::MotionBlend& blend, std::vector<cr::NodePose>& out) {
+    if (const cr::Action* under = blend.under(actions)) {
+        std::vector<cr::NodePose> from, to;
+        cr::computeLocalPoses(skeleton, under, blend.fromTime, from);
+        cr::computeLocalPoses(skeleton, action, time, to);
+        cr::blendLocalPoses(from, to, blend.weight(), out);
+    } else cr::computeLocalPoses(skeleton, action, time, out);
+}
+void poseWorld(const cr::Skeleton& skeleton, const std::vector<cr::Action>& actions, const cr::Action* action, float time,
+               const cr::MotionBlend& blend, std::vector<cr::Mat4>& world) {
+    if (const cr::Action* under = blend.under(actions))
+        cr::computeBlendedWorld(skeleton, under, blend.fromTime, action, time, blend.weight(), world);
+    else cr::computeWorld(skeleton, action, time, world);
+}
 
 // c111.bin is one skinned mesh: node 2 owns the platform, while node 3 owns
 // the crystal. Apply the extra yaw to node 3 so the platform remains stationary.
@@ -11793,10 +11836,10 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
             const cr::Action* act = d.action >= 0 && d.action < int(lm.actions.size()) ? &lm.actions[size_t(d.action)] : nullptr;
             if (posed) {
                 if (fieldWarpCrystal && m.skeleton.nodes.size() > 3 && m.skeleton.nodes[3].parent == 2) {
-                    cr::computeLocalPoses(m.skeleton, act, d.time, lm.localPose);
+                    poseLocal(m.skeleton, lm.actions, act, d.time, d.blend, lm.localPose);
                     spinCrystalBone(lm.localPose[3], app.crystalSpin);
                     cr::computeWorldFromLocalPoses(m.skeleton, lm.localPose, lm.world);
-                } else cr::computeWorld(m.skeleton, act, d.time, lm.world);
+                } else poseWorld(m.skeleton, lm.actions, act, d.time, d.blend, lm.world);
             }
             for (size_t i = 0; i < m.meshes.size(); ++i) {
                 float shift[2] = {0, 0}, scale[2] = {1, 1};
@@ -12763,7 +12806,7 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp, 
                         for (int k = 0; k < 4; ++k) mat.diffuse[k] = std::clamp(v[k], 0.0f, 1.0f);
                 }
             if (mat.diffuse[3] <= 0.004f && mat.blended()) continue;
-            mat.properties &= ~16u; // no depth writes
+            if (!e.keepDepthWrite) mat.properties &= ~16u; // FrmPlayEff2 keeps the source material's depth-write bit
             const cr::GpuMesh& mesh = lm.meshes[i];
             const cr::Texture* tex = mesh.texture >= 0 && mesh.texture < int(lm.textures.size()) ? &lm.textures[size_t(mesh.texture)] : nullptr;
             float uv2[4];
@@ -16056,6 +16099,7 @@ void drawFrame(App& app, bool present = true) {
             if (scriptCam) drawPrompt(app, mvp, 0, 0, SW, H);
             else drawPrompt(app, mvp, vx, vy, vw, vh);
         }
+        r.setOrigin(0); // foreground shares the background's stage-space origin
         r.setOrigin(0); // foreground shares the background's stage-space origin
         if (app.foreground.id) drawLayer(app.foreground);
         r.setLayer(0);
