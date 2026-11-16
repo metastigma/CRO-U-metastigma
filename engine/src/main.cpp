@@ -3147,7 +3147,7 @@ void stepScriptCam(App& app) {
     ++c.t;
     const float t = float(c.t) / float(c.frames);
     c.eye = c.eyeFrom + (c.eyeTo - c.eyeFrom) * t;
-    c.target = c.tgtFrom + (c.tgtTo - c.target) * t;
+    c.target = c.tgtFrom + (c.tgtTo - c.tgtFrom) * t;
 }
 
 void scriptFieldScroll(App& app, float x, float y, int frames) {
