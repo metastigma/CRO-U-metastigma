@@ -3686,7 +3686,7 @@ struct ViewerHost : cr::EventHost {
         ++app.frameEffectCalls;
         cr::Vec3 p;
         if (SDL_getenv("CR_OP_TRACE"))
-            std::printf("  frame effect %d actor %d%s scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\\n",
+            std::printf("  frame effect %d actor %d%s scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\n",
                         effect, actor, v ? "" : " (no record)", scale, angled ? " angled" : "",
                         v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f,
                         v ? v[3] : 0.0f, v ? v[4] : 0.0f, v ? v[5] : 0.0f);
@@ -15869,8 +15869,10 @@ cr::Mat4 scriptCameraView(const App& app, const cr::Vec3& eye, const cr::Vec3& t
     const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
     const float fillZoom = fieldFillZoom(app);
     const float w = fieldViewW(app) * fillZoom, h = fieldViewH(app) * fillZoom;
-    const float qx = std::trunc(app.fieldQuake.off[0]), qy = std::trunc(app.fieldQuake.off[1]);
-    const float rx = app.renderer.uiX() + (cr::Renderer::kLogicalW - w) / 2 + qx, ry = (H - h) / 2 + qy;
+    const float cx0 = (cr::Renderer::kLogicalW - w) / 2, cy0 = (H - h) / 2;
+    const float rx = app.renderer.uiX() + cx0 +
+                     (std::trunc(cx0 + app.fieldQuake.off[0]) - std::trunc(cx0));
+    const float ry = cy0 + (std::trunc(cy0 + app.fieldQuake.off[1]) - std::trunc(cy0));
     cr::Mat4 toScreen;
     toScreen.m[0] = w / SW, toScreen.m[5] = h / H;
     toScreen.m[12] = (2 * rx + w) / SW - 1, toScreen.m[13] = 1 - (2 * ry + h) / H;
