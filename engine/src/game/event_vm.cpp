@@ -30,6 +30,7 @@ struct EventRunner::Vm {
     int eventNo, area, map;
     enum class Wait { None, Frames, Fade, Message, Npc, Choice, Logo } wait = Wait::None;
     int waitFrames = 0, waitNpc = -1;
+    bool waitBackFade = false;
     FieldNpc self;             // NPC whose script runs: flag(-1) / flag(-2) name its flags
     size_t pc = 0;
     std::vector<size_t> calls; // Gosub return addresses (64 deep in the original)
@@ -280,7 +281,10 @@ bool EventRunner::step(EventHost* host) {
     if (host) {
         switch (vm.wait) {
         case Vm::Wait::Frames: if (--vm.waitFrames > 0) return true; break;
-        case Vm::Wait::Fade: if (host->screenFading()) return true; break;
+        case Vm::Wait::Fade:
+            if (host->screenFading(vm.waitBackFade)) return true;
+            vm.wait = Vm::Wait::Frames, vm.waitFrames = 1;
+            return true;
         case Vm::Wait::Message: if (host->messageOpen()) return true; break;
         case Vm::Wait::Npc: if (host->animBusy(vm.waitNpc)) return true; break;
         case Vm::Wait::Choice: if (host->choiceOpen()) return true; break;
@@ -430,9 +434,10 @@ bool EventRunner::step(EventHost* host) {
                 vm.waitNpc = vm.resolve(vm.u16());
                 if (host) return yield(Vm::Wait::Npc);
             } else if (w == 0xFFFF || w == 0xFFFC) {
+                vm.waitBackFade = w == 0xFFFC;
                 if (host) return yield(Vm::Wait::Fade);
-            } else if (w != 0xFFFE && w > 0 && host) {
-                vm.waitFrames = w;
+            } else if (host) {
+                vm.waitFrames = w == 0xFFFE || w == 0 ? 1 : w;
                 return yield(Vm::Wait::Frames);
             }
             break;
@@ -576,8 +581,10 @@ bool EventRunner::step(EventHost* host) {
         case 16: case 58: { // Screen: u16 ?, u16 colour, u8 from alpha, u8 to alpha, u8 frames
             vm.u16();
             const uint16_t colour = vm.u16();
-            const uint8_t from = vm.u8(), to = vm.u8(), frames = vm.u8();
-            if (host) host->screenFade(float(colour & 255) / 255.0f, from / 255.0f, to / 255.0f, frames);
+            const uint8_t from = vm.u8(), to = vm.u8();
+            const int8_t frames = int8_t(vm.u8());
+            if (host && frames < 0) host->toggleFieldHidden();
+            else if (host) host->screenFade(float(colour & 255) / 255.0f, from / 255.0f, to / 255.0f, frames, op == 58);
             break;
         }
         case 21: { // Util n: the game's menus (0 title, 1 world, 2 shop, 3 yes/no, 4 start, 5/6 save, 7 credits, 8 last battle)

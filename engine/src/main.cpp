@@ -540,6 +540,9 @@ struct App {
         int from = 0, to = 0, t = 0, ms = 1; // the fade: from + (to - from) x t / ms, t + 50 a frame
         float clock = 0;
     } menuMask;
+    float fadeBackGrey = 0, fadeBackFrom = 0, fadeBackTo = 0; // Screen's back channel (op 58)
+    int fadeBackFrames = 0, fadeBackT = 0;
+    bool fieldHidden = false; // Screen with a negative signed frame count hides the field, not scene effects
     int fadeFrames = 0, fadeT = 0;
     cr::SystemText systemText;             // sys.evt: messages >= 51000
     std::vector<std::vector<std::string>> dialogue; // pages of the messages the last event showed
@@ -3255,6 +3258,11 @@ struct ViewerHost : cr::EventHost {
     }
     void unloadAction(int id, int slot) override {
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end()) a->second.erase(slot);
+        for (auto* d : npc(id)) {
+            if (d->action == 0) continue;
+            d->action = 0, d->time = 0, d->once = false, d->loopFrom = d->loopTo = 0;
+            d->blend.restart(0, 0, 0, app.npcModels[d->model].actions);
+        }
     }
     // Wait 0xFFFD (npc_autoctl_chk): only a scripted move keeps it waiting, not an animation
     bool animBusy(int id) override {
@@ -3328,10 +3336,17 @@ struct ViewerHost : cr::EventHost {
         buildNpcDraws(app);
         buildWalkCollision(app);
     }
-    void screenFade(float grey, float from, float to, int frames) override {
-        app.fadeGrey = grey; app.fadeFrom = from; app.fadeTo = to; app.fadeFrames = std::max(frames, 1); app.fadeT = 0;
+    void toggleFieldHidden() override { app.fieldHidden = !app.fieldHidden; }
+    void screenFade(float grey, float from, float to, int frames, bool back) override {
+        if (back) {
+            app.fadeBackGrey = grey; app.fadeBackFrom = from; app.fadeBackTo = to;
+            app.fadeBackFrames = std::max(frames, 1); app.fadeBackT = 0;
+        } else {
+            app.fadeGrey = grey; app.fadeFrom = from; app.fadeTo = to;
+            app.fadeFrames = std::max(frames, 1); app.fadeT = 0;
+        }
     }
-    bool screenFading() override { return app.fadeT < app.fadeFrames; }
+    bool screenFading(bool back) override { return back ? app.fadeBackT < app.fadeBackFrames : app.fadeT < app.fadeFrames; }
     void warp(const cr::WarpRequest& w) override { performWarp(app, w, app.runner.eventNo()); }
     void playSound(uint32_t id) override {
         const bool speech = (id & 0x400000) || app.sound.isVoice(int(id & 0xfff));
@@ -10068,6 +10083,11 @@ float screenFadeAlpha(const App& app) {
     const float t = std::min(1.0f, float(app.fadeT) / float(app.fadeFrames));
     return app.fadeFrom + (app.fadeTo - app.fadeFrom) * t;
 }
+float screenFadeBackAlpha(const App& app) {
+    if (app.fadeBackFrames <= 0) return 0;
+    const float t = std::min(1.0f, float(app.fadeBackT) / float(app.fadeBackFrames));
+    return app.fadeBackFrom + (app.fadeBackTo - app.fadeBackFrom) * t;
+}
 
 // One 20 Hz frame of the running script and of the things it set going.
 // Voiced builds: a page's clips start when the page is shown (PrcMsg reaching code 0x1e), one
@@ -11156,6 +11176,7 @@ void stepEvents(App& app) {
     stepVitaLogo(app);
     stepTutoTex(app);
     if (app.fadeT < app.fadeFrames) ++app.fadeT;
+    if (app.fadeBackT < app.fadeBackFrames) ++app.fadeBackT;
     bool unlit = false;
     for (auto& d : app.npcDraws)
         if (d.fadeLeft > 0) {
@@ -14864,6 +14885,7 @@ void stepBattle(App& app) {
         return;
     }
     if (app.fadeT < app.fadeFrames) ++app.fadeT; // the screen's fade (stepEvents' while a talk runs)
+    if (app.fadeBackT < app.fadeBackFrames) ++app.fadeBackT;
     switch (b.phase) {
     case App::Battle::Intro: // the fade and the opening camera (btl_main 200 / 300)
         if (b.phaseFrames >= 30) {
@@ -16068,7 +16090,8 @@ void drawFrame(App& app, bool present = true) {
         drawSceneBack(app, false); // ScnEffectProc's z -1998 layers (the sky, the shaft, ...): behind the painting
         r.setOrigin(0);
         r.setLayer(3); // (the Vita's screen: fldread_prc's paintings and the view with them at full size)
-        if (app.background.id) drawLayer(app.background);
+        const bool hidden = app.fieldHidden;
+        if (app.background.id && !hidden) drawLayer(app.background);
         r.setOrigin(0);
         if (have3D) {
             if (scriptCam) r.begin3DRect(app.haveStageCam && app.stageCam.viewWidth > 0 ? 0 : qx, app.haveStageCam && app.stageCam.viewWidth > 0 ? 0 : qy, SW, H);
@@ -16076,16 +16099,18 @@ void drawFrame(App& app, bool present = true) {
             // Field props are occlusion geometry: all their materials are untextured / solid-alpha
             // and black-diffuse, placed over pillars and door frames of the painting. They only
             // write depth, so the player and NPCs disappear behind them
-            r.setColorWrite(false);
-            if (app.showProps) drawLoaded(app, app.model, mvp);
-            r.setColorWrite(true);
-            // mdl_put queues the player's model before the NPCs' draw entries. In particular,
-            // the ship's blended c152 waves must not cover Vieg on the deck.
-            if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, app.playerFaded);
-            drawNpcs(app, mvp);
+            if (!hidden) {
+                r.setColorWrite(false);
+                if (app.showProps) drawLoaded(app, app.model, mvp);
+                r.setColorWrite(true);
+                // mdl_put queues the player's model before the NPCs' draw entries. In particular,
+                // the ship's blended c152 waves must not cover Vieg on the deck.
+                if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, app.playerFaded);
+                drawNpcs(app, mvp);
+            }
             drawFieldShadows(app, mvp);
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
-            drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // only effects flagged by battle-time setup face the camera
+            if (!hidden) drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // ScnEffect layers remain visible while hidden
             if (app.showCollision && app.collision.vao) {
                 cr::Material colMat; // translucent so the painted floor shows through
                 colMat.culling = 0;
@@ -16103,7 +16128,7 @@ void drawFrame(App& app, bool present = true) {
         }
         r.setOrigin(0); // foreground shares the background's stage-space origin
         r.setOrigin(0); // foreground shares the background's stage-space origin
-        if (app.foreground.id) drawLayer(app.foreground);
+        if (app.foreground.id && !hidden) drawLayer(app.foreground);
         r.setLayer(0);
         drawSceneEffects(app);
         r.setOrigin(0);
@@ -16169,7 +16194,9 @@ void drawFrame(App& app, bool present = true) {
         lines.push_back("Left/Right texture  Tab models");
     r.endScene(); // the scene is complete: upscaled to the frame (when on); the UI over it at full size
     if (app.mode == Mode::Maps) {
-        const float a = screenFadeAlpha(app); // Screen: fades to / from a grey level
+        const float ab = screenFadeBackAlpha(app); // Screen op 58: back channel, behind 2D dialogue/UI
+        if (ab > 0.001f) r.fillRect(0, 0, SW, H, app.fadeBackGrey, app.fadeBackGrey, app.fadeBackGrey, ab);
+        const float a = screenFadeAlpha(app); // Screen op 16: front channel
         if (a > 0.001f) r.fillRect(0, 0, SW, H, app.fadeGrey, app.fadeGrey, app.fadeGrey, a);
         for (app.menuMask.clock += dt; app.menuMask.clock >= 1.0f / kFramesPerSecond; app.menuMask.clock -= 1.0f / kFramesPerSecond)
             stepMenuMask(app);
@@ -21622,6 +21649,9 @@ void bootTitle(App& app) {
     app.voiceQueue.clear();
     app.fadeGrey = app.fadeFrom = app.fadeTo = 0;
     app.fadeT = app.fadeFrames = 0;
+    app.fadeBackGrey = app.fadeBackFrom = app.fadeBackTo = 0;
+    app.fadeBackT = app.fadeBackFrames = 0;
+    app.fieldHidden = false;
     app.crystalCam = App::CrystalCam();
     unloadModel(app);
     if (app.battle.active) endBattle(app, false);
