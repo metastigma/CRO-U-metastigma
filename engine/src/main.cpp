@@ -1782,12 +1782,7 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
     SDL_Log("%s layers: background %dx%d (id %u), foreground %dx%d", field.c_str(), app.background.width,
             app.background.height, app.background.id, app.foreground.width, app.foreground.height);
 
-    app.mapProps.clear();
-    if (std::find(app.models.begin(), app.models.end(), field + ".bin") != app.models.end()) {
-        app.mapProps = field + ".bin";
-        loadModelFile(app, app.mapProps, app.model, false);
-        mdlMemRules(app.model);
-    }
+    app.mapProps.clear(); // (the stage record selects its alpha model after the camera is read)
 
     cr::Mesh mesh;
     const float light[3] = {0.37f, 0.86f, 0.35f};
@@ -1871,6 +1866,19 @@ void showMap(App& app, int index, int forcedMap, int forcedArea) {
         if (app.background.id) { app.renderer.destroy(keep[0]); app.renderer.destroy(keep[1]); }
         else { app.renderer.destroy(app.foreground); app.background = keep[0], app.foreground = keep[1]; }
     }
+    // fldread_prc: the alpha model (the occluders, model slot 0) is named by the stage record's +0x40
+    // (_stgalphaname). A room without its own stage record uses its field-named model instead.
+    if (app.haveStageCam && !app.stageCamBorrowed) {
+        if (app.stageCam.alphaModel >= 0 && app.stageCam.alphaModel < cr::kNumStageAlphaModels)
+            app.mapProps = cr::kStageAlphaModel[app.stageCam.alphaModel];
+    } else if (std::find(app.models.begin(), app.models.end(), field + ".bin") != app.models.end()) {
+        app.mapProps = field + ".bin";
+    }
+    if (!app.mapProps.empty()) {
+        loadModelFile(app, app.mapProps, app.model, false);
+        mdlMemRules(app.model);
+    }
+
     if (app.haveStageCam && app.stageCam.scripted) {
         // its own FOV and view, the script's eye and target - until the script sets them, the best
         // framing among the maps sharing its collision's name (as a room with no record borrows)
