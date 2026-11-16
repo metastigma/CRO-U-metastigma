@@ -521,3 +521,15 @@ Original source: [DuIslingr/CRO-U commit 285bf45](https://github.com/DuIslingr/C
 - [x] Account for SDL3's deferred fullscreen flags on hidden windows: synchronize and inspect the mode only after showing the window.
 - [x] Retry a denied fullscreen request on the visible window; if exclusive mode is refused, retry desktop fullscreen rather than silently remaining windowed.
 - [ ] Windows runtime verification: repeated cold launches with `display=1`, `display_user_set=1`, `resolution_user_set=0` must always start full-screen; confirm `CR_VIDEO_DEBUG=1` reports the actual state.
+
+
+## Upstream port: scene picture layers and opening title — 2026-11-16
+
+- [x] Distinguish the clamped screen pictures (scene-effect slots 0x45, 0x53, 0x55 and 0x56) from wrapping weather / background layers; draw each picture once across the visible screen instead of tiling it.
+- [x] Match the original phone and iPad image rectangles, and stretch the picture to the visible edges on wider screens while preserving the iPad 4:3 placement.
+- [x] Draw `Uty_TexDisp_Put` using the source rectangle and destination rectangle supplied by the original call for every picture size; remove the incorrect special-case strip / full-sheet selection that displaced the opening title.
+- [x] Reject empty picture rectangles before submitting the draw call.
+- [ ] CI build and CTest.
+- [ ] In-game verification: check the frost frame, d06 canvas and both frames on phone, iPad and widescreen layouts; each must appear once, with no tiling or gaps. Confirm the opening's “CHAOS RINGS” title is centred on the eclipse's black disc, and that the credit strips / subsequent picture frames still render correctly.
+
+Sources: [upstream scene-effects fix 411c1dc](https://github.com/DuIslingr/CRO-U/commit/411c1dce18fe5ce7c22d21c889f0f5ec73343ae7) and [upstream opening-title fix bde223f](https://github.com/DuIslingr/CRO-U/commit/bde223fd3d7f4e67d2fb83b5165b1f5562be73d6). The changes are ported into the fork's current renderer and remain unverified in-game.

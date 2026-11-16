@@ -2817,6 +2817,10 @@ void stepSceneEffects(App& app) {
     }
 }
 
+// ScnEffectRead's pictures read clamped (tex2d_read's 1; the layers wrap, 2) and drawn at the screen's adj
+// from uv (0, 0): d01's frost frame (0x45), d06's canvas (0x53) and frames (0x55 / 0x56)
+bool scenePicture(int slot) { return slot == 0x45 || slot == 0x53 || slot == 0x55 || slot == 0x56; }
+
 // A layer: the texture's (u, v) window, wrapping, over tex2d rectangle (x, y, w, h) (+16 / +32 to
 // menu units, doubled on screen; the uv in the slot's logical texels, as tex2d_read sized it); the
 // screen's extra width (widescreen) gets more of the texture. `grey` tints it
@@ -2829,10 +2833,24 @@ void drawSceneLayer(App& app, int slot, float x, float y, float w, float h, floa
     const float lh = app.fx.texH[size_t(k)] > 0 ? app.fx.texH[size_t(k)] : float(t.height);
     const float ku = float(t.width) / lw, kv = float(t.height) / lh; // (the file's texels per logical one)
     cr::Renderer& r = app.renderer;
+    const float a = float(alpha & 255) / 255.0f;
+    if (scenePicture(slot)) {
+        // ScnEffectProc: tex2d_add(slot, adj_xx, adj_yy, z, 0, 0, adj_ww, adj_hh) - ScnEffectStart's adj, the
+        // iPad's (-16, -32) 512 x 384 for its _ipad art, else the iPhone's (0, 0) 480 x 320 (the plain files'
+        // picture fills only that corner of the 512 x 512 texture). One picture over the visible screen - the
+        // original's place at 4:3 / 3:2; wider, stretched to the edges as Android 1.1.6 does its full-screen
+        // pictures (tex2d_add_scaWH, x width / 480, y height / 320), not wrapped (issue #8)
+        const bool phone = r.phoneLayout();
+        const float s = phone ? r.layoutScale() : 1.0f;
+        const float hw = r.screenW() * 0.5f / s, hh = 384.0f / s; // (the visible screen's half-size: layout units)
+        const float pw = phone ? 480.0f : 512.0f, ph = phone ? 320.0f : 384.0f;
+        // (the origin is uiX: the screen's centre is x 512 from it)
+        r.drawQuadUV(t, 512 - hw, 384 - hh, 2 * hw, 2 * hh, 0, 0, pw * ku, ph * kv, grey, grey, grey, a);
+        return;
+    }
     const float extra = r.uiX() / 2; // menu units beyond the 512 at each side
     float mx = x + 16, my = y + 32;
     if (w >= 512) { mx -= extra; u -= extra; w += 2 * extra; }
-    const float a = float(alpha & 255) / 255.0f;
     const float u0 = u - std::floor(u / lw) * lw, v0 = v - std::floor(v / lh) * lh;
     // ScnEffectRead: d03's fireflies (0x4a) and d06's smoke (0x4d) get mceAppearance_setBlendMode(1)
     const bool additive = slot == 0x4a || slot == 0x4d;
@@ -7754,16 +7772,11 @@ void drawTexDisp(App& app) {
     const App::TexDisp& t = app.texDisp;
     if (!t.on || t.alpha <= 0 || t.g[0] < 0 || t.g[0] >= 16) return;
     const cr::Texture& tex = app.portraits[t.g[0]].tex;
-    if (!tex.id) return;
+    if (!tex.id || t.g[5] <= 0 || t.g[6] <= 0) return;
     cr::Renderer& r = app.renderer;
-    const float a = float(t.alpha) / 255.0f, ox = r.uiX();
-    r.setOrigin(0);
-    const float k = float(tex.width) / 1024.0f; // the HD sheet's pixels (1024 wide)
-    if (t.g[5] == 480 && t.g[6] == 96)
-        r.drawQuadUV(tex, ox + 2.0f * float(t.g[1]), 288, 1024, 192, 2.0f * float(t.g[3]) * k, 2.0f * float(t.g[4]) * k, 1024 * k,
-                     192 * k, 1, 1, 1, a);
-    else r.drawQuadUV(tex, ox, 0, 1024, 768, 0, 0, 1024 * k, 768 * k, 1, 1, 1, a);
-    r.setOrigin(ox);
+    const float a = float(t.alpha) / 255.0f, tk = float(tex.width) / 1024.0f; // (the HD sheet's pixels: 1024 wide)
+    r.drawQuadUV(tex, 32 + 2.0f * float(t.g[1]), 64 + 2.0f * float(t.g[2]), 2.0f * float(t.g[5]), 2.0f * float(t.g[6]),
+                 2.0f * float(t.g[3]) * tk, 2.0f * float(t.g[4]) * tk, 2.0f * float(t.g[5]) * tk, 2.0f * float(t.g[6]) * tk, 1, 1, 1, a);
 }
 
 // MsgUty_TexDispProc, a frame: 1 the picture read, 2 each page turn (flag 4075) the next page (its
