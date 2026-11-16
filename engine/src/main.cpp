@@ -16047,7 +16047,7 @@ void drawFrame(App& app, bool present = true) {
             vx = (SW - vw) / 2 + sx * fillZoom;
             vy = (H - vh) / 2 - sy * fillZoom;
         } else {
-            vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
+            vw = vh = std::min(SW, H);
             vx = (SW - vw) / 2;
             vy = (H - vh) / 2;
         }
