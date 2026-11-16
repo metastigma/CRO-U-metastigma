@@ -28,8 +28,9 @@ struct EventRunner::Vm {
     const std::vector<uint8_t>& d;
     GameState& gs;
     int eventNo, area, map;
-    enum class Wait { None, Frames, Fade, Message, Npc, Choice, Logo } wait = Wait::None;
+    enum class Wait { None, Frames, Fade, Message, Window, Npc, Choice, Logo } wait = Wait::None;
     int waitFrames = 0, waitNpc = -1;
+    bool waitBackFade = false;
     FieldNpc self;             // NPC whose script runs: flag(-1) / flag(-2) name its flags
     size_t pc = 0;
     std::vector<size_t> calls; // Gosub return addresses (64 deep in the original)
@@ -280,8 +281,15 @@ bool EventRunner::step(EventHost* host) {
     if (host) {
         switch (vm.wait) {
         case Vm::Wait::Frames: if (--vm.waitFrames > 0) return true; break;
-        case Vm::Wait::Fade: if (host->screenFading()) return true; break;
+        case Vm::Wait::Fade:
+            if (host->screenFading(vm.waitBackFade)) return true;
+            vm.wait = Vm::Wait::Frames, vm.waitFrames = 1;
+            return true;
         case Vm::Wait::Message: if (host->messageOpen()) return true; break;
+        case Vm::Wait::Window:
+            if (!host->windowClosed()) return true;
+            vm.wait = Vm::Wait::Frames, vm.waitFrames = 1;
+            return true;
         case Vm::Wait::Npc: if (host->animBusy(vm.waitNpc)) return true; break;
         case Vm::Wait::Choice: if (host->choiceOpen()) return true; break;
         case Vm::Wait::Logo: if (host->vitaLogoBusy()) return true; break;
@@ -430,9 +438,10 @@ bool EventRunner::step(EventHost* host) {
                 vm.waitNpc = vm.resolve(vm.u16());
                 if (host) return yield(Vm::Wait::Npc);
             } else if (w == 0xFFFF || w == 0xFFFC) {
+                vm.waitBackFade = w == 0xFFFC;
                 if (host) return yield(Vm::Wait::Fade);
-            } else if (w != 0xFFFE && w > 0 && host) {
-                vm.waitFrames = w;
+            } else if (host) {
+                vm.waitFrames = w == 0xFFFE || w == 0 ? 1 : w;
                 return yield(Vm::Wait::Frames);
             }
             break;
@@ -473,12 +482,14 @@ bool EventRunner::step(EventHost* host) {
             return yield(Vm::Wait::None);
         }
         // Presentation and object opcodes: skip their operands (sizes from the handlers)
-        case 3: case 4: { // Open: u8 the window's style (__EvtOpen: its rect and look), u16 its lines
+        case 3: case 4: { // Open: the window starts, one frame for PrcWin
             const int style = vm.u8(), lines = vm.u16();
-            if (host) host->openWindow(style, lines);
+            if (host) { host->openWindow(style, lines); vm.waitFrames = 1; return yield(Vm::Wait::Frames); }
             break;
         }
-        case 5: case 6: if (host) host->closeWindow(); break; // Close
+        case 5: case 6: // Close: the 5-frame fade then one more original frame
+            if (host) { host->closeWindow(); return yield(Vm::Wait::Window); }
+            break;
         case 7: case 8: { // Msg
             const int id = vm.u16();
             res.messages.push_back(id);
@@ -523,8 +534,13 @@ bool EventRunner::step(EventHost* host) {
             float v[6];
             if (!host || !vm.scene(s) || !vm.actor(s, vm.record(s, frame), n, v)) break;
             if (op == 52) {
-                host->moveNpc(n, v, v[4], last == 1 && s.words == 6 ? EventHost::Facing::Yaw : EventHost::Facing::Keep,
-                              frames, last == 2 ? 2 : last == 1 ? 1 : 0);
+                // Mode 0 snaps to the record angle, mode 2 moves in Y without turning;
+                // script modes 10 / 20 turn to the record angle over the move.
+                const bool hasAngles = s.words == 6;
+                if (last == 2) host->moveNpc(n, v, v[4], EventHost::Facing::Keep, frames, 2);
+                else host->moveNpc(n, v, hasAngles ? v[4] : 0.0f,
+                                   !hasAngles ? EventHost::Facing::Keep : last == 0 ? EventHost::Facing::Snap : EventHost::Facing::Yaw,
+                                   frames, 0);
             } else {
                 float yaw; const auto f = facingFor(last, yaw);
                 host->moveNpc(n, v, yaw, f, frames, 0);
@@ -571,8 +587,10 @@ bool EventRunner::step(EventHost* host) {
         case 16: case 58: { // Screen: u16 ?, u16 colour, u8 from alpha, u8 to alpha, u8 frames
             vm.u16();
             const uint16_t colour = vm.u16();
-            const uint8_t from = vm.u8(), to = vm.u8(), frames = vm.u8();
-            if (host) host->screenFade(float(colour & 255) / 255.0f, from / 255.0f, to / 255.0f, frames);
+            const uint8_t from = vm.u8(), to = vm.u8();
+            const int8_t frames = int8_t(vm.u8());
+            if (host && frames < 0) host->toggleFieldHidden();
+            else if (host) host->screenFade(float(colour & 255) / 255.0f, from / 255.0f, to / 255.0f, frames, op == 58);
             break;
         }
         case 21: { // Util n: the game's menus (0 title, 1 world, 2 shop, 3 yes/no, 4 start, 5/6 save, 7 credits, 8 last battle)
@@ -681,11 +699,11 @@ bool EventRunner::step(EventHost* host) {
             if (host) host->fadeNpc(n == 0 ? 0 : vm.resolve(n), from / 255.0f, to / 255.0f, frames);
             break;
         }
-        case 49: { // Anim2: u16 npc, u16 slot, s16 loop from, s16 loop to, then 4 bytes
+        case 49: { // Anim2: npc, slot, loop from/to, start frame, blend frames
             const int n = vm.resolve(vm.u16()), slot = vm.u16();
             const int from = int16_t(vm.u16()), to = int16_t(vm.u16());
-            vm.skip(4);
-            if (host) host->playAnim(n, slot, from, to);
+            const int start = int16_t(vm.u16()), blend = int16_t(vm.u16());
+            if (host) host->playAnim2(n, slot, from, to, start, blend);
             break;
         }
         case 60: { // Joint (Omega: the table's 61 entries put it here, AAAA after it)

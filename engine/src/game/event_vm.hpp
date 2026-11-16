@@ -88,12 +88,16 @@ public:
     // one-line place)
     virtual void openWindow(int /*style*/, int /*lines*/) {}
     virtual void closeWindow() {}
+    virtual bool windowClosed() { return true; }
+    virtual void toggleFieldHidden() {}                   // Screen with frames < 0 toggles field drawing
     virtual bool messageOpen() { return false; }         // the script waits while true
     virtual bool tapped() { return false; }              // action key pressed this frame (touch_up_chk)
     virtual void showItemWindow(int /*item*/) {}         // Uty_GetItem
     // Anim npc, slot, a, b (mdl_set_act_motion_loop): play the action in `slot`, then loop frames
     // a..b; a = -1 plays it once and holds the end, a = b = 0 loops it whole
     virtual void playAnim(int /*npc*/, int /*slot*/, int /*loopFrom*/ = 0, int /*loopTo*/ = 0) {}
+    // Anim2 restarts at a specific frame and blends the previous pose under it for the given frame count.
+    virtual void playAnim2(int /*npc*/, int /*slot*/, int /*loopFrom*/, int /*loopTo*/, int /*start*/, int /*blend*/) {}
     // LoadAct npc, action, slot (read_act_set): kActionFile[action] into the actor's slot; UnloadAct frees it
     virtual void loadAction(int /*npc*/, int /*action*/, int /*slot*/) {}
     virtual void unloadAction(int /*npc*/, int /*slot*/) {}
@@ -105,15 +109,15 @@ public:
     // Joint npc, parent, node (Omega's op 60, __EvtJoint): npc's model rides `parent`'s node
     // `node` (mdl +0xf80 / +0xf84); parent < 1 lets it go
     virtual void jointNpc(int /*npc*/, int /*parent*/, int /*node*/) {}
-    virtual void screenFade(float /*grey*/, float /*fromAlpha*/, float /*toAlpha*/, int /*frames*/) {}
-    virtual bool screenFading() { return false; }        // Wait 0xFFFF / 0xFFFC
+    virtual void screenFade(float /*grey*/, float /*fromAlpha*/, float /*toAlpha*/, int /*frames*/, bool /*back*/ = false) {}
+    virtual bool screenFading(bool /*back*/ = false) { return false; }        // Wait 0xFFFF / 0xFFFC
     virtual void warp(const WarpRequest& /*w*/) {}       // the script continues on the new field
     virtual void playSound(uint32_t /*id*/) {}           // Eff: _effgo(u16 | u16 << 16)
     virtual void playMusic(uint32_t /*v*/) {}            // Bgm: _bgmgo(u16 | u16 << 16)
     // Cutscene staging (EvtFrmSetc / FrmSetc2 / FrmAdjc / FrmAdjc2 / SetDir); npc 0 is the party
     // leader. Positions are world units; the y is snapped to the floor unless `mode` is 2.
     // Facing: Yaw turns to `yawDegrees`, Keep leaves it, Travel faces the way it moves.
-    enum class Facing { Yaw, Keep, Travel };
+    enum class Facing { Yaw, Keep, Travel, Snap };
     virtual void placeNpc(int /*npc*/, const float* /*pos*/, float /*yawDegrees*/, Facing /*facing*/) {}
     // Moves in a straight line over `frames` (npc_autoctl_set_fream); mode 0 position, 1 position
     // and turn, 2 position including y. Wait 0xFFFD waits for it (animBusy).

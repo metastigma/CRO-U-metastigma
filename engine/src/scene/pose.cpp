@@ -151,6 +151,56 @@ void computeWorldFromLocalPoses(const Skeleton& skel,const std::vector<NodePose>
  std::vector<Mat4> local(src->size());for(size_t i=0;i<src->size();++i)local[i]=localMatrix((*src)[i].cols,(*src)[i].t,(*src)[i].s);
  resolveWorld(skel,local,world);
 }
+bool MotionBlend::step(int action, float& time, float frames, const std::vector<Action>& actions) {
+    if (action != lastAction) {
+        const bool blend = lastAction >= 0 && lastAction < int(actions.size()) && action >= 0 && action < int(actions.size());
+        from = blend ? lastAction : -1, fromTime = lastTime, since = blend ? 0.0f : kFrames, changed = blend;
+        length = kFrames, holdTime = 0.0f;
+        lastAction = action;
+        if (blend) time = 0.0f;
+        lastTime = time;
+        return blend;
+    }
+    if (since >= length) { lastTime = time; return false; }
+    const float duration = from >= 0 && from < int(actions.size()) ? actions[size_t(from)].duration : 0.0f;
+    fromTime += frames;
+    if (duration > 0.0f && fromTime >= duration) fromTime = std::fmod(fromTime, duration);
+    since += frames;
+    if (since >= length) {
+        from = -1;
+        lastTime = time;
+        return false;
+    }
+    time = holdTime;
+    lastTime = time;
+    return true;
+}
+void MotionBlend::restart(int action, float start, float frames, const std::vector<Action>& actions) {
+    const bool blend = frames > 0.0f && lastAction >= 0 && lastAction < int(actions.size()) &&
+                       action >= 0 && action < int(actions.size());
+    from = blend ? lastAction : -1;
+    fromTime = lastTime;
+    changed = blend;
+    length = blend ? frames : kFrames;
+    holdTime = blend ? start : 0.0f;
+    since = blend ? 0.0f : length;
+    lastAction = action;
+    lastTime = start;
+}
+const Action* MotionBlend::under(const std::vector<Action>& actions) const {
+    return from >= 0 && from < int(actions.size()) && since < length - 1.0f ? &actions[size_t(from)] : nullptr;
+}
+float MotionBlend::weight() const { return std::min(1.0f, (since + 1.0f) / length); }
+void MotionBlend::reset() { *this = MotionBlend(); }
+
+void computeBlendedWorld(const Skeleton& skel, const Action* from, float fromTime, const Action* to, float toTime,
+                         float toWeight, std::vector<Mat4>& world) {
+    std::vector<NodePose> a, b, blended;
+    computeLocalPoses(skel, from, fromTime, a);
+    computeLocalPoses(skel, to, toTime, b);
+    blendLocalPoses(a, b, toWeight, blended);
+    computeWorldFromLocalPoses(skel, blended, world);
+}
 void computeWorld(const Skeleton& skel,const Action* action,float time,std::vector<Mat4>& world) {
  std::vector<NodePose> poses;computeLocalPoses(skel,action,time,poses);computeWorldFromLocalPoses(skel,poses,world);
 }

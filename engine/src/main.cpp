@@ -122,7 +122,8 @@ struct Effect {
     bool loop = false;
     float scale = 1, yaw = 0;
     float pitch = 0, roll = 0; // FrmPlayEff2: the record's X and Z angles (radians)
-    bool faceCamera = false;   // Omega sets mdl +0xfc7 only for effects started while a battle is active
+    bool faceCamera = false;
+    bool keepDepthWrite = false; // FrmPlayEff2 preserves the material's depth-write setting
     int handle = 0;  // for stopping it
     int key = 0;     // FrmPlayEff's (effect + 1) x (actor + 1)
 };
@@ -334,6 +335,7 @@ struct App {
     // x right and y up; ScrollAutoCtl's slide (FrmAdjCam / FrmPanCam) from -> to over `frames`
     struct FieldScroll {
         float offX = 0, offY = 0;
+        bool snap = true;                  // first follow after field entry is immediate
         // The scroll the scripts set (GetScroll / SetScroll's): not held to the painting - only what is
         // shown is (offX / offY) - so FrmPanCam there and back again over its edge comes back where it was
         float curX = 0, curY = 0;
@@ -383,6 +385,8 @@ struct App {
     crinput::HeldAction skipSources;       // independently held X / □ / pointer sources
     bool skipScene = false;                // derived from skipSources; fast-forward while any source is held
     int msgStyle = 2, msgLines = 2;        // the script's last Open: the message window's style and lines
+    struct MsgWin { int state = 0, t = 0; float alpha = 1; } msgWin;
+    bool frontFadeDrawn = false;
     int msgColour = -1;                    // the page's message's 0x16 colour (MessageInfo::colour), -1 none
     double playSeconds = 0;                // TOTAL PLAYTIME: time on the field and in battles
     // The save / load screen (__menuu_SaveLoad*): from the Camp menu (save) or the title's Start
@@ -538,6 +542,9 @@ struct App {
         int from = 0, to = 0, t = 0, ms = 1; // the fade: from + (to - from) x t / ms, t + 50 a frame
         float clock = 0;
     } menuMask;
+    float fadeBackGrey = 0, fadeBackFrom = 0, fadeBackTo = 0; // Screen's back channel (op 58)
+    int fadeBackFrames = 0, fadeBackT = 0;
+    bool fieldHidden = false; // Screen with a negative signed frame count hides the field, not scene effects
     int fadeFrames = 0, fadeT = 0;
     cr::SystemText systemText;             // sys.evt: messages >= 51000
     std::vector<std::vector<std::string>> dialogue; // pages of the messages the last event showed
@@ -768,6 +775,7 @@ struct App {
         float alpha = 1, alphaFrom = 1, alphaTo = 1; // NpcFade / mdl_fadein / mdl_fadeout
         int fadeFrames = 0, fadeLeft = 0;
         bool faded = false;  // mdl_set_alpha: alpha-blended for good, even when the fade ends at 255
+        cr::MotionBlend blend; // action transition state for Anim / Anim2
         bool lit = false;    // a fade temporarily puts a hidden model back into mdl_put
     };
     std::vector<NpcDraw> npcDraws;         // this map's visible NPCs
@@ -865,6 +873,7 @@ struct App {
     bool treasureReroll = false;           // gac +0x364 bit 0x40000000: set by the World Select's choice
     bool showPlayer = true;                // P: the party leader walking on the field
     int playerChar = 0;                    // the leader's record (game.leaders[scenario]): its field model
+    int leaderMotion = -1, leaderLoopFrom = 0; // a script's Anim 0: leader's action while the field is held
     bool treasureBoxesHidden = false;      // Uty_TBox(0)
     bool messageSkip = false;              // Uty_Chg_MsgSkip
     int puzzleTeleports = 0;               // Uty_puzzle_teleport_cnt
@@ -2345,8 +2354,26 @@ bool pageTyped(const App& app) {
 
 // PrcMsg a frame: the next character (0x1a pauses it); a page ending the message with 0x14
 // closes by itself once out
+void stepMsgWin(App::MsgWin& w) {
+    switch (w.state) {
+    case 1: w.t = 4, w.state = 2; break;
+    case 2:
+        --w.t;
+        w.alpha = float(4 - w.t) / 4.0f;
+        if (w.t <= 0) w.state = 3, w.alpha = 1;
+        break;
+    case 4: w.t = 0, w.state = 5; break;
+    case 5:
+        w.alpha = float(4 - w.t) / 4.0f;
+        if (++w.t > 4) w.state = 6, w.alpha = 0;
+        break;
+    default: break;
+    }
+}
+void stepMsgWin(App& app) { stepMsgWin(app.msgWin); }
+
 void stepTyping(App& app) {
-    if (app.dialogue.empty()) return;
+    if (app.dialogue.empty() || app.msgWin.state == 1 || app.msgWin.state == 2) return;
     const cr::MessageInfo* info = pageInfo(app);
     const int total = pageChars(app.dialogue[std::min(app.dialoguePage, app.dialogue.size() - 1)]);
     if (!app.typeOn) app.dialogueTyped = total;
@@ -3030,9 +3057,19 @@ void drawSceneEffects(App& app, bool battle = false) {
 bool paintedField(const App& app) {
     return app.mode == Mode::Maps && app.showBackground && app.background.id && app.haveStageCam;
 }
-bool scrollingField(const App& app) { return paintedField(app) && app.video.paintings == 0; }
+bool scrollingField(const App& app) { return paintedField(app); }
 float fieldViewW(const App& app) { return 2.0f * float(app.stageCam.viewWidth > 0 ? app.stageCam.viewWidth : 1024); }
 float fieldViewH(const App& app) { return 2.0f * float(app.stageCam.viewHeight > 0 ? app.stageCam.viewHeight : 1024); }
+// Painted Rooms: Fill zooms the view until the camera rect covers the screen.
+float fieldFillZoom(const App& app) {
+    if (app.video.paintings != 1 || !app.haveStageCam) return 1.0f;
+    const float sw = app.renderer.screenW(), h = cr::Renderer::kLogicalH;
+    const int* rect = app.stageCam.rect;
+    const bool haveRect = rect[2] > 0 && rect[3] > 0;
+    const float rw = haveRect ? 2.0f * float(rect[2]) : fieldViewW(app);
+    const float rh = haveRect ? 2.0f * float(rect[3]) : fieldViewH(app);
+    return std::max(1.0f, std::max(sw / std::max(rw, 1.0f), h / std::max(rh, 1.0f)));
+}
 
 cr::Mat4 stageViewProjection(const App& app) {
     const cr::StageCamera& sc = app.stageCam;
@@ -3056,38 +3093,40 @@ bool fieldViewPoint(const App& app, const cr::Vec3& p, float& vx, float& vy) {
 // screen's half from its edges; a rect narrower than the screen stays centred); the offset
 // moves `rate` of the way there
 void scrollFieldTo(App& app, float vx, float vy, float rate) {
-    const float V = fieldViewW(app), Vh = fieldViewH(app);
+    const float viewW = fieldViewW(app), viewH = fieldViewH(app);
+    const float fillZoom = fieldFillZoom(app);
     cr::Renderer& r = app.renderer;
-    // The painted field is drawn on layer 3. On phone/Vita layouts that layer is scaled
-    // differently from the 2D UI layer, so clamp the camera to the actual painted viewport.
     const int keepLayer = r.layer();
     r.setLayer(3);
-    const float k = r.phoneLayout() ? r.layoutScale() : 1.0f;
-    float cx = r.screenW() / 2, cy = cr::Renderer::kLogicalH / 2.0f;
+    const float layoutScale = r.phoneLayout() ? r.layoutScale() : 1.0f;
+    float cx = r.screenW() / 2.0f, cy = cr::Renderer::kLogicalH / 2.0f;
     r.layoutToScreen(cx, cy);
-    const float shiftY = (cy - cr::Renderer::kLogicalH / 2.0f) / k;
+    const float shiftY = (cy - cr::Renderer::kLogicalH / 2.0f) / layoutScale;
     r.setLayer(keepLayer);
-    const float SW = r.screenW() / k, H = cr::Renderer::kLogicalH / k;
-    const int* rc = app.stageCam.rect;
-    const bool haveRect = rc[2] > 0 && rc[3] > 0;
-    const float rx = haveRect ? 2.0f * float(rc[0]) : 0, ry = haveRect ? 2.0f * float(rc[1]) : 0;
-    const float rw = haveRect ? 2.0f * float(rc[2]) : V, rh = haveRect ? 2.0f * float(rc[3]) : Vh;
-    auto axis = [](float v, float lo, float len, float screen) {
-        return len <= screen ? lo + len / 2 : std::clamp(v, lo + screen / 2, lo + len - screen / 2);
+    const float screenW = r.screenW() / (fillZoom * layoutScale);
+    const float screenH = cr::Renderer::kLogicalH / (fillZoom * layoutScale);
+    const int* rect = app.stageCam.rect;
+    const bool haveRect = rect[2] > 0 && rect[3] > 0;
+    const float rx = haveRect ? 2.0f * float(rect[0]) : 0.0f;
+    const float ry = haveRect ? 2.0f * float(rect[1]) : 0.0f;
+    const float rw = haveRect ? 2.0f * float(rect[2]) : viewW;
+    const float rh = haveRect ? 2.0f * float(rect[3]) : viewH;
+    auto axis = [](float value, float low, float length, float screen) {
+        return length <= screen ? low + length / 2.0f : std::clamp(value, low + screen / 2.0f, low + length - screen / 2.0f);
     };
-    const float tx = V / 2 - axis(vx, rx, rw, SW);
-    const float ty = axis(vy - shiftY, ry, rh, H) + shiftY - Vh / 2;
-    app.scroll.offX += (tx - app.scroll.offX) * rate;
-    app.scroll.offY += (ty - app.scroll.offY) * rate;
+    const float targetX = viewW / 2.0f - axis(vx, rx, rw, screenW);
+    const float targetY = axis(vy - shiftY, ry, rh, screenH) + shiftY - viewH / 2.0f;
+    app.scroll.offX += (targetX - app.scroll.offX) * rate;
+    app.scroll.offY += (targetY - app.scroll.offY) * rate;
 }
 
-// FieldCamera::setScrollPlayer, every frame while the camera follows the player
-void followPlayerScroll(App& app) {
+void followPlayerScroll(App& app, float rate) {
     if (!scrollingField(app) || app.cam.free || !app.havePlayer) return;
     app.scroll.scripted = false;
+    if (app.scroll.snap) rate = 1.0f, app.scroll.snap = false;
     const cr::Vec3 head = shownWalker(app).pos + cr::Vec3{0, 7.0f + float(app.stageCam.lookHeight), 0};
     float vx, vy;
-    if (fieldViewPoint(app, head, vx, vy)) scrollFieldTo(app, vx, vy, 1.0f);
+    if (fieldViewPoint(app, head, vx, vy)) scrollFieldTo(app, vx, vy, rate);
     if (SDL_getenv("CR_SCROLL_DEBUG"))
         std::printf("scroll: head view (%.0f, %.0f) of %.0f x %.0f, rect %d %d %d %d -> offset (%.0f, %.0f)\n", vx, vy,
                     fieldViewW(app), fieldViewH(app), app.stageCam.rect[0], app.stageCam.rect[1], app.stageCam.rect[2],
@@ -3109,6 +3148,32 @@ void stepFieldScroll(App& app) {
 }
 
 // The scripts' shots on a painted field: jump (frames 0) or slide to offset (x, y)
+void stepMove(App& app, App::Move& move) {
+    ++move.t;
+    const float t = float(move.t) / float(move.frames);
+    const cr::Vec3 p{move.from.x + (move.to.x - move.from.x) * t,
+                     move.from.y + (move.to.y - move.from.y) * t,
+                     move.from.z + (move.to.z - move.from.z) * t};
+    const float yaw = move.yawFrom + (move.yawTo - move.yawFrom) * t;
+    setActor(app, move.npc, p, move.turn ? &yaw : nullptr, move.mode == 2);
+}
+void stepRescale(App& app, App::Rescale& scale) {
+    ++scale.t;
+    const float t = float(scale.t) / float(scale.frames);
+    if (cr::FieldNpc* n = findNpc(app, scale.npc)) {
+        for (int k = 0; k < 3; ++k) n->axes[k] = scale.from[k] + (scale.to[k] - scale.from[k]) * t;
+        for (auto& d : app.npcDraws) if (d.id == scale.npc) d.world = npcWorld(*n);
+    }
+}
+void stepScriptCam(App& app) {
+    if (app.cam.t >= app.cam.frames) return;
+    App::ScriptCam& c = app.cam;
+    ++c.t;
+    const float t = float(c.t) / float(c.frames);
+    c.eye = c.eyeFrom + (c.eyeTo - c.eyeFrom) * t;
+    c.target = c.tgtFrom + (c.tgtTo - c.tgtFrom) * t;
+}
+
 void scriptFieldScroll(App& app, float x, float y, int frames) {
     App::FieldScroll& fs = app.scroll;
     if (frames <= 0) {
@@ -3126,6 +3191,7 @@ void scriptFieldScroll(App& app, float x, float y, int frames) {
     fs.t = 0;
     fs.frames = frames;
     fs.sliding = true;
+    stepFieldScroll(app); // first interpolation step belongs to the command frame
 }
 
 void openStaffRoll(App& app, int mode);
@@ -3160,14 +3226,36 @@ struct ViewerHost : cr::EventHost {
     bool tapped() override { const bool t = app.tapPending; app.tapPending = false; return t; }
     void showItemWindow(int item) override { app.game.setFlag(0, false); openItemWindow(app, item); }
     void playAnim(int id, int slot, int loopFrom, int loopTo) override {
+        if (id == 0) { // __EvtAnim npc 0 calls mdl_set_act_motion_loop on the leader (gac +0x1338)
+            app.leaderMotion = slot, app.leaderLoopFrom = loopFrom;
+            return;
+        }
         int action = slot; // a slot LoadAct filled, else the model's own action of that number
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
             if (auto it = a->second.find(slot); it != a->second.end()) action = it->second;
         for (auto* d : npc(id)) {
-            if (d->action != action) { d->action = action; d->time = 0; } // the same action keeps running
+            if (d->action != action) {
+                const LoadedModel& lm = app.npcModels[d->model];
+                d->action = action, d->time = 0;
+                d->blend.restart(action, 0.0f, cr::MotionBlend::kFrames, lm.actions);
+            }
             d->once = loopFrom < 0;
             d->loopFrom = loopFrom;
             d->loopTo = loopTo;
+        }
+    }
+    void playAnim2(int id, int slot, int loopFrom, int loopTo, int start, int blend) override {
+        int action = slot;
+        if (auto a = app.actorSlots.find(id); a != app.actorSlots.end())
+            if (auto it = a->second.find(slot); it != a->second.end()) action = it->second;
+        for (auto* d : npc(id)) {
+            const LoadedModel& lm = app.npcModels[d->model];
+            d->action = action;
+            d->time = float(std::max(start, 0));
+            d->once = loopFrom < 0;
+            d->loopFrom = loopFrom;
+            d->loopTo = loopTo;
+            d->blend.restart(action, d->time, float(std::max(blend, 0)), lm.actions);
         }
     }
     void loadAction(int id, int action, int slot) override {
@@ -3195,6 +3283,11 @@ struct ViewerHost : cr::EventHost {
     }
     void unloadAction(int id, int slot) override {
         if (auto a = app.actorSlots.find(id); a != app.actorSlots.end()) a->second.erase(slot);
+        for (auto* d : npc(id)) {
+            if (d->action == 0) continue;
+            d->action = 0, d->time = 0, d->once = false, d->loopFrom = d->loopTo = 0;
+            d->blend.restart(0, 0, 0, app.npcModels[d->model].actions);
+        }
     }
     // Wait 0xFFFD (npc_autoctl_chk): only a scripted move keeps it waiting, not an animation
     bool animBusy(int id) override {
@@ -3222,6 +3315,8 @@ struct ViewerHost : cr::EventHost {
         r.npc = id, r.frames = frames;
         for (int k = 0; k < 3; ++k) r.from[k] = n->axes[0] >= 0 ? n->axes[k] : n->scale, r.to[k] = s[k];
         app.rescales.push_back(r);
+        stepRescale(app, app.rescales.back());
+        if (app.rescales.back().t >= app.rescales.back().frames) app.rescales.pop_back();
     }
     // Autoadj (npc_autoctl_set / prty_autoctl_set): a straight move to (x, its y, z) at `speed` a frame -
     // dist / speed frames, truncated (FPToFixed) - facing kept
@@ -3266,10 +3361,17 @@ struct ViewerHost : cr::EventHost {
         buildNpcDraws(app);
         buildWalkCollision(app);
     }
-    void screenFade(float grey, float from, float to, int frames) override {
-        app.fadeGrey = grey; app.fadeFrom = from; app.fadeTo = to; app.fadeFrames = std::max(frames, 1); app.fadeT = 0;
+    void toggleFieldHidden() override { app.fieldHidden = !app.fieldHidden; }
+    void screenFade(float grey, float from, float to, int frames, bool back) override {
+        if (back) {
+            app.fadeBackGrey = grey; app.fadeBackFrom = from; app.fadeBackTo = to;
+            app.fadeBackFrames = std::max(frames, 1); app.fadeBackT = 0;
+        } else {
+            app.fadeGrey = grey; app.fadeFrom = from; app.fadeTo = to;
+            app.fadeFrames = std::max(frames, 1); app.fadeT = 0;
+        }
     }
-    bool screenFading() override { return app.fadeT < app.fadeFrames; }
+    bool screenFading(bool back) override { return back ? app.fadeBackT < app.fadeBackFrames : app.fadeT < app.fadeFrames; }
     void warp(const cr::WarpRequest& w) override { performWarp(app, w, app.runner.eventNo()); }
     void playSound(uint32_t id) override {
         const bool speech = (id & 0x400000) || app.sound.isVoice(int(id & 0xfff));
@@ -3381,6 +3483,9 @@ struct ViewerHost : cr::EventHost {
         if (facing == Facing::Travel && std::fabs(m.to.x - m.from.x) + std::fabs(m.to.z - m.from.z) > 1e-4f) {
             const float yaw = std::atan2(m.to.x - m.from.x, m.to.z - m.from.z);
             setActor(app, id, m.from, &yaw, true);
+        } else if (facing == Facing::Snap) {
+            const float yaw = yawDeg * kDeg;
+            setActor(app, id, m.from, &yaw, true);
         } else if (facing == Facing::Yaw) {
             m.turn = true;
             m.yawFrom = yawNow;
@@ -3391,6 +3496,8 @@ struct ViewerHost : cr::EventHost {
         app.rescales.erase(std::remove_if(app.rescales.begin(), app.rescales.end(), [&](const App::Rescale& o) { return o.npc == id; }),
                            app.rescales.end());
         app.moves.push_back(m);
+        stepMove(app, app.moves.back());
+        if (app.moves.back().t >= app.moves.back().frames) app.moves.pop_back();
     }
     void tex2d(int slot, uint16_t f, int image, const int16_t (*extra)[3]) override {
         if (SDL_getenv("CR_TEXDISP_DEBUG")) std::printf("tex2d: slot %d flags %04x image %d\n", slot, f, image);
@@ -3497,7 +3604,7 @@ struct ViewerHost : cr::EventHost {
         app.npcWarps.push_back(false);
         buildNpcDraws(app); // retain a model read by a script even when its hidden bit is set
     }
-    void freeCamera(bool on) override { app.cam.free = on; if (!on) app.cam.set = false; }
+    void freeCamera(bool on) override { app.cam.free = on; if (!on) app.cam.t = app.cam.frames = 0; }
     void setCamera(const float* eye, const float* target, int frames) override {
         if (scrollingField(app)) { // a painted field: FrmAdjCam slides the painting to the shot's (x, y);
             // FrmSetCam on the field (flag word bit 64) takes the 3D path, which starts with SetScroll(0, 0)
@@ -3518,6 +3625,7 @@ struct ViewerHost : cr::EventHost {
         if (frames <= 0 || !c.set) { c.eye = e; c.target = t; c.frames = c.t = 0; }
         else { c.eyeFrom = c.eye; c.tgtFrom = c.target; c.eyeTo = e; c.tgtTo = t; c.frames = frames; c.t = 0; }
         c.set = true;
+        stepScriptCam(app);
     }
     void panCamera(const float* d, int frames) override {
         if (scrollingField(app)) { // FrmPanCam's 2D path: twice the deltas on the iPad
@@ -3540,6 +3648,7 @@ struct ViewerHost : cr::EventHost {
         c.eyeFrom = c.eye; c.tgtFrom = c.target;
         c.eyeTo = c.eye + dv; c.tgtTo = c.target + dv;
         c.frames = std::max(frames, 1); c.t = 0;
+        stepScriptCam(app);
     }
     void sceneEffectSet(int set) override { loadSceneEffectSet(app, set); }
     void quake(int amp, int from, int to, int frames) override { // EvtQuake: < 0 frames starts one held, else EndQuake
@@ -3596,8 +3705,18 @@ struct ViewerHost : cr::EventHost {
         ++app.tutoCalls;
     }
     void exclamationMark() override { app.exclamation = true; ++app.exclamationCalls; }
-    void openWindow(int style, int lines) override { app.msgStyle = style, app.msgLines = lines, app.heldPage = false; }
-    void closeWindow() override { app.heldPage = false; } // Close: a page that ended itself goes with its window
+    void openWindow(int style, int lines) override {
+        app.msgStyle = style, app.msgLines = lines, app.heldPage = false;
+        app.msgWin.state = style & 0x10 ? 3 : 1, app.msgWin.t = 0, app.msgWin.alpha = style & 0x10 ? 1.0f : 0.0f;
+        stepMsgWin(app); // PrcWin runs after PrcEvnt in the original's frame
+    }
+    void closeWindow() override {
+        app.heldPage = false;
+        app.msgWin.state = app.msgStyle & 0x110 ? 6 : 4, app.msgWin.t = 0;
+        if (app.msgWin.state == 6) app.msgWin.alpha = 0;
+        stepMsgWin(app);
+    }
+    bool windowClosed() override { return app.msgWin.state == 0 || app.msgWin.state == 6; }
     bool logoSeen() override { return app.logoSeen; }
     void setLogoSeen() override { app.logoSeen = true; }
     void padArt() override { app.padArt = true; }
@@ -3617,21 +3736,26 @@ struct ViewerHost : cr::EventHost {
         ++app.frameEffectCalls;
         cr::Vec3 p;
         if (SDL_getenv("CR_OP_TRACE"))
-            std::printf("  frame effect %d actor %d%s scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\n", effect, actor, v ? "" : " (no record)", scale,
-                        angled ? " angled" : "", v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f, v ? v[3] : 0.0f, v ? v[4] : 0.0f,
-                        v ? v[5] : 0.0f);
-        float yaw = 0, pitch = 0, roll = 0;
-        if (!actorPos(app, actor, p)) { // not an NPC: where the scene's record has it
+            std::printf("  frame effect %d actor %d%s scale %d%s at (%.1f %.1f %.1f) angles (%.1f %.1f %.1f)\n",
+                        effect, actor, v ? "" : " (no record)", scale, angled ? " angled" : "",
+                        v ? v[0] : 0.0f, v ? v[1] : 0.0f, v ? v[2] : 0.0f,
+                        v ? v[3] : 0.0f, v ? v[4] : 0.0f, v ? v[5] : 0.0f);
+        float pitch = 0, yaw = 0, roll = 0;
+        bool withAngles = false, atRecord = false;
+        if (!actorPos(app, actor, p)) {
+            atRecord = true;
             if (!v) return;
             p = {v[0], v[1], v[2]};
-            // FrmPlayEff2 (eff3d_set_with_pos_and_ang) takes its angles too (the field's effects
-            // don't turn to the camera in Omega: drawEffects)
-            if (angled) yaw = v[4] * kDeg, pitch = v[3] * kDeg, roll = v[5] * kDeg;
+            if (angled) pitch = v[3] * kDeg, yaw = v[4] * kDeg, roll = v[5] * kDeg, withAngles = true;
         }
-        const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, yaw);
+        const int h = startEffect(app, app.fieldEffects, effect, p, true, float(scale) / 100.0f, 0.0f);
         if (h)
             for (Effect& fx : app.fieldEffects)
-                if (fx.handle == h) fx.pitch = pitch, fx.yaw = yaw, fx.roll = roll, fx.faceCamera = app.battle.active;
+                if (fx.handle == h) {
+                    fx.pitch = pitch, fx.yaw = yaw, fx.roll = roll;
+                    fx.faceCamera = app.battle.active || (atRecord && !angled);
+                    fx.keepDepthWrite = withAngles;
+                }
         if (h && app.frameEffects.size() < 16) app.frameEffects.push_back({(effect + 1) * (actor + 1), effect, h});
     }
     void stopFrameEffect(int effect, int actor) override {
@@ -3715,7 +3839,8 @@ struct ViewerHost : cr::EventHost {
 
 extern const float kWinMessagePanel[4];
 extern const float kWinSmallPanel[4];
-void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h);
+void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h, float alpha = 1.0f);
+void drawFrontFade(App& app);
 
 // Mixer: master scales the three channels; settings.ini is beside the desktop executable
 void applyMix(App& app) {
@@ -9994,6 +10119,26 @@ float screenFadeAlpha(const App& app) {
     const float t = std::min(1.0f, float(app.fadeT) / float(app.fadeFrames));
     return app.fadeFrom + (app.fadeTo - app.fadeFrom) * t;
 }
+void drawFrontFade(App& app) {
+    if (app.frontFadeDrawn) return;
+    app.frontFadeDrawn = true;
+    const float alpha = screenFadeAlpha(app);
+    if (alpha <= 0.001f) return;
+    cr::Renderer& r = app.renderer;
+    const int keepLayer = r.layer();
+    r.setOrigin(0);
+    r.setLayer(0);
+    r.fillRect(0, 0, r.screenW(), cr::Renderer::kLogicalH,
+                app.fadeGrey, app.fadeGrey, app.fadeGrey, alpha);
+    r.setOrigin(r.uiX());
+    r.setLayer(keepLayer);
+}
+
+float screenFadeBackAlpha(const App& app) {
+    if (app.fadeBackFrames <= 0) return 0;
+    const float t = std::min(1.0f, float(app.fadeBackT) / float(app.fadeBackFrames));
+    return app.fadeBackFrom + (app.fadeBackTo - app.fadeBackFrom) * t;
+}
 
 // One 20 Hz frame of the running script and of the things it set going.
 // Voiced builds: a page's clips start when the page is shown (PrcMsg reaching code 0x1e), one
@@ -11081,7 +11226,9 @@ void stepEvents(App& app) {
     stepTexDisp(app);
     stepVitaLogo(app);
     stepTutoTex(app);
+    stepMsgWin(app);
     if (app.fadeT < app.fadeFrames) ++app.fadeT;
+    if (app.fadeBackT < app.fadeBackFrames) ++app.fadeBackT;
     bool unlit = false;
     for (auto& d : app.npcDraws)
         if (d.fadeLeft > 0) {
@@ -11102,39 +11249,20 @@ void stepEvents(App& app) {
     puzzle::step(app);
     puzzle::stepCrystalCam(app);
     puzzle::stepBanner(app);
-    // Script moves (npc_autoctl_prc): straight lines, y on the floor unless mode 2
+    // A script command has already taken its first step; continue on later event frames.
     for (size_t i = 0; i < app.moves.size();) {
-        App::Move& m = app.moves[i];
-        ++m.t;
-        const float t = float(m.t) / float(m.frames);
-        const cr::Vec3 p{m.from.x + (m.to.x - m.from.x) * t, m.from.y + (m.to.y - m.from.y) * t,
-                         m.from.z + (m.to.z - m.from.z) * t};
-        const float yaw = m.yawFrom + (m.yawTo - m.yawFrom) * t;
-        setActor(app, m.npc, p, m.turn ? &yaw : nullptr, m.mode == 2);
-        if (m.t >= m.frames) app.moves.erase(app.moves.begin() + long(i));
+        stepMove(app, app.moves[i]);
+        if (app.moves[i].t >= app.moves[i].frames) app.moves.erase(app.moves.begin() + long(i));
         else ++i;
     }
-    for (size_t i = 0; i < app.rescales.size();) { // (npc_autoctl_prc mode 3: the scale in a straight line)
-        App::Rescale& r = app.rescales[i];
-        ++r.t;
-        const float t = float(r.t) / float(r.frames);
-        if (cr::FieldNpc* n = findNpc(app, r.npc)) {
-            for (int k = 0; k < 3; ++k) n->axes[k] = r.from[k] + (r.to[k] - r.from[k]) * t;
-            for (auto& d : app.npcDraws)
-                if (d.id == r.npc) d.world = npcWorld(*n);
-        }
-        if (r.t >= r.frames) app.rescales.erase(app.rescales.begin() + long(i));
+    for (size_t i = 0; i < app.rescales.size();) {
+        stepRescale(app, app.rescales[i]);
+        if (app.rescales[i].t >= app.rescales[i].frames) app.rescales.erase(app.rescales.begin() + long(i));
         else ++i;
     }
     stepFieldScroll(app);
     stepSceneEffects(app);
-    if (app.cam.t < app.cam.frames) { // camera moves are straight lines
-        App::ScriptCam& c = app.cam;
-        ++c.t;
-        const float t = float(c.t) / float(c.frames);
-        c.eye = c.eyeFrom + (c.eyeTo - c.eyeFrom) * t;
-        c.target = c.tgtFrom + (c.tgtTo - c.tgtFrom) * t;
-    }
+    stepScriptCam(app);
     for (App::Portrait& p : app.portraits) // Tex2d slides and fades (tex2d_img_prc)
     {
         if (p.t < p.frames) {
@@ -11444,12 +11572,14 @@ void updatePlayer(App& app, float dt, float camYaw) {
     // block is held, slot 3 looped from frame 2 (Psychokinesis::onCheckTouch's
     // mdl_set_act_motion_loop(leader, 3, 2, 2))
     const bool hold = app.puzzle.pkState != 0 && app.player.actions.size() > 3;
-    const int want = hold ? 3 : std::min(int(app.walker.gait), int(app.player.actions.size()) - 1);
+    if (!fieldSceneRunning(app)) app.leaderMotion = -1; // FieldPCCtrl::operate resumes the stick's gait
+    const bool scripted = !hold && app.leaderMotion >= 0 && app.leaderMotion < int(app.player.actions.size());
+    const int want = hold ? 3 : scripted ? app.leaderMotion : std::min(int(app.walker.gait), int(app.player.actions.size()) - 1);
     if (want != app.player.action) {
         setPlayerAction(app.player, want);
         app.footPrev = 0;
     }
-    app.player.loopFrom = hold ? 2 : -1;
+    app.player.loopFrom = hold ? 2 : scripted && app.leaderLoopFrom > 0 ? app.leaderLoopFrom : -1;
     animate(app, app.player, dt);
     playFootsteps(app);
 }
@@ -11715,6 +11845,7 @@ void animateNpcs(App& app, float dt) {
         }
         if (d.action < 0 || d.action >= int(lm.actions.size())) continue;
         const float dur = lm.actions[d.action].duration;
+        if (d.blend.step(d.action, d.time, dt * kFramesPerSecond, lm.actions)) continue;
         d.time += dt * kFramesPerSecond;
         if (const char* tr = SDL_getenv("CR_NPC_TRACE"); tr && (SDL_atoi(tr) < 0 || d.id == SDL_atoi(tr))) // (debugging: an NPC's animation clock; -1 every one)
             std::printf("npc %d action %d time %.3f dur %.1f once %d loop %d..%d\n", d.id, d.action, d.time, dur, int(d.once), d.loopFrom, d.loopTo);
@@ -11734,6 +11865,23 @@ void drawLoaded(App& app, const LoadedModel& m, const cr::Mat4& mvp, const cr::M
 const cr::Action* effectMaterialAction(const LoadedModel& lm, const cr::Material* mt);
 bool effectUvMotion(const LoadedModel& lm, const cr::Material* mt, float time, float shift[2], float scale[2], int unit = 0);
 const cr::Texture* secondUnit(const LoadedModel& lm, size_t mesh, const cr::Material* mt, float time, float uv2[4]);
+
+// A cutscene NPC pose blends the previous action under the current one while MotionBlend is active.
+void poseLocal(const cr::Skeleton& skeleton, const std::vector<cr::Action>& actions, const cr::Action* action, float time,
+               const cr::MotionBlend& blend, std::vector<cr::NodePose>& out) {
+    if (const cr::Action* under = blend.under(actions)) {
+        std::vector<cr::NodePose> from, to;
+        cr::computeLocalPoses(skeleton, under, blend.fromTime, from);
+        cr::computeLocalPoses(skeleton, action, time, to);
+        cr::blendLocalPoses(from, to, blend.weight(), out);
+    } else cr::computeLocalPoses(skeleton, action, time, out);
+}
+void poseWorld(const cr::Skeleton& skeleton, const std::vector<cr::Action>& actions, const cr::Action* action, float time,
+               const cr::MotionBlend& blend, std::vector<cr::Mat4>& world) {
+    if (const cr::Action* under = blend.under(actions))
+        cr::computeBlendedWorld(skeleton, under, blend.fromTime, action, time, blend.weight(), world);
+    else cr::computeWorld(skeleton, action, time, world);
+}
 
 // c111.bin is one skinned mesh: node 2 owns the platform, while node 3 owns
 // the crystal. Apply the extra yaw to node 3 so the platform remains stationary.
@@ -11763,10 +11911,10 @@ void drawNpcs(App& app, const cr::Mat4& vp) {
             const cr::Action* act = d.action >= 0 && d.action < int(lm.actions.size()) ? &lm.actions[size_t(d.action)] : nullptr;
             if (posed) {
                 if (fieldWarpCrystal && m.skeleton.nodes.size() > 3 && m.skeleton.nodes[3].parent == 2) {
-                    cr::computeLocalPoses(m.skeleton, act, d.time, lm.localPose);
+                    poseLocal(m.skeleton, lm.actions, act, d.time, d.blend, lm.localPose);
                     spinCrystalBone(lm.localPose[3], app.crystalSpin);
                     cr::computeWorldFromLocalPoses(m.skeleton, lm.localPose, lm.world);
-                } else cr::computeWorld(m.skeleton, act, d.time, lm.world);
+                } else poseWorld(m.skeleton, lm.actions, act, d.time, d.blend, lm.world);
             }
             for (size_t i = 0; i < m.meshes.size(); ++i) {
                 float shift[2] = {0, 0}, scale[2] = {1, 1};
@@ -11886,6 +12034,7 @@ constexpr float kMsgScale = 4.0f;
 // drawfont_text's name (its -8): about three quarters of the lines' size, as the reference shows it
 constexpr float kNameScale = 3.1f;
 void drawMessageLines(App& app, const std::vector<std::string>& page, float x, float y, float scale, bool centreAll) {
+    drawFrontFade(app); // the original's front fade is over portraits/window and under text
     cr::Renderer& r = app.renderer;
     bool any = centreAll;
     for (const std::string& l : page) any |= !l.empty() && l[0] == '\x01';
@@ -11944,6 +12093,9 @@ bool drawAndroidMessagePanel(App& app, float x, float y, float w, float h, float
 void drawMessageBox(App& app, const std::vector<std::string>& page, const std::string& speaker, bool next,
                     const std::string& pageNo) {
     cr::Renderer& r = app.renderer;
+    const int ws = app.msgWin.state;
+    const bool windowFading = ws == 1 || ws == 2 || ws == 4 || ws == 5;
+    const float windowAlpha = windowFading ? app.msgWin.alpha : 1.0f;
     auto ink = [&] { // a message's 0x16 colour over the window's own
         if (app.msgColour == 1) app.dialogueHud.setTint(0, 0, 0);
         else if (app.msgColour == 0) app.dialogueHud.setTint(1, 1, 1);
@@ -11977,7 +12129,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         if (style & 0x80 || style & 0x210) { // no window: the text alone (0x10: outlined in black)
             outline = (style & 0x10) != 0;
         } else if (style & 0x20) { // a black band across the bottom (tex2d y 252..352), the name on its edge
-            r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, 1);
+            r.fillRect(left, 2.0f * 252 + 64, width, 768 - (2.0f * 252 + 64), 0, 0, 0, windowAlpha);
             if (!speaker.empty()) { // PutMsg: drawfont_l at tex2d (16, 236), just above the band
                 const float nx = 2.0f * 16 + 32, ny = 2.0f * 236 + 64 - 11; // (the larger box's offset)
                 app.nameHud.setTint(0, 0, 0); // (an outline, so it reads over a bright scene too)
@@ -11989,15 +12141,15 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
             const float a = 0.75f, y1 = wy + 16, y2 = wy + 192;
             for (int k = 0; k < 8; ++k) { // the 2D path has no per-vertex colour: the edges in strips
                 const float t = (float(k) + 0.5f) / 8.0f;
-                r.fillRect(left, wy + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * t);
-                r.fillRect(left, y2 + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * (1 - t));
+                r.fillRect(left, wy + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * t * windowAlpha);
+                r.fillRect(left, y2 + 2.0f * float(k), width, 2.0f, 0, 0, 0, a * (1 - t) * windowAlpha);
             }
-            r.fillRect(left, y1, width, y2 - y1, 0, 0, 0, a);
+            r.fillRect(left, y1, width, y2 - y1, 0, 0, 0, a * windowAlpha);
             if (app.language == 1) tx = 2.0f * 8 + 32;
         } else if (style & 0x40) { // the grey panel (960 x 192 at its rect)
-            drawWinPiece(app, kWinMessagePanel, 32, wy, 960, 192);
+            drawWinPiece(app, kWinMessagePanel, 32, wy, 960, 192, windowAlpha);
             if (!speaker.empty()) {
-                drawWinPiece(app, kWinSmallPanel, 32, wy - 36, 300, 40);
+                drawWinPiece(app, kWinSmallPanel, 32, wy - 36, 300, 40, windowAlpha);
                 app.nameHud.setTint(1, 1, 1);
                 app.nameHud.drawAt(r, {speaker}, 62, wy - 34, 1.9f, 0, 0, 0.0f);
             }
@@ -12020,8 +12172,8 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         // PutMsg's "next" mark: tex2d x 452, at y 328 - beside a tutorial's band 84 below its
         // top; none on the grey panel
         const float markY = style & 8 ? 2.0f * (rect[0] + 84) + 64 : H - 44;
-        if (next && !(style & 0x40) && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, markY, 46, 22);
-        if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50);
+        if (next && !(style & 0x40) && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, markY, 46, 22, windowAlpha);
+        if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50, windowAlpha);
         return;
     }
     (void)portraits;
@@ -12040,7 +12192,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         if (!((app.androidWindow || r.androidScreen()) &&
               drawAndroidMessagePanel(app, (W - stripW) / 2, stripY, stripW, stripBottom - stripY,
                                       32, 2.0f * (pr[0] + 16) + 64))) {
-            drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256);
+            drawWinPiece(app, kWinParchmentPhone, 32, 2.0f * (pr[0] + 16) + 64, 960, 256, windowAlpha);
         }
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
@@ -12053,7 +12205,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         // y + 32) - the screen's bottom 288; PutMsg: the name at tex2d (24, 222), the lines at x 36
         // from y + text y + 18, the "next" mark at y 328
         const short* pr = kRect[app.msgLines == 1];
-        app.renderer.drawQuadUV(app.cutinTex, left, 2.0f * (pr[0] + 32 - 32) + 128, width, 288, 0, 112, 512, 144);
+        app.renderer.drawQuadUV(app.cutinTex, left, 2.0f * (pr[0] + 32 - 32) + 128, width, 288, 0, 112, 512, 144, 1, 1, 1, windowAlpha);
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, 2.0f * 24 + 32, 2.0f * 222 + 64 - 25, kNameScale, 0, 0, 0.0f);
@@ -12062,7 +12214,7 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         textX = 2.0f * 36 + 32;
         textY = 2.0f * (pr[0] + pr[1] + 18) + 64;
     } else if (true) { // the parchment (style 2, and the default)
-        drawWinPiece(app, kWinParchment, left, H - 280, width, 280);
+        drawWinPiece(app, kWinParchment, left, H - 280, width, 280, windowAlpha);
         if (!speaker.empty()) {
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, left + 44, H - 285, kNameScale, 0, 0, 0.0f); // on the streak (piece y 14..52)
@@ -12070,9 +12222,9 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         app.dialogueHud.setTint(0.12f, 0.10f, 0.08f); // ink
         textY = H - 196;
     } else {
-        drawWinPiece(app, kWinMessagePanel, left, H - 170, width, 170);
+        drawWinPiece(app, kWinMessagePanel, left, H - 170, width, 170, windowAlpha);
         if (!speaker.empty()) {
-            drawWinPiece(app, kWinSmallPanel, left, H - 206, 300 - left, 40);
+            drawWinPiece(app, kWinSmallPanel, left, H - 206, 300 - left, 40, windowAlpha);
             app.nameHud.setTint(1, 1, 1);
             app.nameHud.drawAt(r, {speaker}, left + 30, H - 204, 1.9f, 0, 0, 0.0f);
         }
@@ -12085,12 +12237,12 @@ void drawMessageBox(App& app, const std::vector<std::string>& page, const std::s
         app.pageHud.setTint(0.12f, 0.10f, 0.08f);
         app.pageHud.drawAt(r, {pageNo}, right - 140, H - 48, 1.5f, 0, 0, 0.0f);
     }
-    if (next && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, H - 44, 46, 22);
-    if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50); // a scene is playing
+    if (next && (SDL_GetTicks() / 400) % 2 == 0) drawWinPiece(app, kWinNext, right - 76, H - 44, 46, 22, windowAlpha);
+    if (app.runner.running()) drawWinPiece(app, kWinSkip, right - 66, top + 12, 50, 50, windowAlpha); // a scene is playing
 }
 
-void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h) {
-    app.renderer.drawQuadUV(app.windowTex, x, y, w, h, piece[0], piece[1], piece[2], piece[3]);
+void drawWinPiece(App& app, const float* piece, float x, float y, float w, float h, float alpha) {
+    app.renderer.drawQuadUV(app.windowTex, x, y, w, h, piece[0], piece[1], piece[2], piece[3], 1, 1, 1, alpha);
 }
 
 // ---- Battles (btl_main) ----
@@ -12733,7 +12885,7 @@ void drawEffects(App& app, const std::vector<Effect>& list, const cr::Mat4& vp, 
                         for (int k = 0; k < 4; ++k) mat.diffuse[k] = std::clamp(v[k], 0.0f, 1.0f);
                 }
             if (mat.diffuse[3] <= 0.004f && mat.blended()) continue;
-            mat.properties &= ~16u; // no depth writes
+            if (!e.keepDepthWrite) mat.properties &= ~16u; // FrmPlayEff2 keeps the source material's depth-write bit
             const cr::GpuMesh& mesh = lm.meshes[i];
             const cr::Texture* tex = mesh.texture >= 0 && mesh.texture < int(lm.textures.size()) ? &lm.textures[size_t(mesh.texture)] : nullptr;
             float uv2[4];
@@ -14791,6 +14943,7 @@ void stepBattle(App& app) {
         return;
     }
     if (app.fadeT < app.fadeFrames) ++app.fadeT; // the screen's fade (stepEvents' while a talk runs)
+    if (app.fadeBackT < app.fadeBackFrames) ++app.fadeBackT;
     switch (b.phase) {
     case App::Battle::Intro: // the fade and the opening camera (btl_main 200 / 300)
         if (b.phaseFrames >= 30) {
@@ -15771,17 +15924,42 @@ void drawCheckerboard(cr::Renderer& r) {
 // centred on the 1024 x 768 screen, moved by the quake) with aspect viewW / viewH in whole
 // numbers and the stage's FOV: a 1024 view is a 2048 x 2048 frame of which the screen shows the
 // middle. That frustum, mapped onto the whole screen (wider screens see past its sides)
+void fieldDepthRange(const App& app, const cr::Vec3& eye, const cr::Vec3& target, float& zNear, float& zFar) {
+    const int map = app.mapNumber;
+    auto in = [map](std::initializer_list<int> l) { return std::find(l.begin(), l.end(), map) != l.end(); };
+    float off = 10;
+    if (eye.y > 200) off = eye.y / 10;
+    else {
+        const cr::Vec3 d = eye - target;
+        const float dist = std::sqrt(cr::dot(d, d));
+        if (dist > 100 && std::fabs(eye.y - target.y) > 25 && !in({46, 130, 86, 87})) off = dist / 10;
+    }
+    if (in({19, 28, 65, 97, 102, 138})) off = 0;
+    if (in({13, 29, 47, 66, 71, 91, 152, 174, 185, 191, 197, 208, 214})) off = 0;
+    if (in({15, 22, 34})) off = eye.y * 0.5f;
+    if (map == 83) off = 100;
+    const bool wide = app.game.flag(0x1003);
+    zNear = 1 + (wide ? 0 : off);
+    zFar = wide ? 7000.0f : map == 83 ? 4000.0f : 2000.0f;
+    if (zNear >= zFar * 0.5f) zNear = zFar * 0.5f;
+}
+
 cr::Mat4 scriptCameraView(const App& app, const cr::Vec3& eye, const cr::Vec3& target) {
     const cr::StageCamera& sc = app.stageCam;
     const float SW = app.renderer.screenW(), H = cr::Renderer::kLogicalH;
-    const float w = fieldViewW(app), h = fieldViewH(app);
-    const float qx = std::trunc(app.fieldQuake.off[0]), qy = std::trunc(app.fieldQuake.off[1]);
-    const float rx = app.renderer.uiX() + (cr::Renderer::kLogicalW - w) / 2 + qx, ry = (H - h) / 2 + qy;
+    const float fillZoom = fieldFillZoom(app);
+    const float w = fieldViewW(app) * fillZoom, h = fieldViewH(app) * fillZoom;
+    const float cx0 = (cr::Renderer::kLogicalW - w) / 2, cy0 = (H - h) / 2;
+    const float rx = app.renderer.uiX() + cx0 +
+                     (std::trunc(cx0 + app.fieldQuake.off[0]) - std::trunc(cx0));
+    const float ry = cy0 + (std::trunc(cy0 + app.fieldQuake.off[1]) - std::trunc(cy0));
     cr::Mat4 toScreen;
     toScreen.m[0] = w / SW, toScreen.m[5] = h / H;
     toScreen.m[12] = (2 * rx + w) / SW - 1, toScreen.m[13] = 1 - (2 * ry + h) / H;
     const float whole = float(std::max(1, sc.viewWidth / std::max(1, sc.viewHeight)));
-    return toScreen * cr::Mat4::perspective(sc.fovDegrees * 3.14159265f / 180.0f, whole, 1.0f, 4000.0f) *
+    float zNear, zFar;
+    fieldDepthRange(app, eye, target, zNear, zFar);
+    return toScreen * cr::Mat4::perspective(sc.fovDegrees * 3.14159265f / 180.0f, whole, zNear, zFar) *
            cr::Mat4::lookAt(eye, target, {0, 1, 0});
 }
 
@@ -15917,7 +16095,7 @@ void drawFrame(App& app, bool present = true) {
         // screen's height (wider screens get bars at the sides) or its width (top and bottom cut).
         r.fillRect(0, 0, SW, H, 0, 0, 0, 1);
         // A room without a painting is fully 3D: there a script's free camera films the whole screen
-        const bool scriptCam = app.cam.free && app.cam.set && !app.background.id;
+        const bool scriptCam = app.cam.set && !app.background.id;
         cr::Vec3 eye, tgt;
         cr::Mat4 mvp;
         const bool have3D = app.haveStageCam || scriptCam;
@@ -15929,10 +16107,12 @@ void drawFrame(App& app, bool present = true) {
             tgt = scriptCam ? camTarget : cr::Vec3{sc.target[0], sc.target[1], sc.target[2]};
             const float aspect = scriptCam ? SW / H : sc.viewHeight > 0 ? float(sc.viewWidth) / float(sc.viewHeight) : 1.0f;
             const float fov = app.haveStageCam ? sc.fovDegrees : 60.0f;
-            mvp = cr::Mat4::perspective(fov * 3.14159265f / 180.0f, aspect, scriptCam ? 1.0f : 10.0f, 4000.0f) *
+            float zNear = 1.0f, zFar = 4000.0f;
+            fieldDepthRange(app, eye, tgt, zNear, zFar);
+            mvp = cr::Mat4::perspective(fov * 3.14159265f / 180.0f, aspect, zNear, zFar) *
                   cr::Mat4::lookAt(eye, tgt, {0, 1, 0});
             if (scriptCam && app.haveStageCam && sc.viewWidth > 0 && sc.viewHeight > 0) mvp = scriptCameraView(app, eye, tgt);
-            r.setCamera(scriptCam ? 1.0f : 10.0f, 4000.0f, fov * 3.14159265f / 180.0f);
+            r.setCamera(zNear, zFar, fov * 3.14159265f / 180.0f);
             animateModel(app, dt);
             animateNpcs(app, dt);
             updatePlayer(app, dt, std::atan2(eye.x - tgt.x, eye.z - tgt.z));
@@ -15940,15 +16120,16 @@ void drawFrame(App& app, bool present = true) {
         // The stage view on screen (vx, vy, vw, vh)
         float vx, vy, vw, vh;
         if (scrollingField(app)) {
-            followPlayerScroll(app);
-            vw = fieldViewW(app);
-            vh = fieldViewH(app);
+            followPlayerScroll(app, 0.3f);
+            const float fillZoom = fieldFillZoom(app);
+            vw = fieldViewW(app) * fillZoom;
+            vh = fieldViewH(app) * fillZoom;
             float sx, sy;
             shownScroll(app, sx, sy);
-            vx = (SW - vw) / 2 + sx;
-            vy = (H - vh) / 2 - sy;
+            vx = (SW - vw) / 2 + sx * fillZoom;
+            vy = (H - vh) / 2 - sy * fillZoom;
         } else {
-            vw = vh = app.video.paintings == 2 ? std::max(SW, H) : std::min(SW, H);
+            vw = vh = std::min(SW, H);
             vx = (SW - vw) / 2;
             vy = (H - vh) / 2;
         }
@@ -15967,7 +16148,8 @@ void drawFrame(App& app, bool present = true) {
         drawSceneBack(app, false); // ScnEffectProc's z -1998 layers (the sky, the shaft, ...): behind the painting
         r.setOrigin(0);
         r.setLayer(3); // (the Vita's screen: fldread_prc's paintings and the view with them at full size)
-        if (app.background.id) drawLayer(app.background);
+        const bool hidden = app.fieldHidden;
+        if (app.background.id && !hidden) drawLayer(app.background);
         r.setOrigin(0);
         if (have3D) {
             if (scriptCam) r.begin3DRect(app.haveStageCam && app.stageCam.viewWidth > 0 ? 0 : qx, app.haveStageCam && app.stageCam.viewWidth > 0 ? 0 : qy, SW, H);
@@ -15975,16 +16157,18 @@ void drawFrame(App& app, bool present = true) {
             // Field props are occlusion geometry: all their materials are untextured / solid-alpha
             // and black-diffuse, placed over pillars and door frames of the painting. They only
             // write depth, so the player and NPCs disappear behind them
-            r.setColorWrite(false);
-            if (app.showProps) drawLoaded(app, app.model, mvp);
-            r.setColorWrite(true);
-            // mdl_put queues the player's model before the NPCs' draw entries. In particular,
-            // the ship's blended c152 waves must not cover Vieg on the deck.
-            if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, app.playerFaded);
-            drawNpcs(app, mvp);
+            if (!hidden) {
+                r.setColorWrite(false);
+                if (app.showProps) drawLoaded(app, app.model, mvp);
+                r.setColorWrite(true);
+                // mdl_put queues the player's model before the NPCs' draw entries. In particular,
+                // the ship's blended c152 waves must not cover Vieg on the deck.
+                if (app.havePlayer && playerShown(app)) drawLoaded(app, app.player, mvp * playerWorld(shownWalker(app)), nullptr, shownPlayerAlpha(app), -1.0f, app.playerFaded);
+                drawNpcs(app, mvp);
+            }
             drawFieldShadows(app, mvp);
             if (app.puzzle.stage >= 0) puzzle::drawFx(app, mvp);
-            drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // only effects flagged by battle-time setup face the camera
+            if (!hidden) drawEffects(app, app.fieldEffects, mvp, &eye, &tgt); // ScnEffect layers remain visible while hidden
             if (app.showCollision && app.collision.vao) {
                 cr::Material colMat; // translucent so the painted floor shows through
                 colMat.culling = 0;
@@ -16000,7 +16184,8 @@ void drawFrame(App& app, bool present = true) {
             if (scriptCam) drawPrompt(app, mvp, 0, 0, SW, H);
             else drawPrompt(app, mvp, vx, vy, vw, vh);
         }
-        if (app.foreground.id) drawLayer(app.foreground);
+        r.setOrigin(0); // foreground shares the background's stage-space origin
+        if (app.foreground.id && !hidden) drawLayer(app.foreground);
         r.setLayer(0);
         drawSceneEffects(app);
         r.setOrigin(0);
@@ -16066,13 +16251,17 @@ void drawFrame(App& app, bool present = true) {
         lines.push_back("Left/Right texture  Tab models");
     r.endScene(); // the scene is complete: upscaled to the frame (when on); the UI over it at full size
     if (app.mode == Mode::Maps) {
-        const float a = screenFadeAlpha(app); // Screen: fades to / from a grey level
-        if (a > 0.001f) r.fillRect(0, 0, SW, H, app.fadeGrey, app.fadeGrey, app.fadeGrey, a);
+        const float ab = screenFadeBackAlpha(app); // Screen op 58: back channel, behind portraits and dialogue
+        if (ab > 0.001f) r.fillRect(0, 0, SW, H, app.fadeBackGrey, app.fadeBackGrey, app.fadeBackGrey, ab);
         for (app.menuMask.clock += dt; app.menuMask.clock >= 1.0f / kFramesPerSecond; app.menuMask.clock -= 1.0f / kFramesPerSecond)
             stepMenuMask(app);
         drawMenuMask(app);
     }
+    app.frontFadeDrawn = false;
     r.setOrigin(r.uiX()); // the game's 2D from here on: its 1024 x 768 layout, centred
+    const bool messageNow = app.mode == Mode::Maps && (!app.dialogue.empty() ||
+        (app.choiceFlag >= 0 && !app.lastPage.empty()) ||
+        (app.choiceFlag < 0 && (app.heldPage || (app.msgWin.state >= 1 && app.msgWin.state <= 5))));
     if (app.mode == Mode::Maps) {
         if (!app.dialogue.empty()) { // 0x1c: 1 = the left speaks, 2 = the right; the other side dims
             const size_t pi = std::min(app.dialoguePage, app.dialogue.size() - 1);
@@ -16114,6 +16303,7 @@ void drawFrame(App& app, bool present = true) {
             }
         r.setLayer(0);
         if (app.itemWindowOpen) drawItemWindow(app);
+        if (!messageNow && !(app.mode == Mode::Maps && app.battle.active)) drawFrontFade(app);
     }
     if (fieldMenuWanted(app)) { // the corner button and its bar
         for (app.fieldMenu.clock += dt; app.fieldMenu.clock >= 1.0f / kFramesPerSecond; app.fieldMenu.clock -= 1.0f / kFramesPerSecond)
@@ -16138,7 +16328,10 @@ void drawFrame(App& app, bool present = true) {
         const bool phone = app.renderer.phoneLayout(); // 2.2.0: (448, 288), the iPhone screen's corner
         app.menu.piece((phone ? 448 : 464) + 16, (phone ? 288 : 320) + 32, 820 + 24.0f * float(app.nowLoading.frame % 8), 96, 24, 24, 1);
     }
-    if (app.mode == Mode::Maps && app.battle.active) drawBattleHud(app, W, H);
+    if (app.mode == Mode::Maps && app.battle.active) {
+        drawBattleHud(app, W, H);
+        if (!messageNow) drawFrontFade(app);
+    }
     if (app.mode == Mode::Maps && app.titleOpen && !app.optionsOpen && !app.saveScreen.open && !app.resumePrompt &&
         !app.charSelectOpen && !app.scc.open && !app.collection.open && !app.manualOpen)
         drawTitleMenu(app);
@@ -16199,7 +16392,10 @@ void drawFrame(App& app, bool present = true) {
                        app.dialogue.size() > 1 ? std::to_string(app.dialoguePage + 1) + "/" + std::to_string(app.dialogue.size())
                                                : std::string());
         app.textLimit = 1 << 30;
+    } else if (app.mode == Mode::Maps && !app.heldPage && app.choiceFlag < 0 && app.msgWin.state >= 1 && app.msgWin.state <= 5) {
+        drawMessageBox(app, {}, "", false, ""); // the window alone while its original fade runs
     }
+    drawFrontFade(app); // also handles a window with no text; idempotent with drawMessageLines
     // The menus over everything else (Options draws above them)
     if (app.charSelectOpen) {
         ++app.charSelectAnim;
@@ -20103,7 +20299,7 @@ int runSelfTest(App& app) {
         int followed = 0;
         for (const cr::Vec3 p : {cr::Vec3{120.4f, 20.0f, 69.5f}, cr::Vec3{100, 20, 60}, cr::Vec3{80, 20, 50}}) {
             app.walker.pos = p;
-            followPlayerScroll(app);
+            followPlayerScroll(app, 1.0f);
             float hx, hy, x, y;
             fieldViewPoint(app, p + cr::Vec3{0, 7, 0}, hx, hy);
             view(x, y);
@@ -20139,7 +20335,7 @@ int runSelfTest(App& app) {
         problems += !inside() || x + hx < 0 || x + hx > SW;
         // CameraPlayer: following again
         host.freeCamera(false);
-        followPlayerScroll(app);
+        followPlayerScroll(app, 1.0f);
         problems += !inside();
         app.lastTicks = 0;
         drawFrame(app, false);
@@ -21519,6 +21715,11 @@ void bootTitle(App& app) {
     app.voiceQueue.clear();
     app.fadeGrey = app.fadeFrom = app.fadeTo = 0;
     app.fadeT = app.fadeFrames = 0;
+    app.fadeBackGrey = app.fadeBackFrom = app.fadeBackTo = 0;
+    app.fadeBackT = app.fadeBackFrames = 0;
+    app.fieldHidden = false;
+    app.msgWin = App::MsgWin();
+    app.leaderMotion = -1, app.leaderLoopFrom = 0;
     app.crystalCam = App::CrystalCam();
     unloadModel(app);
     if (app.battle.active) endBattle(app, false);
@@ -22178,7 +22379,7 @@ int runCapture(App& app, const char* mapName, const char* outPath) {
             lastWhere = where;
         }
         animateNpcs(app, 1.0f / kFramesPerSecond);
-        followPlayerScroll(app); // (drawFrame's, every frame the game shows: a capture draws only its last)
+        followPlayerScroll(app, 1.0f); // (drawFrame's, every frame the game shows: a capture draws only its last)
         if (f % 45 == 44 && f + 1 < app.captureFrames && !SDL_getenv("CR_CAPTURE_NOTAP")) { // (CR_CAPTURE_NOTAP: no taps)
             if (app.choiceFlag >= 0) answerChoice(app, true);
             else if (app.worldChoiceOpen) answerWorldChoice(app, 0);
